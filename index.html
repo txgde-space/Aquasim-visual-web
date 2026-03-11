@@ -1,0 +1,727 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>水下节点信号传输监控</title><script src="tailwindcss.js"></script><script src="iconify-icon.min.js"></script></head><body><style id="uw-style">
+@keyframes signalPulse {
+0% { stroke-dashoffset: 100; opacity: 1; }
+100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes nodePulse {
+0%, 100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.5); }
+50% { box-shadow: 0 0 40px rgba(56, 189, 248, 0.8); }
+}
+@keyframes collisionExplode {
+0% { transform: scale(0); opacity: 1; }
+50% { transform: scale(2); opacity: 0.8; }
+100% { transform: scale(3); opacity: 0; }
+}
+@keyframes floatBubble {
+0% { transform: translateY(100vh) scale(0); opacity: 0; }
+10% { opacity: 0.6; }
+90% { opacity: 0.6; }
+100% { transform: translateY(-100px) scale(1); opacity: 0; }
+}
+@keyframes signalDotMove {
+0% { offset-distance: 0%; opacity: 1; }
+90% { opacity: 1; }
+100% { offset-distance: 100%; opacity: 0; }
+}
+.ocean-bg {
+background: linear-gradient(180deg, #0a1628 0%, #0d2847 30%, #0a3a5c 60%, #064e6b 100%);
+}
+.node {
+animation: nodePulse 3s ease-in-out infinite;
+}
+.signal-path {
+stroke-dasharray: 8 4;
+stroke-dashoffset: 100;
+animation: signalPulse 1.5s linear;
+}
+.collision-effect {
+animation: collisionExplode 0.8s ease-out forwards;
+}
+.bubble {
+position: absolute;
+border-radius: 50%;
+background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.3), rgba(255,255,255,0.1));
+animation: floatBubble 8s ease-in infinite;
+}
+.log-entry {
+transition: all 0.3s ease;
+}
+.log-entry:hover {
+transform: translateX(5px);
+}
+</style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<header id="uw-header" class="ocean-bg border-b border-cyan-800/50 px-6 py-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<iconify-icon icon="mdi:wan" class="text-cyan-400 text-3xl"></iconify-icon>
+<div>
+<h1 class="text-2xl font-bold text-white tracking-wide">水下节点信号监控系统</h1>
+<p class="text-cyan-300/70 text-sm">Underwater Acoustic Network Monitor</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 bg-slate-900/60 px-4 py-2 rounded-full border border-cyan-800/50">
+<span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+<span class="text-cyan-200 text-sm">系统运行中</span>
+</div>
+<button id="btn-auto-sim" class="px-4 py-2 text-white rounded-lg transition-all flex items-center gap-2 text-sm font-medium bg-red-600 hover:bg-red-500"><iconify-icon icon="mdi:stop"></iconify-icon>停止模拟</button>
+<button id="btn-reset" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-all flex items-center gap-2 text-sm font-medium">
+<iconify-icon icon="mdi:refresh"></iconify-icon>
+重置
+</button>
+</div>
+</header>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <section id="uw-main" class="ocean-bg flex" style="height: calc(100vh - 73px); overflow: hidden;">
+      <div id="canvas-container" class="flex-1 relative overflow-hidden">
+        <div id="bubbles-container" class="absolute inset-0 pointer-events-none"><div class="bubble" style="width: 26.8314px; height: 26.8314px; left: 79.0657%; animation-delay: 1.12848s; animation-duration: 8.39784s;"></div><div class="bubble" style="width: 11.3315px; height: 11.3315px; left: 86.2367%; animation-delay: 2.84525s; animation-duration: 9.91934s;"></div><div class="bubble" style="width: 23.7971px; height: 23.7971px; left: 31.0489%; animation-delay: 2.96205s; animation-duration: 7.94234s;"></div><div class="bubble" style="width: 27.0047px; height: 27.0047px; left: 18.9687%; animation-delay: 3.2631s; animation-duration: 9.57148s;"></div><div class="bubble" style="width: 16.1349px; height: 16.1349px; left: 59.4541%; animation-delay: 4.39816s; animation-duration: 9.82187s;"></div><div class="bubble" style="width: 25.3869px; height: 25.3869px; left: 54.1439%; animation-delay: 4.36065s; animation-duration: 6.93677s;"></div><div class="bubble" style="width: 25.2907px; height: 25.2907px; left: 0.449437%; animation-delay: 2.08443s; animation-duration: 7.74312s;"></div><div class="bubble" style="width: 14.6297px; height: 14.6297px; left: 47.5652%; animation-delay: 1.17917s; animation-duration: 6.01116s;"></div><div class="bubble" style="width: 25.9581px; height: 25.9581px; left: 97.5208%; animation-delay: 4.51749s; animation-duration: 7.92671s;"></div><div class="bubble" style="width: 10.1933px; height: 10.1933px; left: 46.9644%; animation-delay: 4.01035s; animation-duration: 8.27279s;"></div><div class="bubble" style="width: 21.7373px; height: 21.7373px; left: 72.349%; animation-delay: 2.30674s; animation-duration: 7.60457s;"></div><div class="bubble" style="width: 17.5366px; height: 17.5366px; left: 97.0284%; animation-delay: 4.47168s; animation-duration: 8.00058s;"></div><div class="bubble" style="width: 14.5707px; height: 14.5707px; left: 71.923%; animation-delay: 1.08324s; animation-duration: 9.9111s;"></div><div class="bubble" style="width: 22.2076px; height: 22.2076px; left: 23.6496%; animation-delay: 3.29509s; animation-duration: 8.06604s;"></div><div class="bubble" style="width: 16.6194px; height: 16.6194px; left: 25.1508%; animation-delay: 1.60272s; animation-duration: 6.79868s;"></div><div class="bubble" style="width: 14.2009px; height: 14.2009px; left: 89.3341%; animation-delay: 0.207451s; animation-duration: 7.97042s;"></div><div class="bubble" style="width: 10.4604px; height: 10.4604px; left: 43.1671%; animation-delay: 2.55038s; animation-duration: 9.86203s;"></div><div class="bubble" style="width: 16.4617px; height: 16.4617px; left: 40.5788%; animation-delay: 2.67985s; animation-duration: 9.98594s;"></div></div>
+        <svg id="signal-canvas" class="absolute inset-0 w-full h-full">
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="#22d3ee"></polygon>
+            </marker>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="coloredBlur"></feGaussianBlur>
+              <feMerge>
+                <feMergeNode in="coloredBlur"></feMergeNode>
+                <feMergeNode in="SourceGraphic"></feMergeNode>
+              </feMerge>
+            </filter>
+          </defs>
+          <g id="connections-layer"></g>
+          <g id="signals-layer"></g>
+          <g id="effects-layer"></g>
+        </svg>
+        <div id="nodes-container" class="absolute inset-0">
+          <div id="node-1" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 10%; top: 20%;">
+            <span class="text-white font-bold text-lg">A</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-A</div>
+          </div>
+          <div id="node-2" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 75%; top: 15%;">
+            <span class="text-white font-bold text-lg">B</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-B</div>
+          </div>
+          <div id="node-3" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 5%; top: 55%;">
+            <span class="text-white font-bold text-lg">C</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-C</div>
+          </div>
+          <div id="node-4" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 85%; top: 50%;">
+            <span class="text-white font-bold text-lg">D</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-D</div>
+          </div>
+          <div id="node-5" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 30%; top: 75%;">
+            <span class="text-white font-bold text-lg">E</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-E</div>
+          </div>
+          <div id="node-6" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 65%; top: 80%;">
+            <span class="text-white font-bold text-lg">F</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-F</div>
+          </div>
+          <div id="node-7" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 35%; top: 35%;">
+            <span class="text-white font-bold text-lg">G</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-G</div>
+          </div>
+          <div id="node-8" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 55%; top: 40%;">
+            <span class="text-white font-bold text-lg">H</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-H</div>
+          </div>
+          <div id="node-9" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 15%; top: 85%;">
+            <span class="text-white font-bold text-lg">I</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-I</div>
+          </div>
+          <div id="node-10" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 90%; top: 25%;">
+            <span class="text-white font-bold text-lg">J</span>
+            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-J</div>
+          </div>
+        </div>
+        <div id="collision-container" class="absolute inset-0 pointer-events-none"></div>
+        <div class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm rounded-xl border border-cyan-800/50 p-4">
+          <h3 class="text-cyan-300 font-semibold mb-3 flex items-center gap-2">
+            <iconify-icon icon="mdi:chart-box"></iconify-icon>
+            实时统计
+          </h3>
+          <div class="space-y-2 text-sm">
+            <div class="flex justify-between items-center gap-6">
+              <span class="text-slate-300">总发送</span>
+              <span id="stat-total" class="text-cyan-400 font-mono font-bold">0</span>
+            </div>
+            <div class="flex justify-between items-center gap-6">
+              <span class="text-slate-300">成功接收</span>
+              <span id="stat-success" class="text-green-400 font-mono font-bold">0</span>
+            </div>
+            <div class="flex justify-between items-center gap-6">
+              <span class="text-slate-300">信号碰撞</span>
+              <span id="stat-collision" class="text-red-400 font-mono font-bold">0</span>
+            </div>
+            <div class="flex justify-between items-center gap-6">
+              <span class="text-slate-300">信号丢失</span>
+              <span id="stat-lost" class="text-orange-400 font-mono font-bold">0</span>
+            </div>
+          </div>
+        </div>
+        <div class="absolute bottom-4 left-4 flex gap-2 flex-wrap">
+          <button onclick="sendSignal('A', 'B')" class="px-3 py-2 bg-cyan-700/80 hover:bg-cyan-600 text-white rounded-lg text-xs transition-all border border-cyan-500/50">A→B 发送</button>
+          <button onclick="sendSignal('C', 'G')" class="px-3 py-2 bg-cyan-700/80 hover:bg-cyan-600 text-white rounded-lg text-xs transition-all border border-cyan-500/50">C→G 发送</button>
+          <button onclick="simulateCollision()" class="px-3 py-2 bg-red-700/80 hover:bg-red-600 text-white rounded-lg text-xs transition-all border border-red-500/50">模拟碰撞</button>
+          <button onclick="simulateLost()" class="px-3 py-2 bg-orange-700/80 hover:bg-orange-600 text-white rounded-lg text-xs transition-all border border-orange-500/50">模拟丢失</button>
+        </div>
+      </div>
+      <div class="w-80 bg-slate-900/90 border-l border-cyan-800/50 flex flex-col" style="height: 100%; overflow: hidden;">
+        <div class="p-4 border-b border-cyan-800/50 flex-shrink-0">
+          <h3 class="text-cyan-300 font-semibold flex items-center gap-2">
+            <iconify-icon icon="mdi:text-box"></iconify-icon>
+            事件日志
+          </h3>
+        </div>
+        <div id="log-container" class="flex-1 overflow-y-auto p-4 space-y-2"><div class="log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm" style="border-left-color: rgb(34, 211, 238);">
+<div class="flex items-center justify-between mb-1">
+<span class="text-cyan-400 font-semibold text-xs">状态</span>
+<span class="text-slate-500 text-xs font-mono">13:03:43</span>
+</div>
+<div class="text-slate-200">10个节点在线，系统运行正常</div>
+</div><div class="log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm" style="border-left-color: rgb(34, 211, 238);">
+<div class="flex items-center justify-between mb-1">
+<span class="text-cyan-400 font-semibold text-xs">系统</span>
+<span class="text-slate-500 text-xs font-mono">13:03:43</span>
+</div>
+<div class="text-slate-200">水下节点信号监控系统已启动</div>
+</div></div>
+        <div class="p-4 border-t border-cyan-800/50 flex-shrink-0">
+          <div class="flex items-center gap-2 text-xs text-slate-400">
+            <iconify-icon icon="mdi:information"></iconify-icon>
+            <span>最近50条事件记录</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+<script id="uw-script">(function() { 
+const nodes = {
+'A': document.getElementById('node-1'),
+'B': document.getElementById('node-2'),
+'C': document.getElementById('node-3'),
+'D': document.getElementById('node-4'),
+'E': document.getElementById('node-5'),
+'F': document.getElementById('node-6'),
+'G': document.getElementById('node-7'),
+'H': document.getElementById('node-8'),
+'I': document.getElementById('node-9'),
+'J': document.getElementById('node-10')
+};
+
+const canvas = document.getElementById('signal-canvas');
+const signalsLayer = document.getElementById('signals-layer');
+const effectsLayer = document.getElementById('effects-layer');
+const logContainer = document.getElementById('log-container');
+const collisionContainer = document.getElementById('collision-container');
+
+let stats = { total: 0, success: 0, collision: 0, lost: 0 };
+let autoSimInterval = null;
+
+function getNodeCenter(nodeId) {
+const node = nodes[nodeId];
+const rect = node.getBoundingClientRect();
+const containerRect = document.getElementById('canvas-container').getBoundingClientRect();
+return {
+x: rect.left - containerRect.left + rect.width / 2,
+y: rect.top - containerRect.top + rect.height / 2
+};
+}
+
+function createBubble() {
+const bubble = document.createElement('div');
+bubble.className = 'bubble';
+const size = Math.random() * 20 + 10;
+bubble.style.width = size + 'px';
+bubble.style.height = size + 'px';
+bubble.style.left = Math.random() * 100 + '%';
+bubble.style.animationDelay = Math.random() * 5 + 's';
+bubble.style.animationDuration = (Math.random() * 4 + 6) + 's';
+document.getElementById('bubbles-container').appendChild(bubble);
+
+setTimeout(() => bubble.remove(), 12000);
+}
+
+setInterval(createBubble, 800);
+
+function sendSignal(fromId, toId, type = 'normal') {
+const from = getNodeCenter(fromId);
+const to = getNodeCenter(toId);
+
+stats.total++;
+updateStats();
+
+const pathId = 'path-' + Date.now() + '-' + Math.random();
+const color = type === 'collision' ? '#f87171' : type === 'lost' ? '#fb923c' : '#22d3ee';
+
+const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+path.setAttribute('id', pathId);
+path.setAttribute('d', `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
+path.setAttribute('stroke', color);
+path.setAttribute('stroke-width', '2');
+path.setAttribute('fill', 'none');
+path.setAttribute('stroke-dasharray', '8,4');
+path.setAttribute('filter', 'url(#glow)');
+path.style.animation = 'signalPulse 1.5s linear';
+
+signalsLayer.appendChild(path);
+
+const signalDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+signalDot.setAttribute('r', '6');
+signalDot.setAttribute('fill', color);
+signalDot.innerHTML = `
+<animateMotion dur="1.5s" repeatCount="1" path="M ${from.x} ${from.y} L ${to.x} ${to.y}" />
+`;
+signalsLayer.appendChild(signalDot);
+
+setTimeout(() => {
+path.remove();
+signalDot.remove();
+
+if (type === 'collision') {
+showCollision((from.x + to.x) / 2, (from.y + to.y) / 2);
+stats.collision++;
+addLog('碰撞', `${fromId} → ${toId} 信号发生碰撞`, 'red');
+} else if (type === 'lost') {
+showLostEffect(to.x, to.y);
+stats.lost++;
+addLog('丢失', `${fromId} → ${toId} 信号丢失`, 'orange');
+} else {
+stats.success++;
+addLog('发送', `${fromId} → ${toId} 信号发送成功`, 'cyan');
+}
+updateStats();
+}, 1500);
+}
+
+function showCollision(x, y) {
+const effect = document.createElement('div');
+effect.className = 'collision-effect absolute w-12 h-12 rounded-full border-4 border-red-400 bg-red-400/30';
+effect.style.left = (x - 24) + 'px';
+effect.style.top = (y - 24) + 'px';
+collisionContainer.appendChild(effect);
+
+const burst = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+burst.setAttribute('cx', x);
+burst.setAttribute('cy', y);
+burst.setAttribute('r', '5');
+burst.setAttribute('fill', 'none');
+burst.setAttribute('stroke', '#f87171');
+burst.setAttribute('stroke-width', '3');
+burst.innerHTML = `
+<animate attributeName="r" from="5" to="50" dur="0.5s" fill="freeze" />
+<animate attributeName="opacity" from="1" to="0" dur="0.5s" fill="freeze" />
+`;
+effectsLayer.appendChild(burst);
+
+setTimeout(() => {
+effect.remove();
+burst.remove();
+}, 800);
+}
+
+function showLostEffect(x, y) {
+const xMark = document.createElement('div');
+xMark.className = 'absolute text-orange-400 text-3xl font-bold';
+xMark.style.left = (x - 10) + 'px';
+xMark.style.top = (y - 15) + 'px';
+xMark.innerHTML = '✕';
+xMark.style.animation = 'collisionExplode 0.6s ease-out forwards';
+collisionContainer.appendChild(xMark);
+
+setTimeout(() => xMark.remove(), 600);
+}
+
+function addLog(type, message, color) {
+const entry = document.createElement('div');
+entry.className = 'log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm';
+entry.style.borderLeftColor = color === 'cyan' ? '#22d3ee' : color === 'red' ? '#f87171' : '#fb923c';
+
+const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+entry.innerHTML = `
+<div class="flex items-center justify-between mb-1">
+<span class="text-${color}-400 font-semibold text-xs">${type}</span>
+<span class="text-slate-500 text-xs font-mono">${time}</span>
+</div>
+<div class="text-slate-200">${message}</div>
+`;
+
+logContainer.insertBefore(entry, logContainer.firstChild);
+
+while (logContainer.children.length > 50) {
+logContainer.removeChild(logContainer.lastChild);
+}
+}
+
+function updateStats() {
+document.getElementById('stat-total').textContent = stats.total;
+document.getElementById('stat-success').textContent = stats.success;
+document.getElementById('stat-collision').textContent = stats.collision;
+document.getElementById('stat-lost').textContent = stats.lost;
+}
+
+function simulateCollision() {
+const nodeKeys = Object.keys(nodes);
+const from1 = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+const from2 = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+
+if (from1 !== to && from2 !== to && from1 !== from2) {
+sendSignal(from1, to, 'collision');
+setTimeout(() => sendSignal(from2, to, 'collision'), 100);
+}
+}
+
+function simulateLost() {
+const nodeKeys = Object.keys(nodes);
+const from = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+if (from !== to) {
+sendSignal(from, to, 'lost');
+}
+}
+
+function randomSimulation() {
+const actions = ['send', 'send', 'send', 'collision', 'lost'];
+const action = actions[Math.floor(Math.random() * actions.length)];
+const nodeKeys = Object.keys(nodes);
+
+if (action === 'send') {
+const from = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+if (from !== to) sendSignal(from, to);
+} else if (action === 'collision') {
+simulateCollision();
+} else {
+simulateLost();
+}
+}
+
+document.getElementById('btn-auto-sim').addEventListener('click', function() {
+if (autoSimInterval) {
+clearInterval(autoSimInterval);
+autoSimInterval = null;
+this.innerHTML = '<iconify-icon icon="mdi:play"></iconify-icon>自动模拟';
+this.classList.remove('bg-red-600', 'hover:bg-red-500');
+this.classList.add('bg-cyan-600', 'hover:bg-cyan-500');
+} else {
+autoSimInterval = setInterval(randomSimulation, 2000);
+this.innerHTML = '<iconify-icon icon="mdi:stop"></iconify-icon>停止模拟';
+this.classList.remove('bg-cyan-600', 'hover:bg-cyan-500');
+this.classList.add('bg-red-600', 'hover:bg-red-500');
+}
+});
+
+document.getElementById('btn-reset').addEventListener('click', function() {
+stats = { total: 0, success: 0, collision: 0, lost: 0 };
+updateStats();
+logContainer.innerHTML = '';
+signalsLayer.innerHTML = '';
+effectsLayer.innerHTML = '';
+collisionContainer.innerHTML = '';
+});
+
+addLog('系统', '水下节点信号监控系统已启动', 'cyan');
+addLog('状态', '10个节点在线，系统运行正常', 'cyan');
+ })();</script></body></html>
