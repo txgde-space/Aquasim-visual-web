@@ -1,727 +1,1185 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>水下节点信号传输监控</title><script src="tailwindcss.js"></script><script src="iconify-icon.min.js"></script></head><body><style id="uw-style">
-@keyframes signalPulse {
-0% { stroke-dashoffset: 100; opacity: 1; }
-100% { stroke-dashoffset: 0; opacity: 0; }
-}
-@keyframes nodePulse {
-0%, 100% { box-shadow: 0 0 20px rgba(56, 189, 248, 0.5); }
-50% { box-shadow: 0 0 40px rgba(56, 189, 248, 0.8); }
-}
-@keyframes collisionExplode {
-0% { transform: scale(0); opacity: 1; }
-50% { transform: scale(2); opacity: 0.8; }
-100% { transform: scale(3); opacity: 0; }
-}
-@keyframes floatBubble {
-0% { transform: translateY(100vh) scale(0); opacity: 0; }
-10% { opacity: 0.6; }
-90% { opacity: 0.6; }
-100% { transform: translateY(-100px) scale(1); opacity: 0; }
-}
-@keyframes signalDotMove {
-0% { offset-distance: 0%; opacity: 1; }
-90% { opacity: 1; }
-100% { offset-distance: 100%; opacity: 0; }
-}
-.ocean-bg {
-background: linear-gradient(180deg, #0a1628 0%, #0d2847 30%, #0a3a5c 60%, #064e6b 100%);
-}
-.node {
-animation: nodePulse 3s ease-in-out infinite;
-}
-.signal-path {
-stroke-dasharray: 8 4;
-stroke-dashoffset: 100;
-animation: signalPulse 1.5s linear;
-}
-.collision-effect {
-animation: collisionExplode 0.8s ease-out forwards;
-}
-.bubble {
-position: absolute;
-border-radius: 50%;
-background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.3), rgba(255,255,255,0.1));
-animation: floatBubble 8s ease-in infinite;
-}
-.log-entry {
-transition: all 0.3s ease;
-}
-.log-entry:hover {
-transform: translateX(5px);
-}
-</style>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<header id="uw-header" class="ocean-bg border-b border-cyan-800/50 px-6 py-4 flex items-center justify-between">
-<div class="flex items-center gap-3">
-<iconify-icon icon="mdi:wan" class="text-cyan-400 text-3xl"></iconify-icon>
-<div>
-<h1 class="text-2xl font-bold text-white tracking-wide">水下节点信号监控系统</h1>
-<p class="text-cyan-300/70 text-sm">Underwater Acoustic Network Monitor</p>
-</div>
-</div>
-<div class="flex items-center gap-4">
-<div class="flex items-center gap-2 bg-slate-900/60 px-4 py-2 rounded-full border border-cyan-800/50">
-<span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-<span class="text-cyan-200 text-sm">系统运行中</span>
-</div>
-<button id="btn-auto-sim" class="px-4 py-2 text-white rounded-lg transition-all flex items-center gap-2 text-sm font-medium bg-red-600 hover:bg-red-500"><iconify-icon icon="mdi:stop"></iconify-icon>停止模拟</button>
-<button id="btn-reset" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-all flex items-center gap-2 text-sm font-medium">
-<iconify-icon icon="mdi:refresh"></iconify-icon>
-重置
-</button>
-</div>
-</header>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    <section id="uw-main" class="ocean-bg flex" style="height: calc(100vh - 73px); overflow: hidden;">
-      <div id="canvas-container" class="flex-1 relative overflow-hidden">
-        <div id="bubbles-container" class="absolute inset-0 pointer-events-none"><div class="bubble" style="width: 26.8314px; height: 26.8314px; left: 79.0657%; animation-delay: 1.12848s; animation-duration: 8.39784s;"></div><div class="bubble" style="width: 11.3315px; height: 11.3315px; left: 86.2367%; animation-delay: 2.84525s; animation-duration: 9.91934s;"></div><div class="bubble" style="width: 23.7971px; height: 23.7971px; left: 31.0489%; animation-delay: 2.96205s; animation-duration: 7.94234s;"></div><div class="bubble" style="width: 27.0047px; height: 27.0047px; left: 18.9687%; animation-delay: 3.2631s; animation-duration: 9.57148s;"></div><div class="bubble" style="width: 16.1349px; height: 16.1349px; left: 59.4541%; animation-delay: 4.39816s; animation-duration: 9.82187s;"></div><div class="bubble" style="width: 25.3869px; height: 25.3869px; left: 54.1439%; animation-delay: 4.36065s; animation-duration: 6.93677s;"></div><div class="bubble" style="width: 25.2907px; height: 25.2907px; left: 0.449437%; animation-delay: 2.08443s; animation-duration: 7.74312s;"></div><div class="bubble" style="width: 14.6297px; height: 14.6297px; left: 47.5652%; animation-delay: 1.17917s; animation-duration: 6.01116s;"></div><div class="bubble" style="width: 25.9581px; height: 25.9581px; left: 97.5208%; animation-delay: 4.51749s; animation-duration: 7.92671s;"></div><div class="bubble" style="width: 10.1933px; height: 10.1933px; left: 46.9644%; animation-delay: 4.01035s; animation-duration: 8.27279s;"></div><div class="bubble" style="width: 21.7373px; height: 21.7373px; left: 72.349%; animation-delay: 2.30674s; animation-duration: 7.60457s;"></div><div class="bubble" style="width: 17.5366px; height: 17.5366px; left: 97.0284%; animation-delay: 4.47168s; animation-duration: 8.00058s;"></div><div class="bubble" style="width: 14.5707px; height: 14.5707px; left: 71.923%; animation-delay: 1.08324s; animation-duration: 9.9111s;"></div><div class="bubble" style="width: 22.2076px; height: 22.2076px; left: 23.6496%; animation-delay: 3.29509s; animation-duration: 8.06604s;"></div><div class="bubble" style="width: 16.6194px; height: 16.6194px; left: 25.1508%; animation-delay: 1.60272s; animation-duration: 6.79868s;"></div><div class="bubble" style="width: 14.2009px; height: 14.2009px; left: 89.3341%; animation-delay: 0.207451s; animation-duration: 7.97042s;"></div><div class="bubble" style="width: 10.4604px; height: 10.4604px; left: 43.1671%; animation-delay: 2.55038s; animation-duration: 9.86203s;"></div><div class="bubble" style="width: 16.4617px; height: 16.4617px; left: 40.5788%; animation-delay: 2.67985s; animation-duration: 9.98594s;"></div></div>
-        <svg id="signal-canvas" class="absolute inset-0 w-full h-full">
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ns-3 水声网络日志回放</title>
+  <script src="tailwindcss.js"></script>
+  <script src="iconify-icon.min.js"></script>
+  <style>
+    :root {
+      --bg-top: #081221;
+      --bg-mid: #0d2740;
+      --bg-bottom: #0d4664;
+      --cyan: #67e8f9;
+      --cyan-strong: #22d3ee;
+      --green: #4ade80;
+      --red: #f87171;
+      --amber: #fbbf24;
+      --slate-border: rgba(103, 232, 249, 0.18);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: #e2e8f0;
+      background:
+        radial-gradient(circle at top, rgba(103, 232, 249, 0.14), transparent 28%),
+        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 42%, var(--bg-bottom) 100%);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .panel {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--slate-border);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 18px 60px rgba(2, 6, 23, 0.25);
+    }
+
+    .ocean-grid {
+      background:
+        radial-gradient(circle at center, rgba(103, 232, 249, 0.1), transparent 55%),
+        linear-gradient(rgba(103, 232, 249, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(103, 232, 249, 0.08) 1px, transparent 1px);
+      background-size: auto, 64px 64px, 64px 64px;
+      background-position: center center, 0 0, 0 0;
+    }
+
+    .node-card {
+      position: absolute;
+      width: 78px;
+      height: 78px;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+      border: 1px solid rgba(186, 230, 253, 0.65);
+      background:
+        radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.25), transparent 24%),
+        linear-gradient(160deg, rgba(34, 211, 238, 0.82), rgba(30, 64, 175, 0.88));
+      box-shadow:
+        0 0 0 1px rgba(34, 211, 238, 0.15),
+        0 0 24px rgba(34, 211, 238, 0.28);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+      z-index: 3;
+    }
+
+    .node-card:hover {
+      transform: translate(-50%, -50%) scale(1.06);
+    }
+
+    .node-card[data-state="tx"] {
+      box-shadow:
+        0 0 0 1px rgba(103, 232, 249, 0.4),
+        0 0 34px rgba(103, 232, 249, 0.55);
+      border-color: rgba(207, 250, 254, 0.95);
+    }
+
+    .node-card[data-state="ok"] {
+      box-shadow:
+        0 0 0 1px rgba(74, 222, 128, 0.45),
+        0 0 30px rgba(74, 222, 128, 0.45);
+      border-color: rgba(187, 247, 208, 0.95);
+    }
+
+    .node-card[data-state="collision"] {
+      box-shadow:
+        0 0 0 1px rgba(248, 113, 113, 0.55),
+        0 0 32px rgba(248, 113, 113, 0.6);
+      border-color: rgba(254, 202, 202, 0.95);
+    }
+
+    .node-card[data-state="lost"] {
+      box-shadow:
+        0 0 0 1px rgba(251, 191, 36, 0.5),
+        0 0 28px rgba(251, 191, 36, 0.45);
+      border-color: rgba(253, 230, 138, 0.95);
+    }
+
+    .node-core {
+      width: 46px;
+      height: 46px;
+      border-radius: 999px;
+      background: rgba(8, 47, 73, 0.42);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: white;
+    }
+
+    .node-meta {
+      position: absolute;
+      top: calc(100% + 7px);
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      text-align: center;
+      font-size: 11px;
+      line-height: 1.2;
+      color: rgba(207, 250, 254, 0.92);
+      text-shadow: 0 2px 10px rgba(8, 15, 28, 0.95);
+    }
+
+    .wave-ring {
+      position: absolute;
+      width: var(--diameter);
+      height: var(--diameter);
+      left: var(--x);
+      top: var(--y);
+      transform: translate(-50%, -50%) scale(0.08);
+      border-radius: 999px;
+      border: 2px solid rgba(103, 232, 249, 0.8);
+      background: radial-gradient(circle, rgba(34, 211, 238, 0.12), rgba(34, 211, 238, 0.02) 55%, transparent 70%);
+      opacity: 0.95;
+      animation: wave-expand linear forwards;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    @keyframes wave-expand {
+      0% {
+        transform: translate(-50%, -50%) scale(0.08);
+        opacity: 0.85;
+      }
+      70% {
+        opacity: 0.3;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0;
+      }
+    }
+
+    .bubble {
+      position: absolute;
+      bottom: -60px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.04));
+      animation: bubble-rise linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes bubble-rise {
+      from {
+        transform: translateY(0) scale(0.6);
+        opacity: 0;
+      }
+      15% {
+        opacity: 0.6;
+      }
+      to {
+        transform: translateY(-115vh) scale(1);
+        opacity: 0;
+      }
+    }
+
+    .arrival-marker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+      pointer-events: none;
+      z-index: 4;
+      animation: arrival-pop 820ms ease-out forwards;
+    }
+
+    .arrival-marker.ok {
+      width: 24px;
+      height: 24px;
+      border: 2px solid rgba(74, 222, 128, 0.9);
+      box-shadow: 0 0 22px rgba(74, 222, 128, 0.55);
+    }
+
+    .arrival-marker.collision {
+      width: 30px;
+      height: 30px;
+      border: 2px solid rgba(248, 113, 113, 0.95);
+      box-shadow: 0 0 26px rgba(248, 113, 113, 0.7);
+    }
+
+    .arrival-marker.lost {
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(251, 191, 36, 0.95);
+      box-shadow: 0 0 20px rgba(251, 191, 36, 0.55);
+    }
+
+    @keyframes arrival-pop {
+      0% {
+        transform: translate(-50%, -50%) scale(0.4);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(2.2);
+        opacity: 0;
+      }
+    }
+
+    .collision-cross {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      color: var(--red);
+      font-weight: 800;
+      font-size: 28px;
+      pointer-events: none;
+      z-index: 5;
+      animation: collision-x 700ms ease-out forwards;
+      text-shadow: 0 0 18px rgba(248, 113, 113, 0.8);
+    }
+
+    @keyframes collision-x {
+      from {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(0.7);
+      }
+      to {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.5);
+      }
+    }
+
+    .log-entry {
+      border-left: 4px solid rgba(103, 232, 249, 0.8);
+      transition: transform 180ms ease, background 180ms ease;
+    }
+
+    .log-entry:hover {
+      transform: translateX(4px);
+      background: rgba(15, 23, 42, 0.86);
+    }
+
+    .log-entry[data-tone="ok"] {
+      border-left-color: rgba(74, 222, 128, 0.9);
+    }
+
+    .log-entry[data-tone="collision"] {
+      border-left-color: rgba(248, 113, 113, 0.95);
+    }
+
+    .log-entry[data-tone="lost"] {
+      border-left-color: rgba(251, 191, 36, 0.95);
+    }
+
+    .progress-track {
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(103, 232, 249, 0.16);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(34, 211, 238, 0.9), rgba(125, 211, 252, 0.95));
+      box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+      transition: width 120ms linear;
+    }
+
+    .mono {
+      font-variant-numeric: tabular-nums;
+      font-family: "JetBrains Mono", "Consolas", monospace;
+    }
+
+    .status-pill {
+      border-radius: 999px;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      border: 1px solid rgba(103, 232, 249, 0.25);
+      background: rgba(15, 23, 42, 0.72);
+      color: rgba(224, 242, 254, 0.9);
+    }
+
+    .status-pill[data-tone="green"] {
+      border-color: rgba(74, 222, 128, 0.3);
+      background: rgba(34, 197, 94, 0.12);
+      color: rgba(240, 253, 244, 0.95);
+    }
+
+    .status-pill[data-tone="amber"] {
+      border-color: rgba(251, 191, 36, 0.3);
+      background: rgba(245, 158, 11, 0.12);
+      color: rgba(255, 251, 235, 0.96);
+    }
+
+    .status-pill[data-tone="red"] {
+      border-color: rgba(248, 113, 113, 0.32);
+      background: rgba(239, 68, 68, 0.12);
+      color: rgba(254, 242, 242, 0.96);
+    }
+
+    .node-meta-sub {
+      font-size: 10px;
+      color: rgba(203, 213, 225, 0.8);
+    }
+
+    .log-label {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: rgba(224, 242, 254, 0.96);
+    }
+
+    .log-time {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .log-body {
+      color: #e2e8f0;
+      line-height: 1.55;
+    }
+  </style>
+</head>
+<body>
+  <header class="border-b border-cyan-900/40 px-6 py-4">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex items-center gap-3">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10">
+          <iconify-icon icon="mdi:radar" class="text-3xl text-cyan-300"></iconify-icon>
+        </div>
+        <div>
+          <h1 class="text-2xl font-semibold tracking-wide text-white">ns-3 水声网络日志回放</h1>
+          <p class="text-sm text-cyan-100/70">基于 `tx / rx` 广播事件模型的 H5 可视化原型</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <span id="status-pill" class="status-pill">准备加载日志</span>
+        <button id="btn-load-default" class="rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-100 transition hover:bg-cyan-500/20">加载默认 `net.log`</button>
+        <label class="rounded-xl border border-cyan-400/25 bg-slate-900/70 px-4 py-2 text-sm text-cyan-50 transition hover:bg-slate-800/80">
+          选择日志
+          <input id="file-input" type="file" accept=".log,.jsonl,.txt,.json" class="hidden">
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main class="flex min-h-[calc(100vh-89px)] flex-col gap-4 p-4 xl:flex-row">
+    <section class="flex min-h-[720px] flex-1 flex-col gap-4">
+      <div class="panel rounded-3xl p-4">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div class="rounded-2xl border border-cyan-400/15 bg-slate-950/35 px-4 py-3">
+              <div class="text-xs text-slate-400">日志来源</div>
+              <div id="source-name" class="mt-1 text-sm text-cyan-100">未加载</div>
+            </div>
+            <div class="rounded-2xl border border-cyan-400/15 bg-slate-950/35 px-4 py-3">
+              <div class="text-xs text-slate-400">仿真时间</div>
+              <div id="sim-time" class="mono mt-1 text-sm text-cyan-100">0.000 s / 0.000 s</div>
+            </div>
+            <div class="rounded-2xl border border-cyan-400/15 bg-slate-950/35 px-4 py-3">
+              <div class="text-xs text-slate-400">节点 / TX / RX</div>
+              <div id="dataset-counts" class="mono mt-1 text-sm text-cyan-100">0 / 0 / 0</div>
+            </div>
+            <div class="rounded-2xl border border-cyan-400/15 bg-slate-950/35 px-4 py-3">
+              <div class="text-xs text-slate-400">播放速度</div>
+              <div class="mt-1 flex items-center gap-2">
+                <select id="speed-select" class="rounded-lg border border-cyan-400/20 bg-slate-900 px-3 py-1 text-sm text-cyan-50 outline-none">
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="2">2x</option>
+                  <option value="4">4x</option>
+                </select>
+                <span class="text-xs text-slate-400">实时回放</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <button id="btn-play" class="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400">播放</button>
+            <button id="btn-pause" class="rounded-xl border border-cyan-400/25 bg-slate-900/80 px-4 py-2 text-sm text-cyan-50 transition hover:bg-slate-800">暂停</button>
+            <button id="btn-replay" class="rounded-xl border border-cyan-400/25 bg-slate-900/80 px-4 py-2 text-sm text-cyan-50 transition hover:bg-slate-800">重新播放</button>
+          </div>
+        </div>
+
+        <div class="mt-4 progress-track">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+      </div>
+
+      <div id="canvas-container" class="panel ocean-grid relative flex-1 overflow-hidden rounded-[32px] border border-cyan-300/10">
+        <div id="bubbles-layer" class="absolute inset-0 pointer-events-none"></div>
+        <svg id="effect-svg" class="absolute inset-0 h-full w-full">
           <defs>
-            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-              <polygon points="0 0, 10 3, 0 6" fill="#22d3ee"></polygon>
-            </marker>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="3" result="coloredBlur"></feGaussianBlur>
+            <filter id="line-glow">
+              <feGaussianBlur stdDeviation="2.2" result="blur"></feGaussianBlur>
               <feMerge>
-                <feMergeNode in="coloredBlur"></feMergeNode>
+                <feMergeNode in="blur"></feMergeNode>
                 <feMergeNode in="SourceGraphic"></feMergeNode>
               </feMerge>
             </filter>
           </defs>
-          <g id="connections-layer"></g>
-          <g id="signals-layer"></g>
-          <g id="effects-layer"></g>
+          <g id="travel-layer"></g>
+          <g id="burst-layer"></g>
         </svg>
-        <div id="nodes-container" class="absolute inset-0">
-          <div id="node-1" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 10%; top: 20%;">
-            <span class="text-white font-bold text-lg">A</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-A</div>
+        <div id="rings-layer" class="absolute inset-0 pointer-events-none"></div>
+        <div id="markers-layer" class="absolute inset-0 pointer-events-none"></div>
+        <div id="nodes-layer" class="absolute inset-0"></div>
+
+        <div class="absolute left-4 top-4 max-w-xs rounded-2xl border border-cyan-400/18 bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div class="mb-3 flex items-center gap-2 text-cyan-100">
+            <iconify-icon icon="mdi:chart-donut-variant"></iconify-icon>
+            <span class="text-sm font-semibold">实时统计</span>
           </div>
-          <div id="node-2" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 75%; top: 15%;">
-            <span class="text-white font-bold text-lg">B</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-B</div>
-          </div>
-          <div id="node-3" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 5%; top: 55%;">
-            <span class="text-white font-bold text-lg">C</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-C</div>
-          </div>
-          <div id="node-4" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 85%; top: 50%;">
-            <span class="text-white font-bold text-lg">D</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-D</div>
-          </div>
-          <div id="node-5" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 30%; top: 75%;">
-            <span class="text-white font-bold text-lg">E</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-E</div>
-          </div>
-          <div id="node-6" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 65%; top: 80%;">
-            <span class="text-white font-bold text-lg">F</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-F</div>
-          </div>
-          <div id="node-7" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 35%; top: 35%;">
-            <span class="text-white font-bold text-lg">G</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-G</div>
-          </div>
-          <div id="node-8" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 55%; top: 40%;">
-            <span class="text-white font-bold text-lg">H</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-H</div>
-          </div>
-          <div id="node-9" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 15%; top: 85%;">
-            <span class="text-white font-bold text-lg">I</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-I</div>
-          </div>
-          <div id="node-10" class="node absolute w-16 h-16 bg-gradient-to-br from-cyan-500 to-blue-700 rounded-full flex items-center justify-center cursor-pointer hover:scale-110 transition-transform border-2 border-cyan-300 shadow-lg shadow-cyan-500/30" style="left: 90%; top: 25%;">
-            <span class="text-white font-bold text-lg">J</span>
-            <div class="absolute -bottom-6 text-cyan-300 text-xs whitespace-nowrap">Node-J</div>
-          </div>
-        </div>
-        <div id="collision-container" class="absolute inset-0 pointer-events-none"></div>
-        <div class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur-sm rounded-xl border border-cyan-800/50 p-4">
-          <h3 class="text-cyan-300 font-semibold mb-3 flex items-center gap-2">
-            <iconify-icon icon="mdi:chart-box"></iconify-icon>
-            实时统计
-          </h3>
-          <div class="space-y-2 text-sm">
-            <div class="flex justify-between items-center gap-6">
-              <span class="text-slate-300">总发送</span>
-              <span id="stat-total" class="text-cyan-400 font-mono font-bold">0</span>
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-xl bg-slate-900/70 p-3">
+              <div class="text-xs text-slate-400">总发射 TX</div>
+              <div id="stat-total" class="mono mt-1 text-lg text-cyan-300">0</div>
             </div>
-            <div class="flex justify-between items-center gap-6">
-              <span class="text-slate-300">成功接收</span>
-              <span id="stat-success" class="text-green-400 font-mono font-bold">0</span>
+            <div class="rounded-xl bg-slate-900/70 p-3">
+              <div class="text-xs text-slate-400">成功 RX</div>
+              <div id="stat-success" class="mono mt-1 text-lg text-green-300">0</div>
             </div>
-            <div class="flex justify-between items-center gap-6">
-              <span class="text-slate-300">信号碰撞</span>
-              <span id="stat-collision" class="text-red-400 font-mono font-bold">0</span>
+            <div class="rounded-xl bg-slate-900/70 p-3">
+              <div class="text-xs text-slate-400">碰撞 RX</div>
+              <div id="stat-collision" class="mono mt-1 text-lg text-red-300">0</div>
             </div>
-            <div class="flex justify-between items-center gap-6">
-              <span class="text-slate-300">信号丢失</span>
-              <span id="stat-lost" class="text-orange-400 font-mono font-bold">0</span>
+            <div class="rounded-xl bg-slate-900/70 p-3">
+              <div class="text-xs text-slate-400">失败 RX</div>
+              <div id="stat-lost" class="mono mt-1 text-lg text-amber-300">0</div>
             </div>
           </div>
         </div>
-        <div class="absolute bottom-4 left-4 flex gap-2 flex-wrap">
-          <button onclick="sendSignal('A', 'B')" class="px-3 py-2 bg-cyan-700/80 hover:bg-cyan-600 text-white rounded-lg text-xs transition-all border border-cyan-500/50">A→B 发送</button>
-          <button onclick="sendSignal('C', 'G')" class="px-3 py-2 bg-cyan-700/80 hover:bg-cyan-600 text-white rounded-lg text-xs transition-all border border-cyan-500/50">C→G 发送</button>
-          <button onclick="simulateCollision()" class="px-3 py-2 bg-red-700/80 hover:bg-red-600 text-white rounded-lg text-xs transition-all border border-red-500/50">模拟碰撞</button>
-          <button onclick="simulateLost()" class="px-3 py-2 bg-orange-700/80 hover:bg-orange-600 text-white rounded-lg text-xs transition-all border border-orange-500/50">模拟丢失</button>
-        </div>
-      </div>
-      <div class="w-80 bg-slate-900/90 border-l border-cyan-800/50 flex flex-col" style="height: 100%; overflow: hidden;">
-        <div class="p-4 border-b border-cyan-800/50 flex-shrink-0">
-          <h3 class="text-cyan-300 font-semibold flex items-center gap-2">
-            <iconify-icon icon="mdi:text-box"></iconify-icon>
-            事件日志
-          </h3>
-        </div>
-        <div id="log-container" class="flex-1 overflow-y-auto p-4 space-y-2"><div class="log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm" style="border-left-color: rgb(34, 211, 238);">
-<div class="flex items-center justify-between mb-1">
-<span class="text-cyan-400 font-semibold text-xs">状态</span>
-<span class="text-slate-500 text-xs font-mono">13:03:43</span>
-</div>
-<div class="text-slate-200">10个节点在线，系统运行正常</div>
-</div><div class="log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm" style="border-left-color: rgb(34, 211, 238);">
-<div class="flex items-center justify-between mb-1">
-<span class="text-cyan-400 font-semibold text-xs">系统</span>
-<span class="text-slate-500 text-xs font-mono">13:03:43</span>
-</div>
-<div class="text-slate-200">水下节点信号监控系统已启动</div>
-</div></div>
-        <div class="p-4 border-t border-cyan-800/50 flex-shrink-0">
-          <div class="flex items-center gap-2 text-xs text-slate-400">
-            <iconify-icon icon="mdi:information"></iconify-icon>
-            <span>最近50条事件记录</span>
+
+        <div class="absolute bottom-4 left-4 max-w-md rounded-2xl border border-cyan-400/18 bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div class="mb-2 flex items-center gap-2 text-sm font-semibold text-cyan-100">
+            <iconify-icon icon="mdi:book-open-variant"></iconify-icon>
+            <span>图例</span>
+          </div>
+          <div class="flex flex-wrap gap-3 text-xs text-slate-300">
+            <span class="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1">青色波环: 广播发射</span>
+            <span class="rounded-full border border-green-400/25 bg-green-400/10 px-3 py-1">绿色到达: 成功接收</span>
+            <span class="rounded-full border border-red-400/25 bg-red-400/10 px-3 py-1">红色爆点: 接收碰撞</span>
+            <span class="rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1">黄色提示: 接收失败</span>
           </div>
         </div>
       </div>
     </section>
 
-<script id="uw-script">(function() { 
-const nodes = {
-'A': document.getElementById('node-1'),
-'B': document.getElementById('node-2'),
-'C': document.getElementById('node-3'),
-'D': document.getElementById('node-4'),
-'E': document.getElementById('node-5'),
-'F': document.getElementById('node-6'),
-'G': document.getElementById('node-7'),
-'H': document.getElementById('node-8'),
-'I': document.getElementById('node-9'),
-'J': document.getElementById('node-10')
-};
+    <aside class="panel flex w-full flex-col overflow-hidden rounded-3xl xl:w-[360px]">
+      <div class="border-b border-cyan-900/30 px-5 py-4">
+        <div class="flex items-center gap-2 text-cyan-100">
+          <iconify-icon icon="mdi:text-box-multiple"></iconify-icon>
+          <span class="font-semibold">事件日志</span>
+        </div>
+        <p class="mt-1 text-xs text-slate-400">按仿真时间写入，突出 `TX`、`RX` 和碰撞归属接收端。</p>
+      </div>
+      <div id="log-container" class="flex-1 space-y-2 overflow-y-auto px-4 py-4"></div>
+      <div class="border-t border-cyan-900/30 px-5 py-4 text-xs text-slate-400">
+        第一版回放器会自动尝试读取根目录 `net.log`，如果浏览器因 `file://` 限制阻止读取，可手动选择日志文件。
+      </div>
+    </aside>
+  </main>
 
-const canvas = document.getElementById('signal-canvas');
-const signalsLayer = document.getElementById('signals-layer');
-const effectsLayer = document.getElementById('effects-layer');
-const logContainer = document.getElementById('log-container');
-const collisionContainer = document.getElementById('collision-container');
+  <script id="embedded-net-log" type="text/plain">
+{"type":"meta","schema":"uan-vis-log/v1","time_unit":"us","distance_unit":"m","seed":20260416,"sim_end_us":3200000}
+{"type":"node","node_id":1,"name":"Sink-1","x":120,"y":80,"z":-20,"role":"sink"}
+{"type":"node","node_id":2,"name":"Relay-2","x":520,"y":120,"z":-28,"role":"relay"}
+{"type":"node","node_id":3,"name":"Sensor-3","x":310,"y":210,"z":-32,"role":"sensor"}
+{"type":"node","node_id":4,"name":"Sensor-4","x":80,"y":320,"z":-36,"role":"sensor"}
+{"type":"node","node_id":5,"name":"Gateway-5","x":420,"y":360,"z":-26,"role":"gateway"}
+{"type":"node","node_id":6,"name":"AUV-6","x":670,"y":330,"z":-18,"role":"auv"}
+{"type":"node","node_id":7,"name":"Sensor-7","x":220,"y":480,"z":-48,"role":"sensor"}
+{"type":"node","node_id":8,"name":"Edge-8","x":600,"y":500,"z":-42,"role":"sensor"}
+{"type":"tx","tx_id":"tx-1","packet_uid":"pkt-1","src":3,"mac_dst":"broadcast","net_dst":1,"start_us":400000,"duration_us":180000,"end_us":580000,"size_bytes":128,"freq_hz":25000,"bitrate_bps":11300,"tx_power_db":188,"range_m":520}
+{"type":"rx","rx_id":"rx-1-1","tx_id":"tx-1","packet_uid":"pkt-1","src":3,"dst":1,"prop_delay_us":80000,"start_us":480000,"duration_us":180000,"end_us":660000,"distance_m":118,"result":"ok","snr_db":18.4,"per":0.01,"collided_with":[]}
+{"type":"rx","rx_id":"rx-1-2","tx_id":"tx-1","packet_uid":"pkt-1","src":3,"dst":2,"prop_delay_us":140000,"start_us":540000,"duration_us":180000,"end_us":720000,"distance_m":207,"result":"ok","snr_db":15.7,"per":0.03,"collided_with":[]}
+{"type":"rx","rx_id":"rx-1-5","tx_id":"tx-1","packet_uid":"pkt-1","src":3,"dst":5,"prop_delay_us":170000,"start_us":570000,"duration_us":180000,"end_us":750000,"distance_m":250,"result":"collision","snr_db":5.1,"per":0.62,"collided_with":["tx-2"]}
+{"type":"rx","rx_id":"rx-1-7","tx_id":"tx-1","packet_uid":"pkt-1","src":3,"dst":7,"prop_delay_us":130000,"start_us":530000,"duration_us":180000,"end_us":710000,"distance_m":190,"result":"ok","snr_db":13.1,"per":0.05,"collided_with":[]}
+{"type":"tx","tx_id":"tx-2","packet_uid":"pkt-2","src":6,"mac_dst":"broadcast","net_dst":null,"start_us":500000,"duration_us":160000,"end_us":660000,"size_bytes":96,"freq_hz":24000,"bitrate_bps":9800,"tx_power_db":190,"range_m":520}
+{"type":"rx","rx_id":"rx-2-5","tx_id":"tx-2","packet_uid":"pkt-2","src":6,"dst":5,"prop_delay_us":65000,"start_us":565000,"duration_us":160000,"end_us":725000,"distance_m":96,"result":"collision","snr_db":4.7,"per":0.67,"collided_with":["tx-1"]}
+{"type":"rx","rx_id":"rx-2-2","tx_id":"tx-2","packet_uid":"pkt-2","src":6,"dst":2,"prop_delay_us":150000,"start_us":650000,"duration_us":160000,"end_us":810000,"distance_m":220,"result":"ok","snr_db":16.8,"per":0.02,"collided_with":[]}
+{"type":"rx","rx_id":"rx-2-8","tx_id":"tx-2","packet_uid":"pkt-2","src":6,"dst":8,"prop_delay_us":110000,"start_us":610000,"duration_us":160000,"end_us":770000,"distance_m":162,"result":"ok","snr_db":14.2,"per":0.03,"collided_with":[]}
+{"type":"rx","rx_id":"rx-2-7","tx_id":"tx-2","packet_uid":"pkt-2","src":6,"dst":7,"prop_delay_us":290000,"start_us":790000,"duration_us":160000,"end_us":950000,"distance_m":430,"result":"below_snr","snr_db":2.2,"per":0.88,"collided_with":[]}
+{"type":"tx","tx_id":"tx-3","packet_uid":"pkt-3","src":1,"mac_dst":"broadcast","net_dst":7,"start_us":1400000,"duration_us":150000,"end_us":1550000,"size_bytes":144,"freq_hz":25000,"bitrate_bps":11300,"tx_power_db":187,"range_m":500}
+{"type":"rx","rx_id":"rx-3-3","tx_id":"tx-3","packet_uid":"pkt-3","src":1,"dst":3,"prop_delay_us":80000,"start_us":1480000,"duration_us":150000,"end_us":1630000,"distance_m":118,"result":"ok","snr_db":19.2,"per":0.01,"collided_with":[]}
+{"type":"rx","rx_id":"rx-3-4","tx_id":"tx-3","packet_uid":"pkt-3","src":1,"dst":4,"prop_delay_us":160000,"start_us":1560000,"duration_us":150000,"end_us":1710000,"distance_m":236,"result":"ok","snr_db":12.7,"per":0.04,"collided_with":[]}
+{"type":"rx","rx_id":"rx-3-5","tx_id":"tx-3","packet_uid":"pkt-3","src":1,"dst":5,"prop_delay_us":220000,"start_us":1620000,"duration_us":150000,"end_us":1770000,"distance_m":325,"result":"ok","snr_db":11.9,"per":0.06,"collided_with":[]}
+{"type":"tx","tx_id":"tx-4","packet_uid":"pkt-4","src":4,"mac_dst":"broadcast","net_dst":null,"start_us":1850000,"duration_us":170000,"end_us":2020000,"size_bytes":160,"freq_hz":23000,"bitrate_bps":10200,"tx_power_db":189,"range_m":540}
+{"type":"rx","rx_id":"rx-4-1","tx_id":"tx-4","packet_uid":"pkt-4","src":4,"dst":1,"prop_delay_us":160000,"start_us":2010000,"duration_us":170000,"end_us":2180000,"distance_m":236,"result":"ok","snr_db":14.6,"per":0.03,"collided_with":[]}
+{"type":"rx","rx_id":"rx-4-7","tx_id":"tx-4","packet_uid":"pkt-4","src":4,"dst":7,"prop_delay_us":130000,"start_us":1980000,"duration_us":170000,"end_us":2150000,"distance_m":190,"result":"ok","snr_db":13.5,"per":0.04,"collided_with":[]}
+{"type":"rx","rx_id":"rx-4-5","tx_id":"tx-4","packet_uid":"pkt-4","src":4,"dst":5,"prop_delay_us":230000,"start_us":2080000,"duration_us":170000,"end_us":2250000,"distance_m":340,"result":"half_duplex_busy","snr_db":9.1,"per":0.27,"collided_with":[]}
+{"type":"tx","tx_id":"tx-5","packet_uid":"pkt-5","src":8,"mac_dst":"broadcast","net_dst":2,"start_us":2400000,"duration_us":150000,"end_us":2550000,"size_bytes":112,"freq_hz":24000,"bitrate_bps":9800,"tx_power_db":186,"range_m":480}
+{"type":"rx","rx_id":"rx-5-6","tx_id":"tx-5","packet_uid":"pkt-5","src":8,"dst":6,"prop_delay_us":110000,"start_us":2510000,"duration_us":150000,"end_us":2660000,"distance_m":162,"result":"ok","snr_db":15.2,"per":0.03,"collided_with":[]}
+{"type":"rx","rx_id":"rx-5-5","tx_id":"tx-5","packet_uid":"pkt-5","src":8,"dst":5,"prop_delay_us":140000,"start_us":2540000,"duration_us":150000,"end_us":2690000,"distance_m":207,"result":"ok","snr_db":12.8,"per":0.05,"collided_with":[]}
+{"type":"rx","rx_id":"rx-5-2","tx_id":"tx-5","packet_uid":"pkt-5","src":8,"dst":2,"prop_delay_us":150000,"start_us":2550000,"duration_us":150000,"end_us":2700000,"distance_m":220,"result":"collision","snr_db":5.8,"per":0.55,"collided_with":["tx-6"]}
+{"type":"tx","tx_id":"tx-6","packet_uid":"pkt-6","src":5,"mac_dst":"broadcast","net_dst":3,"start_us":2440000,"duration_us":180000,"end_us":2620000,"size_bytes":176,"freq_hz":25000,"bitrate_bps":11300,"tx_power_db":191,"range_m":560}
+{"type":"rx","rx_id":"rx-6-2","tx_id":"tx-6","packet_uid":"pkt-6","src":5,"dst":2,"prop_delay_us":90000,"start_us":2530000,"duration_us":180000,"end_us":2710000,"distance_m":132,"result":"collision","snr_db":4.9,"per":0.63,"collided_with":["tx-5"]}
+{"type":"rx","rx_id":"rx-6-3","tx_id":"tx-6","packet_uid":"pkt-6","src":5,"dst":3,"prop_delay_us":170000,"start_us":2610000,"duration_us":180000,"end_us":2790000,"distance_m":250,"result":"ok","snr_db":13.8,"per":0.04,"collided_with":[]}
+{"type":"rx","rx_id":"rx-6-7","tx_id":"tx-6","packet_uid":"pkt-6","src":5,"dst":7,"prop_delay_us":150000,"start_us":2590000,"duration_us":180000,"end_us":2770000,"distance_m":221,"result":"ok","snr_db":12.9,"per":0.05,"collided_with":[]}
+  </script>
 
-let stats = { total: 0, success: 0, collision: 0, lost: 0 };
-let autoSimInterval = null;
+  <script>
+    (() => {
+      const RESULT_STYLE = {
+        ok: { tone: "ok", color: "#4ade80", label: "成功接收" },
+        collision: { tone: "collision", color: "#f87171", label: "接收碰撞" },
+        below_snr: { tone: "lost", color: "#fbbf24", label: "SNR不足" },
+        half_duplex_busy: { tone: "lost", color: "#fbbf24", label: "接收端忙" },
+        interference: { tone: "lost", color: "#fbbf24", label: "受干扰失败" },
+        dropped: { tone: "lost", color: "#fbbf24", label: "丢弃" },
+        out_of_range: { tone: "lost", color: "#94a3b8", label: "超出范围" }
+      };
 
-function getNodeCenter(nodeId) {
-const node = nodes[nodeId];
-const rect = node.getBoundingClientRect();
-const containerRect = document.getElementById('canvas-container').getBoundingClientRect();
-return {
-x: rect.left - containerRect.left + rect.width / 2,
-y: rect.top - containerRect.top + rect.height / 2
-};
-}
+      const dom = {
+        canvas: document.getElementById("canvas-container"),
+        nodesLayer: document.getElementById("nodes-layer"),
+        ringsLayer: document.getElementById("rings-layer"),
+        markersLayer: document.getElementById("markers-layer"),
+        bubblesLayer: document.getElementById("bubbles-layer"),
+        effectSvg: document.getElementById("effect-svg"),
+        travelLayer: document.getElementById("travel-layer"),
+        burstLayer: document.getElementById("burst-layer"),
+        logContainer: document.getElementById("log-container"),
+        statusPill: document.getElementById("status-pill"),
+        sourceName: document.getElementById("source-name"),
+        simTime: document.getElementById("sim-time"),
+        datasetCounts: document.getElementById("dataset-counts"),
+        progressFill: document.getElementById("progress-fill"),
+        statTotal: document.getElementById("stat-total"),
+        statSuccess: document.getElementById("stat-success"),
+        statCollision: document.getElementById("stat-collision"),
+        statLost: document.getElementById("stat-lost"),
+        speedSelect: document.getElementById("speed-select"),
+        fileInput: document.getElementById("file-input"),
+        btnLoadDefault: document.getElementById("btn-load-default"),
+        btnPlay: document.getElementById("btn-play"),
+        btnPause: document.getElementById("btn-pause"),
+        btnReplay: document.getElementById("btn-replay")
+      };
 
-function createBubble() {
-const bubble = document.createElement('div');
-bubble.className = 'bubble';
-const size = Math.random() * 20 + 10;
-bubble.style.width = size + 'px';
-bubble.style.height = size + 'px';
-bubble.style.left = Math.random() * 100 + '%';
-bubble.style.animationDelay = Math.random() * 5 + 's';
-bubble.style.animationDuration = (Math.random() * 4 + 6) + 's';
-document.getElementById('bubbles-container').appendChild(bubble);
+      const state = {
+        dataset: null,
+        nodeElements: new Map(),
+        sourceName: "未加载",
+        layout: null,
+        stats: {
+          total: 0,
+          success: 0,
+          collision: 0,
+          lost: 0
+        },
+        playback: {
+          isPlaying: false,
+          currentUs: 0,
+          durationUs: 0,
+          nextEventIndex: 0,
+          lastFrameMs: 0,
+          speed: 1
+        },
+        bubbleTimer: null
+      };
 
-setTimeout(() => bubble.remove(), 12000);
-}
+      function parseJsonLines(text) {
+        const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        return lines.map((line, index) => {
+          try {
+            return JSON.parse(line);
+          } catch (error) {
+            throw new Error(`第 ${index + 1} 行 JSON 解析失败: ${error.message}`);
+          }
+        });
+      }
 
-setInterval(createBubble, 800);
+      function buildDataset(records) {
+        const meta = records.find((item) => item.type === "meta") || {
+          schema: "uan-vis-log/v1",
+          sim_end_us: 0
+        };
+        const nodes = records.filter((item) => item.type === "node");
+        const txList = records.filter((item) => item.type === "tx");
+        const txMap = new Map(txList.map((item) => [item.tx_id, item]));
+        const rxList = records.filter((item) => item.type === "rx").filter((item) => txMap.has(item.tx_id));
+        const rxByTx = new Map();
+        const events = [];
 
-function sendSignal(fromId, toId, type = 'normal') {
-const from = getNodeCenter(fromId);
-const to = getNodeCenter(toId);
+        txList.forEach((tx) => {
+          events.push({ timeUs: tx.start_us, sortKey: 0, kind: "tx", tx });
+          rxByTx.set(tx.tx_id, []);
+        });
 
-stats.total++;
-updateStats();
+        rxList.forEach((rx) => {
+          const tx = txMap.get(rx.tx_id);
+          rxByTx.get(rx.tx_id).push(rx);
+          events.push({ timeUs: tx.start_us, sortKey: 1, kind: "travel", tx, rx });
+          events.push({ timeUs: rx.start_us, sortKey: 2, kind: "rx", tx, rx });
+        });
 
-const pathId = 'path-' + Date.now() + '-' + Math.random();
-const color = type === 'collision' ? '#f87171' : type === 'lost' ? '#fb923c' : '#22d3ee';
+        events.sort((a, b) => {
+          if (a.timeUs !== b.timeUs) {
+            return a.timeUs - b.timeUs;
+          }
+          return a.sortKey - b.sortKey;
+        });
 
-const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-path.setAttribute('id', pathId);
-path.setAttribute('d', `M ${from.x} ${from.y} L ${to.x} ${to.y}`);
-path.setAttribute('stroke', color);
-path.setAttribute('stroke-width', '2');
-path.setAttribute('fill', 'none');
-path.setAttribute('stroke-dasharray', '8,4');
-path.setAttribute('filter', 'url(#glow)');
-path.style.animation = 'signalPulse 1.5s linear';
+        const lastEventUs = events.length ? events[events.length - 1].timeUs : 0;
+        const durationUs = Math.max(meta.sim_end_us || 0, lastEventUs);
 
-signalsLayer.appendChild(path);
+        return {
+          meta,
+          nodes,
+          txList,
+          rxList,
+          txMap,
+          rxByTx,
+          events,
+          durationUs
+        };
+      }
 
-const signalDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-signalDot.setAttribute('r', '6');
-signalDot.setAttribute('fill', color);
-signalDot.innerHTML = `
-<animateMotion dur="1.5s" repeatCount="1" path="M ${from.x} ${from.y} L ${to.x} ${to.y}" />
-`;
-signalsLayer.appendChild(signalDot);
+      function setStatus(text, variant = "cyan") {
+        dom.statusPill.className = "status-pill";
+        dom.statusPill.dataset.tone = variant === "cyan" ? "" : variant;
+        dom.statusPill.textContent = text;
+      }
 
-setTimeout(() => {
-path.remove();
-signalDot.remove();
+      function formatUs(us) {
+        return `${(us / 1e6).toFixed(3)} s`;
+      }
 
-if (type === 'collision') {
-showCollision((from.x + to.x) / 2, (from.y + to.y) / 2);
-stats.collision++;
-addLog('碰撞', `${fromId} → ${toId} 信号发生碰撞`, 'red');
-} else if (type === 'lost') {
-showLostEffect(to.x, to.y);
-stats.lost++;
-addLog('丢失', `${fromId} → ${toId} 信号丢失`, 'orange');
-} else {
-stats.success++;
-addLog('发送', `${fromId} → ${toId} 信号发送成功`, 'cyan');
-}
-updateStats();
-}, 1500);
-}
+      function updateStats() {
+        dom.statTotal.textContent = state.stats.total;
+        dom.statSuccess.textContent = state.stats.success;
+        dom.statCollision.textContent = state.stats.collision;
+        dom.statLost.textContent = state.stats.lost;
+      }
 
-function showCollision(x, y) {
-const effect = document.createElement('div');
-effect.className = 'collision-effect absolute w-12 h-12 rounded-full border-4 border-red-400 bg-red-400/30';
-effect.style.left = (x - 24) + 'px';
-effect.style.top = (y - 24) + 'px';
-collisionContainer.appendChild(effect);
+      function resetStats() {
+        state.stats = { total: 0, success: 0, collision: 0, lost: 0 };
+        updateStats();
+      }
 
-const burst = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-burst.setAttribute('cx', x);
-burst.setAttribute('cy', y);
-burst.setAttribute('r', '5');
-burst.setAttribute('fill', 'none');
-burst.setAttribute('stroke', '#f87171');
-burst.setAttribute('stroke-width', '3');
-burst.innerHTML = `
-<animate attributeName="r" from="5" to="50" dur="0.5s" fill="freeze" />
-<animate attributeName="opacity" from="1" to="0" dur="0.5s" fill="freeze" />
-`;
-effectsLayer.appendChild(burst);
+      function updateTimeline() {
+        const durationUs = state.playback.durationUs || 0;
+        dom.simTime.textContent = `${formatUs(state.playback.currentUs)} / ${formatUs(durationUs)}`;
+        const progress = durationUs ? (state.playback.currentUs / durationUs) * 100 : 0;
+        dom.progressFill.style.width = `${Math.max(0, Math.min(progress, 100)).toFixed(2)}%`;
+      }
 
-setTimeout(() => {
-effect.remove();
-burst.remove();
-}, 800);
-}
+      function addLogEntry({ label, message, timeUs = 0, tone = "cyan" }) {
+        const entry = document.createElement("div");
+        entry.className = "log-entry rounded-2xl bg-slate-900/65 p-3 text-sm";
+        entry.dataset.tone = tone;
 
-function showLostEffect(x, y) {
-const xMark = document.createElement('div');
-xMark.className = 'absolute text-orange-400 text-3xl font-bold';
-xMark.style.left = (x - 10) + 'px';
-xMark.style.top = (y - 15) + 'px';
-xMark.innerHTML = '✕';
-xMark.style.animation = 'collisionExplode 0.6s ease-out forwards';
-collisionContainer.appendChild(xMark);
+        const header = document.createElement("div");
+        header.className = "mb-1 flex items-center justify-between gap-3";
 
-setTimeout(() => xMark.remove(), 600);
-}
+        const labelNode = document.createElement("span");
+        labelNode.className = "log-label";
+        labelNode.textContent = label;
 
-function addLog(type, message, color) {
-const entry = document.createElement('div');
-entry.className = 'log-entry bg-slate-800/60 rounded-lg p-3 border-l-4 text-sm';
-entry.style.borderLeftColor = color === 'cyan' ? '#22d3ee' : color === 'red' ? '#f87171' : '#fb923c';
+        const timeNode = document.createElement("span");
+        timeNode.className = "mono log-time";
+        timeNode.textContent = formatUs(timeUs);
 
-const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-entry.innerHTML = `
-<div class="flex items-center justify-between mb-1">
-<span class="text-${color}-400 font-semibold text-xs">${type}</span>
-<span class="text-slate-500 text-xs font-mono">${time}</span>
-</div>
-<div class="text-slate-200">${message}</div>
-`;
+        const body = document.createElement("div");
+        body.className = "log-body";
+        body.textContent = message;
 
-logContainer.insertBefore(entry, logContainer.firstChild);
+        header.appendChild(labelNode);
+        header.appendChild(timeNode);
+        entry.appendChild(header);
+        entry.appendChild(body);
+        dom.logContainer.insertBefore(entry, dom.logContainer.firstChild);
 
-while (logContainer.children.length > 50) {
-logContainer.removeChild(logContainer.lastChild);
-}
-}
+        while (dom.logContainer.children.length > 80) {
+          dom.logContainer.removeChild(dom.logContainer.lastChild);
+        }
+      }
 
-function updateStats() {
-document.getElementById('stat-total').textContent = stats.total;
-document.getElementById('stat-success').textContent = stats.success;
-document.getElementById('stat-collision').textContent = stats.collision;
-document.getElementById('stat-lost').textContent = stats.lost;
-}
+      function clearTransientLayers() {
+        dom.ringsLayer.innerHTML = "";
+        dom.markersLayer.innerHTML = "";
+        dom.travelLayer.innerHTML = "";
+        dom.burstLayer.innerHTML = "";
+      }
 
-function simulateCollision() {
-const nodeKeys = Object.keys(nodes);
-const from1 = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-const from2 = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+      function resetPlayback(clearLog = true) {
+        state.playback.isPlaying = false;
+        state.playback.currentUs = 0;
+        state.playback.nextEventIndex = 0;
+        state.playback.lastFrameMs = 0;
+        state.playback.durationUs = state.dataset ? state.dataset.durationUs : 0;
+        clearTransientLayers();
+        resetStats();
+        updateTimeline();
 
-if (from1 !== to && from2 !== to && from1 !== from2) {
-sendSignal(from1, to, 'collision');
-setTimeout(() => sendSignal(from2, to, 'collision'), 100);
-}
-}
+        state.nodeElements.forEach((element) => {
+          element.dataset.state = "";
+        });
 
-function simulateLost() {
-const nodeKeys = Object.keys(nodes);
-const from = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-if (from !== to) {
-sendSignal(from, to, 'lost');
-}
-}
+        if (clearLog) {
+          dom.logContainer.innerHTML = "";
+        }
+      }
 
-function randomSimulation() {
-const actions = ['send', 'send', 'send', 'collision', 'lost'];
-const action = actions[Math.floor(Math.random() * actions.length)];
-const nodeKeys = Object.keys(nodes);
+      function ensureBubbleLoop() {
+        if (state.bubbleTimer) {
+          return;
+        }
 
-if (action === 'send') {
-const from = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-const to = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-if (from !== to) sendSignal(from, to);
-} else if (action === 'collision') {
-simulateCollision();
-} else {
-simulateLost();
-}
-}
+        const createBubble = () => {
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          const size = 10 + Math.random() * 22;
+          bubble.style.width = `${size}px`;
+          bubble.style.height = `${size}px`;
+          bubble.style.left = `${Math.random() * 100}%`;
+          bubble.style.animationDuration = `${6 + Math.random() * 5}s`;
+          bubble.style.animationDelay = `${Math.random() * 0.6}s`;
+          dom.bubblesLayer.appendChild(bubble);
+          setTimeout(() => bubble.remove(), 12000);
+        };
 
-document.getElementById('btn-auto-sim').addEventListener('click', function() {
-if (autoSimInterval) {
-clearInterval(autoSimInterval);
-autoSimInterval = null;
-this.innerHTML = '<iconify-icon icon="mdi:play"></iconify-icon>自动模拟';
-this.classList.remove('bg-red-600', 'hover:bg-red-500');
-this.classList.add('bg-cyan-600', 'hover:bg-cyan-500');
-} else {
-autoSimInterval = setInterval(randomSimulation, 2000);
-this.innerHTML = '<iconify-icon icon="mdi:stop"></iconify-icon>停止模拟';
-this.classList.remove('bg-cyan-600', 'hover:bg-cyan-500');
-this.classList.add('bg-red-600', 'hover:bg-red-500');
-}
-});
+        for (let i = 0; i < 14; i += 1) {
+          createBubble();
+        }
 
-document.getElementById('btn-reset').addEventListener('click', function() {
-stats = { total: 0, success: 0, collision: 0, lost: 0 };
-updateStats();
-logContainer.innerHTML = '';
-signalsLayer.innerHTML = '';
-effectsLayer.innerHTML = '';
-collisionContainer.innerHTML = '';
-});
+        state.bubbleTimer = window.setInterval(createBubble, 900);
+      }
 
-addLog('系统', '水下节点信号监控系统已启动', 'cyan');
-addLog('状态', '10个节点在线，系统运行正常', 'cyan');
- })();</script></body></html>
+      function computeLayout() {
+        if (!state.dataset || state.dataset.nodes.length === 0) {
+          return null;
+        }
+
+        const width = dom.canvas.clientWidth;
+        const height = dom.canvas.clientHeight;
+        const xs = state.dataset.nodes.map((node) => node.x);
+        const ys = state.dataset.nodes.map((node) => node.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const padding = 86;
+        const spanX = Math.max(maxX - minX, 1);
+        const spanY = Math.max(maxY - minY, 1);
+        const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
+        const drawWidth = spanX * scale;
+        const drawHeight = spanY * scale;
+        const offsetX = (width - drawWidth) / 2;
+        const offsetY = (height - drawHeight) / 2;
+
+        return { width, height, minX, minY, scale, offsetX, offsetY };
+      }
+
+      function toScreen(node) {
+        if (!state.layout) {
+          return { x: 0, y: 0 };
+        }
+
+        return {
+          x: state.layout.offsetX + (node.x - state.layout.minX) * state.layout.scale,
+          y: state.layout.offsetY + (node.y - state.layout.minY) * state.layout.scale
+        };
+      }
+
+      function renderNodes() {
+        state.layout = computeLayout();
+        dom.nodesLayer.innerHTML = "";
+        state.nodeElements.clear();
+
+        if (!state.dataset || !state.layout) {
+          return;
+        }
+
+        state.dataset.nodes.forEach((node) => {
+          const position = toScreen(node);
+          const nodeElement = document.createElement("div");
+          nodeElement.className = "node-card";
+          nodeElement.style.left = `${position.x}px`;
+          nodeElement.style.top = `${position.y}px`;
+          nodeElement.title = `${node.name} (${node.role || "node"})`;
+          nodeElement.innerHTML = `
+            <div class="node-core">${node.node_id}</div>
+            <div class="node-meta">
+              <div>${node.name}</div>
+              <div class="node-meta-sub">${node.role || "node"} · z=${node.z ?? 0}m</div>
+            </div>
+          `;
+          dom.nodesLayer.appendChild(nodeElement);
+          state.nodeElements.set(node.node_id, nodeElement);
+        });
+      }
+
+      function findNode(nodeId) {
+        return state.dataset?.nodes.find((node) => node.node_id === nodeId) || null;
+      }
+
+      function findNodeName(nodeId) {
+        const node = findNode(nodeId);
+        return node ? node.name : `Node-${nodeId}`;
+      }
+
+      function setNodeState(nodeId, nextState, durationMs = 900) {
+        const nodeElement = state.nodeElements.get(nodeId);
+        if (!nodeElement) {
+          return;
+        }
+
+        nodeElement.dataset.state = nextState;
+        window.setTimeout(() => {
+          if (nodeElement.dataset.state === nextState) {
+            nodeElement.dataset.state = "";
+          }
+        }, durationMs);
+      }
+
+      function createWaveRing(tx) {
+        const sourceNode = findNode(tx.src);
+        if (!sourceNode || !state.layout) {
+          return;
+        }
+
+        const position = toScreen(sourceNode);
+        const ring = document.createElement("div");
+        const diameter = Math.max(96, (tx.range_m || 180) * state.layout.scale * 2);
+        const durationMs = Math.max(360, tx.duration_us / 1000 / state.playback.speed);
+        ring.className = "wave-ring";
+        ring.style.setProperty("--diameter", `${diameter}px`);
+        ring.style.setProperty("--x", `${position.x}px`);
+        ring.style.setProperty("--y", `${position.y}px`);
+        ring.style.animationDuration = `${durationMs}ms`;
+        dom.ringsLayer.appendChild(ring);
+        window.setTimeout(() => ring.remove(), durationMs + 120);
+      }
+
+      function createTravel(tx, rx) {
+        if (!state.layout) {
+          return;
+        }
+
+        const sourceNode = findNode(tx.src);
+        const targetNode = findNode(rx.dst);
+        if (!sourceNode || !targetNode) {
+          return;
+        }
+
+        const from = toScreen(sourceNode);
+        const to = toScreen(targetNode);
+        const style = RESULT_STYLE[rx.result] || RESULT_STYLE.dropped;
+        const durationMs = Math.max(260, rx.prop_delay_us / 1000 / state.playback.speed);
+
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", from.x);
+        line.setAttribute("y1", from.y);
+        line.setAttribute("x2", to.x);
+        line.setAttribute("y2", to.y);
+        line.setAttribute("stroke", style.color);
+        line.setAttribute("stroke-width", rx.result === "collision" ? "2.6" : "2");
+        line.setAttribute("stroke-dasharray", "8 6");
+        line.setAttribute("stroke-linecap", "round");
+        line.setAttribute("filter", "url(#line-glow)");
+        line.innerHTML = `
+          <animate attributeName="opacity" values="0;0.65;0.15" dur="${durationMs}ms" fill="freeze" />
+          <animate attributeName="stroke-dashoffset" from="26" to="0" dur="${durationMs}ms" fill="freeze" />
+        `;
+        dom.travelLayer.appendChild(line);
+
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("r", rx.result === "collision" ? "5.5" : "4.5");
+        dot.setAttribute("fill", style.color);
+        dot.setAttribute("filter", "url(#line-glow)");
+        dot.innerHTML = `<animateMotion dur="${durationMs}ms" repeatCount="1" path="M ${from.x} ${from.y} L ${to.x} ${to.y}" />`;
+        dom.travelLayer.appendChild(dot);
+
+        window.setTimeout(() => {
+          line.remove();
+          dot.remove();
+        }, durationMs + 120);
+      }
+
+      function createBurst(nodeId, result) {
+        const node = findNode(nodeId);
+        if (!node) {
+          return;
+        }
+
+        const position = toScreen(node);
+        const styleTone = result === "collision" ? "collision" : result === "ok" ? "ok" : "lost";
+        const marker = document.createElement("div");
+        marker.className = `arrival-marker ${styleTone}`;
+        marker.style.left = `${position.x}px`;
+        marker.style.top = `${position.y}px`;
+        dom.markersLayer.appendChild(marker);
+        window.setTimeout(() => marker.remove(), 900);
+
+        if (result === "collision") {
+          const cross = document.createElement("div");
+          cross.className = "collision-cross";
+          cross.textContent = "×";
+          cross.style.left = `${position.x}px`;
+          cross.style.top = `${position.y}px`;
+          dom.markersLayer.appendChild(cross);
+          window.setTimeout(() => cross.remove(), 800);
+        }
+
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", position.x);
+        circle.setAttribute("cy", position.y);
+        circle.setAttribute("r", "4");
+        circle.setAttribute("fill", "none");
+        circle.setAttribute("stroke-width", result === "collision" ? "3" : "2.5");
+        circle.setAttribute("stroke", (RESULT_STYLE[result] || RESULT_STYLE.dropped).color);
+        circle.innerHTML = `
+          <animate attributeName="r" from="4" to="${result === "collision" ? 48 : 34}" dur="640ms" fill="freeze" />
+          <animate attributeName="opacity" from="1" to="0" dur="640ms" fill="freeze" />
+        `;
+        dom.burstLayer.appendChild(circle);
+        window.setTimeout(() => circle.remove(), 700);
+      }
+
+      function handleTx(event) {
+        const { tx } = event;
+        state.stats.total += 1;
+        updateStats();
+        setNodeState(tx.src, "tx", Math.max(620, tx.duration_us / 1000 / state.playback.speed));
+        createWaveRing(tx);
+        addLogEntry({
+          label: "TX",
+          message: `${findNodeName(tx.src)} 发起广播 ${tx.packet_uid || tx.tx_id}，持续 ${formatUs(tx.duration_us)}`,
+          timeUs: tx.start_us,
+          tone: "cyan"
+        });
+      }
+
+      function handleTravel(event) {
+        createTravel(event.tx, event.rx);
+      }
+
+      function handleRx(event) {
+        const { rx } = event;
+        const style = RESULT_STYLE[rx.result] || RESULT_STYLE.dropped;
+
+        if (rx.result === "ok") {
+          state.stats.success += 1;
+          setNodeState(rx.dst, "ok");
+        } else if (rx.result === "collision") {
+          state.stats.collision += 1;
+          setNodeState(rx.dst, "collision");
+        } else {
+          state.stats.lost += 1;
+          setNodeState(rx.dst, "lost");
+        }
+
+        updateStats();
+        createBurst(rx.dst, rx.result);
+
+        const collisionNote = rx.result === "collision" && rx.collided_with?.length
+          ? `，与 ${rx.collided_with.join(", ")} 重叠`
+          : "";
+
+        addLogEntry({
+          label: "RX",
+          message: `${findNodeName(rx.dst)} 接收 ${findNodeName(rx.src)} 的 ${rx.packet_uid || rx.tx_id}，结果: ${style.label}${collisionNote}`,
+          timeUs: rx.start_us,
+          tone: style.tone
+        });
+      }
+
+      function dispatchEvent(event) {
+        if (event.kind === "tx") {
+          handleTx(event);
+          return;
+        }
+        if (event.kind === "travel") {
+          handleTravel(event);
+          return;
+        }
+        if (event.kind === "rx") {
+          handleRx(event);
+        }
+      }
+
+      function tick(frameMs) {
+        if (!state.playback.isPlaying || !state.dataset) {
+          return;
+        }
+
+        if (!state.playback.lastFrameMs) {
+          state.playback.lastFrameMs = frameMs;
+        }
+
+        const deltaMs = frameMs - state.playback.lastFrameMs;
+        state.playback.lastFrameMs = frameMs;
+        state.playback.currentUs += deltaMs * 1000 * state.playback.speed;
+
+        while (
+          state.playback.nextEventIndex < state.dataset.events.length &&
+          state.dataset.events[state.playback.nextEventIndex].timeUs <= state.playback.currentUs
+        ) {
+          dispatchEvent(state.dataset.events[state.playback.nextEventIndex]);
+          state.playback.nextEventIndex += 1;
+        }
+
+        if (state.playback.currentUs >= state.playback.durationUs) {
+          state.playback.currentUs = state.playback.durationUs;
+          state.playback.isPlaying = false;
+          updateTimeline();
+          setStatus("回放结束", "green");
+          addLogEntry({
+            label: "DONE",
+            message: "日志回放结束，可以点击“重新播放”再次观察碰撞和广播扩散过程。",
+            timeUs: state.playback.durationUs,
+            tone: "ok"
+          });
+          return;
+        }
+
+        updateTimeline();
+        requestAnimationFrame(tick);
+      }
+
+      function play() {
+        if (!state.dataset) {
+          setStatus("还没有加载日志", "amber");
+          return;
+        }
+
+        if (state.playback.currentUs >= state.playback.durationUs) {
+          replay();
+          return;
+        }
+
+        if (state.playback.isPlaying) {
+          return;
+        }
+
+        state.playback.isPlaying = true;
+        state.playback.lastFrameMs = 0;
+        setStatus("回放中", "green");
+        requestAnimationFrame(tick);
+      }
+
+      function pause() {
+        if (!state.playback.isPlaying) {
+          return;
+        }
+        state.playback.isPlaying = false;
+        setStatus("已暂停", "amber");
+      }
+
+      function replay() {
+        if (!state.dataset) {
+          return;
+        }
+        resetPlayback(true);
+        addLogEntry({
+          label: "SYS",
+          message: `已装载 ${state.sourceName}，开始按仿真时间回放 ${state.dataset.txList.length} 条 TX 和 ${state.dataset.rxList.length} 条 RX。`,
+          timeUs: 0,
+          tone: "cyan"
+        });
+        play();
+      }
+
+      function loadLogText(text, sourceName) {
+        const records = parseJsonLines(text);
+        state.dataset = buildDataset(records);
+        state.sourceName = sourceName;
+        state.playback.speed = Number(dom.speedSelect.value) || 1;
+        dom.sourceName.textContent = sourceName;
+        dom.datasetCounts.textContent = `${state.dataset.nodes.length} / ${state.dataset.txList.length} / ${state.dataset.rxList.length}`;
+        renderNodes();
+        resetPlayback(true);
+        setStatus(`已加载 ${sourceName}`, "cyan");
+        replay();
+      }
+
+      async function loadDefaultLog() {
+        const embeddedText = document.getElementById("embedded-net-log").textContent.trim();
+
+        try {
+          const response = await fetch("net.log", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const text = await response.text();
+          loadLogText(text, "net.log");
+        } catch (error) {
+          loadLogText(embeddedText, "embedded net.log");
+          setStatus("已加载内置 net.log 副本", "amber");
+          addLogEntry({
+            label: "SYS",
+            message: "浏览器未直接读取到外部 net.log，通常是 file:// 打开页面导致；当前已切换到内置同内容示例。",
+            timeUs: 0,
+            tone: "lost"
+          });
+        }
+      }
+
+      function handleResize() {
+        if (!state.dataset) {
+          return;
+        }
+
+        const keepUs = state.playback.currentUs;
+        const wasPlaying = state.playback.isPlaying;
+        state.playback.isPlaying = false;
+        renderNodes();
+        clearTransientLayers();
+
+        state.nodeElements.forEach((node) => {
+          node.dataset.state = "";
+        });
+
+        state.playback.currentUs = keepUs;
+        state.playback.nextEventIndex = state.dataset.events.findIndex((event) => event.timeUs > keepUs);
+        if (state.playback.nextEventIndex === -1) {
+          state.playback.nextEventIndex = state.dataset.events.length;
+        }
+        updateTimeline();
+
+        if (wasPlaying) {
+          play();
+        }
+      }
+
+      dom.speedSelect.addEventListener("change", () => {
+        state.playback.speed = Number(dom.speedSelect.value) || 1;
+        setStatus(`速度已切换到 ${state.playback.speed}x`, "cyan");
+      });
+
+      dom.btnPlay.addEventListener("click", play);
+      dom.btnPause.addEventListener("click", pause);
+      dom.btnReplay.addEventListener("click", replay);
+      dom.btnLoadDefault.addEventListener("click", loadDefaultLog);
+
+      dom.fileInput.addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+          return;
+        }
+
+        const text = await file.text();
+        loadLogText(text, file.name);
+      });
+
+      window.addEventListener("resize", () => {
+        window.clearTimeout(handleResize.timer);
+        handleResize.timer = window.setTimeout(handleResize, 180);
+      });
+
+      ensureBubbleLoop();
+      updateTimeline();
+      updateStats();
+      addLogEntry({
+        label: "SYS",
+        message: "页面已初始化，默认会自动尝试装载根目录的 net.log。",
+        timeUs: 0,
+        tone: "cyan"
+      });
+      loadDefaultLog();
+    })();
+  </script>
+</body>
+</html>
