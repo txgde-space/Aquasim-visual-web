@@ -378,6 +378,22 @@ body {
   background: rgba(8, 15, 28, 0.92);
 }
 
+.lifecycle-summary {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  background: rgba(8, 25, 44, 0.75);
+  color: #dbeafe;
+  font-size: 0.9rem;
+}
+
+.lifecycle-list {
+  margin-bottom: 0.75rem;
+}
+
 .log-item {
   position: relative;
   overflow: hidden;

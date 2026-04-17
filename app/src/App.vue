@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import netLogText from './assets/net.log?raw'
+import netLogDefaultText from './assets/net.log?raw'
+import netLogMultiHopText from './assets/net_multihop.log?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
@@ -129,6 +130,7 @@ const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
 
 const normalizePacket = (packet, index) => {
   const packetId = String(packet.packet_id || packet.tx_id || `pkt-${index + 1}`)
+  const eventId = String(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`)
   const txStartUs = normalizeTime(packet.tx_start_us ?? packet.start_us)
   const txDurationUs = Math.max(1, normalizeTime(packet.tx_duration_us ?? packet.duration_us))
   const txEndUs = normalizeTime(packet.tx_end_us ?? packet.end_us ?? (txStartUs + txDurationUs))
@@ -143,7 +145,7 @@ const normalizePacket = (packet, index) => {
   return {
     ...packet,
     type: 'packet',
-    eventId: packetId,
+    eventId,
     packet_id: packetId,
     src: Number(packet.src),
     tx_start_us: txStartUs,
@@ -165,11 +167,14 @@ const buildPacketsFromLegacy = (txRows, rxRows) => {
 
   return txRows.map((txItem, index) => ({
     type: 'packet',
+    event_id: String(txItem.tx_id || `tx-${index + 1}`),
+    tx_id: String(txItem.tx_id || `tx-${index + 1}`),
     packet_id: String(txItem.packet_uid || txItem.tx_id || `pkt-${index + 1}`),
     src: Number(txItem.src),
     tx_start_us: normalizeTime(txItem.start_us),
     tx_duration_us: Math.max(1, normalizeTime(txItem.duration_us)),
     receivers: (rxByTx.get(txItem.tx_id) || []).map((rxItem) => ({
+      receiver_id: String(rxItem.rx_id || `${txItem.tx_id || `tx-${index + 1}`}-rx-${rxItem.dst || 'x'}`),
       dst: Number(rxItem.dst),
       rx_start_us: normalizeTime(rxItem.start_us),
       rx_duration_us: Math.max(1, normalizeTime(rxItem.duration_us || txItem.duration_us)),
@@ -218,19 +223,43 @@ const distanceMeters = (a, b) => {
   return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }
 
-const baseData = parseLog(netLogText)
-const nodesState = ref(enforceMinGap(baseData.nodes))
-const packetRows = ref(
-  (baseData.packets.length > 0 ? baseData.packets : buildPacketsFromLegacy(baseData.tx, baseData.rx))
-    .map((packet, index) => normalizePacket(packet, index)),
+const LOG_SOURCES = Object.freeze({
+  default: {
+    label: '默认日志（net.log）',
+    raw: netLogDefaultText,
+  },
+  multihop: {
+    label: '多跳转发日志（net_multihop.log）',
+    raw: netLogMultiHopText,
+  },
+})
+
+const normalizePacketsFromParsed = (parsed) => (
+  (parsed.packets.length > 0 ? parsed.packets : buildPacketsFromLegacy(parsed.tx, parsed.rx))
+    .map((packet, index) => normalizePacket(packet, index))
 )
-const parseErrors = ref(baseData.parseErrors)
+
+const initialParsed = parseLog(LOG_SOURCES.default.raw)
+const logSourceKey = ref('default')
+const nodesState = ref(enforceMinGap(initialParsed.nodes))
+const packetRows = ref(normalizePacketsFromParsed(initialParsed))
+const parseErrors = ref(initialParsed.parseErrors)
+const metaState = ref(initialParsed.meta)
 
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
-const packetById = computed(() => new Map(packetRows.value.map((packet) => [packet.packet_id, packet])))
+const packetByPacketId = computed(() => {
+  const map = new Map()
+  for (const packet of packetRows.value) {
+    const prev = map.get(packet.packet_id)
+    if (!prev || normalizeTime(packet.tx_start_us) < normalizeTime(prev.tx_start_us)) {
+      map.set(packet.packet_id, packet)
+    }
+  }
+  return map
+})
 
 const packets = computed(() => {
-  const packetMap = packetById.value
+  const packetMap = packetByPacketId.value
 
   return packetRows.value
     .map((packet) => {
@@ -261,11 +290,13 @@ const packets = computed(() => {
 })
 
 const packetsMaxEndUs = computed(() => packets.value.reduce((maxEnd, packet) => Math.max(maxEnd, packet.timeEnd), 0))
-const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(baseData.meta.sim_end_us), packetsMaxEndUs.value))
+const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(metaState.value.sim_end_us), packetsMaxEndUs.value))
 const currentTime = ref(0)
 const rangeProgressStyle = computed(() => `${((currentTime.value / Math.max(1, cycleEndUs.value)) * 100).toFixed(2)}%`)
 
 const focusedPacketId = ref(null)
+const replayMode = ref('global')
+const selectedLifecyclePacketId = ref('')
 const isPlaying = ref(false)
 const speed = ref(1)
 const showAllActivePackets = ref(true)
@@ -325,12 +356,59 @@ const packetEntries = computed(() => packets.value.map((packet) => {
   }
 }))
 
+const lifecycleGroups = computed(() => {
+  const groups = new Map()
+  for (const entry of packetEntries.value) {
+    const key = entry.packet_id
+    const existing = groups.get(key) || {
+      packet_id: key,
+      sourceLabel: entry.sourceLabel,
+      startUs: Number.POSITIVE_INFINITY,
+      endUs: 0,
+      segments: [],
+    }
+    existing.startUs = Math.min(existing.startUs, entry.startUs)
+    existing.endUs = Math.max(existing.endUs, entry.endUs)
+    existing.segments.push(entry)
+    groups.set(key, existing)
+  }
+
+  return [...groups.values()]
+    .map((group) => {
+      const sortedSegments = group.segments.slice().sort((a, b) => a.startUs - b.startUs)
+      const allReceivers = sortedSegments.flatMap((segment) => segment.receivers)
+      const okCount = allReceivers.filter((receiver) => receiver.status === 'ok').length
+      const failCount = allReceivers.length - okCount
+      const rxrxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
+      const rxtxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
+      const packetKind = failCount === 0 ? 'ok' : (okCount > 0 ? 'mixed' : 'fail')
+      const totalDurationUs = Math.max(1, group.endUs - group.startUs)
+      const progressPct = clampRatio((currentTime.value - group.startUs) / totalDurationUs) * 100
+
+      return {
+        ...group,
+        segments: sortedSegments,
+        okCount,
+        failCount,
+        rxrxCount,
+        rxtxCount,
+        packetKind,
+        packetKindLabel: packetTagLabel(packetKind),
+        packetKindClass: packetTagClass(packetKind),
+        packetDurationLabel: timeDisplay(totalDurationUs),
+        prettyTime: timeDisplay(group.startUs),
+        progressPct,
+      }
+    })
+    .sort((a, b) => a.startUs - b.startUs)
+})
+
 const visiblePacketEntries = computed(() => packetEntries.value.slice(-120))
 
 const currentPacketIds = computed(() => new Set(
   packetEntries.value
     .filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
-    .map((packet) => packet.packet_id),
+    .map((packet) => packet.eventId),
 ))
 
 const activePacket = computed(() => {
@@ -345,11 +423,78 @@ const activePacket = computed(() => {
 
 const focusedPacket = computed(() => (
   focusedPacketId.value
-    ? packetEntries.value.find((packet) => packet.packet_id === focusedPacketId.value) || null
+    ? packetEntries.value.find((packet) => packet.eventId === focusedPacketId.value || packet.packet_id === focusedPacketId.value) || null
     : null
 ))
 
+const lifecyclePacketOptions = computed(() => lifecycleGroups.value.map((packet) => ({
+  id: packet.packet_id,
+  label: `${packet.packet_id} · ${packet.sourceLabel} · ${packet.segments.length}段`,
+  startUs: packet.startUs,
+})))
+
+const lifecyclePacket = computed(() => {
+  if (!lifecyclePacketOptions.value.length) return null
+  const targetId = selectedLifecyclePacketId.value || lifecyclePacketOptions.value[0].id
+  return lifecycleGroups.value.find((packet) => packet.packet_id === targetId) || lifecycleGroups.value[0] || null
+})
+
+const lifecycleStages = computed(() => {
+  if (!lifecyclePacket.value) return []
+
+  const stages = []
+  for (const segment of lifecyclePacket.value.segments) {
+    stages.push({
+      eventId: `${segment.eventId}-tx`,
+      type: 'tx',
+      status: 'ok',
+      title: `${segment.sourceLabel} 发射`,
+      detail: `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`,
+      startUs: segment.tx_start_us,
+      endUs: segment.tx_end_us,
+    })
+
+    for (const receiver of segment.receivers) {
+      const status = receiver.status === 'ok'
+        ? 'ok'
+        : receiver.reason === 'collision_rx_tx'
+          ? 'rxtx'
+          : receiver.reason === 'collision_rx_rx'
+            ? 'rxrx'
+            : 'fail'
+
+      stages.push({
+        eventId: receiver.receiver_id,
+        type: 'rx',
+        status,
+        title: `${receiver.dstLabel} 接收`,
+        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us)}`,
+        startUs: receiver.rx_start_us,
+        endUs: receiver.rx_end_us,
+      })
+    }
+  }
+
+  return stages
+    .sort((a, b) => a.startUs - b.startUs)
+    .map((stage) => {
+      const totalUs = Math.max(1, stage.endUs - stage.startUs)
+      const progressPct = clampRatio((currentTime.value - stage.startUs) / totalUs) * 100
+      return {
+        ...stage,
+        progressPct,
+        active: currentTime.value >= stage.startUs && currentTime.value <= stage.endUs,
+      }
+    })
+})
+
+const activeLifecycleStage = computed(() => lifecycleStages.value.find((stage) => stage.active) || null)
+
 const displayPackets = computed(() => {
+  if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
+    return lifecyclePacket.value.segments
+  }
+
   const activePackets = packetEntries.value.filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
   if (showAllActivePackets.value) return activePackets
   if (focusedPacket.value) return [focusedPacket.value]
@@ -592,6 +737,26 @@ const onSpeed = (event) => {
   speed.value = Number(event.target.value)
 }
 
+const onLogSourceChange = (event) => {
+  logSourceKey.value = event.target.value
+}
+
+const onReplayModeChange = (event) => {
+  replayMode.value = event.target.value
+  if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
+    focusedPacketId.value = lifecyclePacket.value.packet_id
+    seekTime(lifecyclePacket.value.startUs)
+  }
+}
+
+const onLifecyclePacketChange = (event) => {
+  selectedLifecyclePacketId.value = event.target.value
+  if (lifecyclePacket.value) {
+    focusedPacketId.value = lifecyclePacket.value.packet_id
+    seekTime(lifecyclePacket.value.startUs)
+  }
+}
+
 const onKeydown = (event) => {
   if (event.code !== 'Space' || (event.target && /^(INPUT|TEXTAREA|SELECT|BUTTON|OPTION)$/i.test(event.target.tagName))) {
     return
@@ -601,17 +766,22 @@ const onKeydown = (event) => {
 }
 
 const onLogSelect = (packet) => {
-  if (suppressLogClick.value === packet.packet_id) {
+  if (suppressLogClick.value === packet.eventId) {
     suppressLogClick.value = null
     return
   }
 
-  if (activeDragEvent.value && activeDragEvent.value.eventId === packet.packet_id) {
+  if (activeDragEvent.value && activeDragEvent.value.eventId === packet.eventId) {
     return
   }
 
-  focusedPacketId.value = packet.packet_id
+  focusedPacketId.value = packet.eventId
   seekTime(packet.tx_start_us)
+}
+
+const onLifecycleStageSelect = (stage) => {
+  if (!stage) return
+  seekTime(stage.startUs)
 }
 
 const onEventTrackPointerDown = (packet, event) => {
@@ -619,7 +789,7 @@ const onEventTrackPointerDown = (packet, event) => {
   event.stopPropagation()
   event.stopImmediatePropagation()
 
-  focusedPacketId.value = packet.packet_id
+  focusedPacketId.value = packet.eventId
 
   const startUs = Number(packet.startUs)
   const durationUs = Math.max(1, Number(packet.endUs - packet.startUs))
@@ -628,13 +798,13 @@ const onEventTrackPointerDown = (packet, event) => {
   seekTime(startUs + (durationUs * ratio))
 
   activeDragEvent.value = {
-    eventId: packet.packet_id,
+    eventId: packet.eventId,
     minUs: startUs,
     maxUs: startUs + durationUs,
     left: rect.left,
     width: Math.max(rect.width, 1),
   }
-  suppressLogClick.value = packet.packet_id
+  suppressLogClick.value = packet.eventId
 }
 
 const onGlobalPointerMove = (event) => {
@@ -685,6 +855,31 @@ watch(isPlaying, (next) => {
   raf = requestAnimationFrame(tick)
 })
 
+watch(logSourceKey, (nextKey) => {
+  const source = LOG_SOURCES[nextKey] || LOG_SOURCES.default
+  const parsed = parseLog(source.raw)
+  nodesState.value = enforceMinGap(parsed.nodes)
+  packetRows.value = normalizePacketsFromParsed(parsed)
+  parseErrors.value = parsed.parseErrors
+  metaState.value = parsed.meta
+
+  focusedPacketId.value = null
+  selectedLifecyclePacketId.value = ''
+  currentTime.value = 0
+  isPlaying.value = false
+  lastTs = 0
+}, { immediate: false })
+
+watch(lifecyclePacketOptions, (options) => {
+  if (!options.length) {
+    selectedLifecyclePacketId.value = ''
+    return
+  }
+  if (!options.some((option) => option.id === selectedLifecyclePacketId.value)) {
+    selectedLifecyclePacketId.value = options[0].id
+  }
+}, { immediate: true })
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('pointermove', onGlobalPointerMove)
@@ -718,7 +913,7 @@ onBeforeUnmount(() => {
       <div class="control-grid">
         <button class="btn primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
         <button class="btn" @click="reset">重置</button>
-        <button class="btn" :class="{ active: showAllActivePackets }" @click="showAllActivePackets = !showAllActivePackets">
+        <button v-if="replayMode === 'global'" class="btn" :class="{ active: showAllActivePackets }" @click="showAllActivePackets = !showAllActivePackets">
           {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
         </button>
         <label class="field">
@@ -729,6 +924,32 @@ onBeforeUnmount(() => {
             <option :value="1">1x</option>
             <option :value="2">2x</option>
             <option :value="4">4x</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>日志源</span>
+          <select class="select" :value="logSourceKey" @change="onLogSourceChange">
+            <option value="default">{{ LOG_SOURCES.default.label }}</option>
+            <option value="multihop">{{ LOG_SOURCES.multihop.label }}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>回放模式</span>
+          <select class="select" :value="replayMode" @change="onReplayModeChange">
+            <option value="global">全局模式</option>
+            <option value="lifecycle">生命周期模式</option>
+          </select>
+        </label>
+        <label v-if="replayMode === 'lifecycle'" class="field">
+          <span>选择包</span>
+          <select class="select" :value="selectedLifecyclePacketId" @change="onLifecyclePacketChange">
+            <option
+              v-for="packet in lifecyclePacketOptions"
+              :key="packet.id"
+              :value="packet.id"
+            >
+              {{ packet.label }}
+            </option>
           </select>
         </label>
         <p class="hint">声速参考：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }}</p>
@@ -748,7 +969,7 @@ onBeforeUnmount(() => {
         />
       </label>
 
-      <p class="hint">可切换显示全部活跃传播或仅显示聚焦包；点击右侧某个包会把时间跳到该包开始时刻。</p>
+      <p class="hint">全局模式查看整体传播；生命周期模式可按包选择并演示单包全流程。当前日志：{{ logSourceKey === 'multihop' ? 'net_multihop.log' : 'net.log' }}</p>
     </section>
 
     <section class="panel card-grid">
@@ -792,8 +1013,42 @@ onBeforeUnmount(() => {
       </div>
 
       <aside class="card log">
-        <div class="card-title">包级日志（旧在上，新在下）</div>
-        <ul class="log-list">
+        <div class="card-title">{{ replayMode === 'lifecycle' ? '包生命周期阶段' : '包级日志（旧在上，新在下）' }}</div>
+
+        <div v-if="replayMode === 'lifecycle' && lifecyclePacket" class="lifecycle-summary">
+          <div>当前包：<strong>{{ lifecyclePacket.packet_id }}</strong></div>
+          <div>源节点：{{ lifecyclePacket.sourceLabel }}</div>
+          <div>生命周期：{{ timeDisplay(lifecyclePacket.startUs) }} - {{ timeDisplay(lifecyclePacket.endUs) }}</div>
+          <div>当前阶段：{{ activeLifecycleStage ? activeLifecycleStage.title : '无' }}</div>
+        </div>
+
+        <ul v-if="replayMode === 'lifecycle'" class="log-list lifecycle-list">
+          <li v-if="!lifecycleStages.length" class="log-item empty">暂无阶段数据</li>
+          <li
+            v-for="stage in lifecycleStages"
+            :key="stage.eventId"
+            class="log-item"
+            :class="{ 'log-item-active': stage.active }"
+            @click="onLifecycleStageSelect(stage)"
+          >
+            <div class="event-track" @pointerdown="onEventTrackPointerDown({ ...lifecyclePacket, eventId: stage.eventId, packet_id: stage.eventId, startUs: stage.startUs, endUs: stage.endUs }, $event)">
+              <div class="event-band" :style="{ width: `${stage.progressPct}%` }" aria-hidden="true"></div>
+            </div>
+            <div class="log-content">
+              <div class="log-head">
+                <span class="time">{{ timeDisplay(stage.startUs) }}</span>
+                <span class="tag" :class="stage.type === 'tx' ? 'tag-ok' : (stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' ? 'tag-fail' : 'tag-mixed'))">
+                  {{ stage.type.toUpperCase() }}
+                </span>
+                <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs) }}</span>
+                <span class="packet-title">{{ stage.title }}</span>
+              </div>
+              <div class="packet-hint">{{ stage.detail }}</div>
+            </div>
+          </li>
+        </ul>
+
+        <ul v-if="replayMode === 'global'" class="log-list">
           <li v-if="parseErrors.length" class="log-item parse-error">
             日志解析失败：{{ parseErrors.length }} 条
           </li>
@@ -802,11 +1057,11 @@ onBeforeUnmount(() => {
           </li>
           <li
             v-for="packet in visiblePacketEntries"
-            :key="packet.packet_id"
+            :key="packet.eventId"
             class="log-item"
             :class="{
-              'log-item-active': currentPacketIds.has(packet.packet_id),
-              'log-item-focused': focusedPacketId === packet.packet_id,
+              'log-item-active': currentPacketIds.has(packet.eventId),
+              'log-item-focused': focusedPacketId === packet.eventId,
             }"
             @click="onLogSelect(packet)"
           >
@@ -819,7 +1074,7 @@ onBeforeUnmount(() => {
                 <span class="time">{{ packet.prettyTime }}</span>
                 <span class="tag" :class="packet.packetKindClass">{{ packet.packetKindLabel }}</span>
                 <span class="duration">总历时 {{ packet.packetDurationLabel }}</span>
-                <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} 发射广播</span>
+                <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} 发射（段 {{ packet.eventId }}）</span>
                 <span class="packet-hint">成功 {{ packet.okCount }} / rx-rx {{ packet.rxrxCount }} / rx-tx {{ packet.rxtxCount }}</span>
               </div>
 
