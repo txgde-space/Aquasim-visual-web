@@ -1,62 +1,187 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import netLogText from './assets/net.log?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
+
+const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
 
 const SOUND_SPEED_MPS = 1500
 const MIN_NODE_GAP_M = 1000
 const MIN_SIM_TIME_US = 10_000_000
+const RX_OK_HOLD_US = 180_000
+const RX_FAIL_HOLD_US = 220_000
+
+const normalizeTime = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+const clampRatio = (value) => Math.max(0, Math.min(1, Number(value) || 0))
+
+const timeDisplay = (us) => {
+  if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)} s`
+  return `${(us / 1000).toFixed(2)} ms`
+}
+
+const reasonLabel = (reason) => {
+  if (reason === 'collision_rx_rx') return 'rx-rx 冲突'
+  if (reason === 'collision_rx_tx') return 'rx-tx 冲突'
+  if (reason === 'below_rx_thresh') return '门限不足'
+  return '接收失败'
+}
+
+const packetTagLabel = (kind) => {
+  if (kind === 'ok') return '全成功'
+  if (kind === 'mixed') return '混合结果'
+  return '全失败'
+}
+
+const packetTagClass = (kind) => {
+  if (kind === 'ok') return 'tag-ok'
+  if (kind === 'mixed') return 'tag-mixed'
+  return 'tag-fail'
+}
+
+const receiverPillClass = (receiver) => {
+  if (receiver.status === 'ok') return 'receiver-pill-ok'
+  if (receiver.reason === 'collision_rx_tx') return 'receiver-pill-rxtx'
+  if (receiver.reason === 'collision_rx_rx') return 'receiver-pill-rxrx'
+  return 'receiver-pill-fail'
+}
+
+const deriveReasonFromLegacy = (result) => {
+  if (result === 'collision') return 'collision_rx_rx'
+  if (result === 'half_duplex_busy') return 'collision_rx_tx'
+  if (result === 'below_snr' || result === 'out_of_range') return 'below_rx_thresh'
+  return 'decode_error'
+}
 
 const parseLog = (raw) => {
-  const lines = String(raw ?? '').split('\n').map((line) => line.trim()).filter(Boolean)
+  const lines = String(raw ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
 
   const nodes = []
+  const packets = []
   const tx = []
   const rx = []
   const parseErrors = []
   const meta = {
     type: 'meta',
-    schema: 'uan-vis-log/v1',
+    schema: 'uan-vis-packet-log/v1',
     time_unit: 'us',
+    distance_unit: 'm',
     sim_end_us: 0,
   }
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line)
+
       if (obj.type === 'meta') {
         Object.assign(meta, obj)
-      } else if (obj.type === 'node' && Number.isFinite(obj.node_id)) {
-        nodes.push({ ...obj })
+      } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
+        nodes.push({
+          ...obj,
+          node_id: Number(obj.node_id),
+          x: Number(obj.x ?? 0),
+          y: Number(obj.y ?? 0),
+          z: Number(obj.z ?? 0),
+        })
+      } else if (obj.type === 'packet' && Number.isFinite(Number(obj.src))) {
+        packets.push({ ...obj })
       } else if (obj.type === 'tx') {
-        tx.push({
-          ...obj,
-          timeStart: Number(obj.start_us ?? 0),
-          timeEnd: Number(obj.end_us ?? ((obj.start_us ?? 0) + (obj.duration_us ?? 0))),
-          eventId: obj.tx_id || `tx-${tx.length}`,
-        })
+        tx.push({ ...obj })
       } else if (obj.type === 'rx') {
-        rx.push({
-          ...obj,
-          eventId: obj.rx_id || `rx-${rx.length}`,
-        })
+        rx.push({ ...obj })
       }
     } catch {
       parseErrors.push(line)
     }
   }
 
-  const allEventEnds = [...tx.map((i) => i.timeEnd)]
-  if (!Number.isFinite(meta.sim_end_us) || meta.sim_end_us <= 0) {
-    const maxEnd = allEventEnds.length ? Math.max(...allEventEnds) : 0
-    meta.sim_end_us = maxEnd
+  return { nodes, packets, tx, rx, parseErrors, meta }
+}
+
+const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
+  const startUs = normalizeTime(receiver.rx_start_us ?? receiver.start_us)
+  const durationUs = Math.max(1, normalizeTime(receiver.rx_duration_us ?? receiver.duration_us ?? fallbackDurationUs))
+  const rawStatus = receiver.status
+  const status = rawStatus === 'ok' || receiver.result === 'ok' ? 'ok' : 'fail'
+
+  return {
+    ...receiver,
+    receiver_id: receiver.receiver_id || `${packetId}-rx-${index + 1}`,
+    dst: Number(receiver.dst),
+    status,
+    reason: status === 'ok' ? null : String(receiver.reason || deriveReasonFromLegacy(receiver.result)),
+    with: Array.isArray(receiver.with)
+      ? receiver.with.map(String)
+      : Array.isArray(receiver.collided_with)
+        ? receiver.collided_with.map(String)
+        : [],
+    rx_start_us: startUs,
+    rx_duration_us: durationUs,
+    rx_end_us: startUs + durationUs,
+  }
+}
+
+const normalizePacket = (packet, index) => {
+  const packetId = String(packet.packet_id || packet.tx_id || `pkt-${index + 1}`)
+  const txStartUs = normalizeTime(packet.tx_start_us ?? packet.start_us)
+  const txDurationUs = Math.max(1, normalizeTime(packet.tx_duration_us ?? packet.duration_us))
+  const txEndUs = normalizeTime(packet.tx_end_us ?? packet.end_us ?? (txStartUs + txDurationUs))
+  const receivers = Array.isArray(packet.receivers)
+    ? packet.receivers
+      .map((receiver, receiverIndex) => normalizeReceiver(packetId, receiver, receiverIndex, txDurationUs))
+      .filter((receiver) => Number.isFinite(receiver.dst))
+      .sort((a, b) => a.rx_start_us - b.rx_start_us)
+    : []
+
+  const packetEndUs = Math.max(txEndUs, ...receivers.map((receiver) => receiver.rx_end_us))
+  return {
+    ...packet,
+    type: 'packet',
+    eventId: packetId,
+    packet_id: packetId,
+    src: Number(packet.src),
+    tx_start_us: txStartUs,
+    tx_duration_us: txDurationUs,
+    tx_end_us: txEndUs,
+    timeStart: txStartUs,
+    timeEnd: packetEndUs,
+    receivers,
+  }
+}
+
+const buildPacketsFromLegacy = (txRows, rxRows) => {
+  const rxByTx = new Map()
+  for (const item of rxRows) {
+    const list = rxByTx.get(item.tx_id) || []
+    list.push(item)
+    rxByTx.set(item.tx_id, list)
   }
 
-  return { nodes, tx, rx, parseErrors, meta }
+  return txRows.map((txItem, index) => ({
+    type: 'packet',
+    packet_id: String(txItem.packet_uid || txItem.tx_id || `pkt-${index + 1}`),
+    src: Number(txItem.src),
+    tx_start_us: normalizeTime(txItem.start_us),
+    tx_duration_us: Math.max(1, normalizeTime(txItem.duration_us)),
+    receivers: (rxByTx.get(txItem.tx_id) || []).map((rxItem) => ({
+      dst: Number(rxItem.dst),
+      rx_start_us: normalizeTime(rxItem.start_us),
+      rx_duration_us: Math.max(1, normalizeTime(rxItem.duration_us || txItem.duration_us)),
+      status: rxItem.result === 'ok' ? 'ok' : 'fail',
+      reason: rxItem.result === 'ok' ? null : deriveReasonFromLegacy(rxItem.result),
+      with: Array.isArray(rxItem.collided_with) ? rxItem.collided_with.map(String) : [],
+    })),
+  }))
 }
 
 const enforceMinGap = (nodes) => {
-  if (nodes.length < 2) return nodes.map((n) => ({ ...n }))
+  if (nodes.length < 2) return nodes.map((node) => ({ ...node }))
 
   let minGap = Infinity
   for (let i = 0; i < nodes.length; i += 1) {
@@ -72,17 +197,17 @@ const enforceMinGap = (nodes) => {
   }
 
   if (!Number.isFinite(minGap) || minGap >= MIN_NODE_GAP_M || minGap <= 0) {
-    return nodes.map((n) => ({ ...n }))
+    return nodes.map((node) => ({ ...node }))
   }
 
-  const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length
-  const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length
+  const cx = nodes.reduce((sum, node) => sum + node.x, 0) / nodes.length
+  const cy = nodes.reduce((sum, node) => sum + node.y, 0) / nodes.length
   const scale = MIN_NODE_GAP_M / minGap
 
-  return nodes.map((n) => ({
-    ...n,
-    x: cx + (n.x - cx) * scale,
-    y: cy + (n.y - cy) * scale,
+  return nodes.map((node) => ({
+    ...node,
+    x: cx + (node.x - cx) * scale,
+    y: cy + (node.y - cy) * scale,
   }))
 }
 
@@ -93,99 +218,58 @@ const distanceMeters = (a, b) => {
   return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }
 
-const delayUsFromDistance = (a, b) => (distanceMeters(a, b) / SOUND_SPEED_MPS) * 1e6
-
-const normalizeTime = (us) => Number(us) || 0
-const isCollisionEvent = (result, collidedWith) => {
-  if (result === 'ok') return false
-  if (Array.isArray(collidedWith) && collidedWith.length > 0) return true
-  return result != null && result !== ''
-}
-const formatPacketStatus = (isCollision) => (isCollision ? 'collision' : 'normal')
-
 const baseData = parseLog(netLogText)
 const nodesState = ref(enforceMinGap(baseData.nodes))
-const txRows = ref(baseData.tx)
-const rxRows = ref(baseData.rx)
+const packetRows = ref(
+  (baseData.packets.length > 0 ? baseData.packets : buildPacketsFromLegacy(baseData.tx, baseData.rx))
+    .map((packet, index) => normalizePacket(packet, index)),
+)
 const parseErrors = ref(baseData.parseErrors)
 
-const txs = computed(() => txRows.value.map((item) => {
-  const start = normalizeTime(item.start_us)
-  const duration = normalizeTime(item.duration_us)
-  return {
-    ...item,
-    timeStart: start,
-    timeEnd: start + duration,
-    duration_us: duration,
-  }
-}))
-
-const txById = computed(() => new Map(txs.value.map((item) => [item.tx_id, item])))
-
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
+const packetById = computed(() => new Map(packetRows.value.map((packet) => [packet.packet_id, packet])))
 
-const rxEvents = computed(() => {
-  const derived = rxRows.value.map((item) => {
-    const txItem = txById.value.get(item.tx_id)
-    const src = nodeById.value.get(item.src)
-    const dst = nodeById.value.get(item.dst)
+const packets = computed(() => {
+  const packetMap = packetById.value
 
-    const baseStart = normalizeTime(item.start_us || (txItem ? txItem.timeStart : 0))
-    const duration = normalizeTime(item.duration_us || (txItem ? txItem.duration_us : 0))
-    const distanceM = src && dst ? distanceMeters(src, dst) : normalizeTime(item.distance_m)
-    const delayUs = src && dst ? delayUsFromDistance(src, dst) : normalizeTime(item.prop_delay_us)
+  return packetRows.value
+    .map((packet) => {
+      const receivers = packet.receivers.map((receiver) => {
+        let collisionStartUs = receiver.rx_start_us
+        if (receiver.reason === 'collision_rx_rx' && receiver.with.length) {
+          for (const packetId of receiver.with) {
+            const otherPacket = packetMap.get(packetId)
+            const otherReceiver = otherPacket?.receivers.find((item) => item.dst === receiver.dst)
+            if (!otherReceiver) continue
+            collisionStartUs = Math.max(collisionStartUs, Math.max(receiver.rx_start_us, otherReceiver.rx_start_us))
+          }
+        }
 
-    const startUs = txItem ? txItem.timeStart + delayUs : baseStart
+        return {
+          ...receiver,
+          collision_start_us: collisionStartUs,
+        }
+      })
 
-    return {
-      ...item,
-      distance_m: distanceM,
-      prop_delay_us: delayUs,
-      timeStart: startUs,
-      timeEnd: startUs + duration,
-      duration_us: duration,
-      txStartUs: txItem ? txItem.timeStart : undefined,
-      collision: isCollisionEvent(item.result, item.collided_with),
-    }
-  })
-
-  const maxEnd = derived.reduce((m, item) => Math.max(m, item.timeEnd), 0)
-  if (!baseData.meta.sim_end_us || baseData.meta.sim_end_us < maxEnd) {
-    baseData.meta.sim_end_us = maxEnd
-  }
-  return derived
+      return {
+        ...packet,
+        receivers,
+      }
+    })
+    .slice()
+    .sort((a, b) => a.tx_start_us - b.tx_start_us)
 })
 
-const rxEventsByTx = computed(() => {
-  const byTx = new Map()
-  for (const rx of rxEvents.value) {
-    const list = byTx.get(rx.tx_id) || []
-    list.push(rx)
-    byTx.set(rx.tx_id, list)
-  }
-  for (const [txId, events] of byTx.entries()) {
-    events.sort((a, b) => a.timeStart - b.timeStart)
-    byTx.set(txId, events)
-  }
-  return byTx
-})
-
-const txStatusById = computed(() => {
-  const statusMap = new Map()
-  for (const tx of txs.value) {
-    const related = rxEventsByTx.value.get(tx.tx_id) || []
-    const hasCollision = related.some((rx) => rx.collision)
-    statusMap.set(tx.tx_id, formatPacketStatus(hasCollision))
-  }
-  return statusMap
-})
-
-const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(baseData.meta.sim_end_us)))
-const currentTime = ref(Math.min(300_000, cycleEndUs.value))
+const packetsMaxEndUs = computed(() => packets.value.reduce((maxEnd, packet) => Math.max(maxEnd, packet.timeEnd), 0))
+const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(baseData.meta.sim_end_us), packetsMaxEndUs.value))
+const currentTime = ref(0)
 const rangeProgressStyle = computed(() => `${((currentTime.value / Math.max(1, cycleEndUs.value)) * 100).toFixed(2)}%`)
 
+const focusedPacketId = ref(null)
 const isPlaying = ref(false)
 const speed = ref(1)
+const showAllActivePackets = ref(true)
+const visualMode = ref('2d')
 const activeDragEvent = ref(null)
 const suppressLogClick = ref(null)
 let raf = 0
@@ -193,160 +277,315 @@ let lastTs = 0
 
 const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
 
-const timeDisplay = (us) => `${(us / 1000).toFixed(2)} ms`
-
-const activeTxs = computed(() => txs.value
-  .filter((tx) => tx.timeStart <= currentTime.value && currentTime.value <= tx.timeEnd)
-  .map((tx) => {
-    const src = nodeById.value.get(tx.src)
-    if (!src) return null
-    const progress = (currentTime.value - tx.timeStart) / Math.max(tx.duration_us, 1)
-    const ratio = Math.max(0, Math.min(1, progress))
-    return {
-      ...tx,
-      source: src,
-      radius: 18 + ratio * 250,
-      opacity: Math.max(0, 1 - ratio),
-    }
-  })
-  .filter(Boolean)
-)
-
-const activeRxs = computed(() => rxEvents.value
-  .filter((rx) => rx.timeStart <= currentTime.value && currentTime.value <= rx.timeEnd)
-  .map((rx) => {
-    const src = nodeById.value.get(rx.src)
-    const dst = nodeById.value.get(rx.dst)
-    if (!src || !dst) return null
-    const progress = (currentTime.value - rx.timeStart) / Math.max(rx.duration_us, 1)
-    const ratio = Math.max(0, Math.min(1, progress))
-    return {
-      ...rx,
-      srcPos: src,
-      dstPos: dst,
-      travelX: src.x + (dst.x - src.x) * ratio,
-      travelY: src.y + (dst.y - src.y) * ratio,
-      label: `${rx.rx_id}`,
-    }
-  })
-  .filter(Boolean)
-)
-
-const logEvents = computed(() => {
-  const txRows = txs.value.map((tx) => {
-    const src = nodeById.value.get(tx.src)
-    const txDurationUs = normalizeTime(tx.duration_us)
-    const txStart = normalizeTime(tx.timeStart)
-    const txEnd = normalizeTime(tx.timeEnd)
-    const txDurationSec = Math.max(1, txEnd - txStart)
-    const txTrackProgress = Math.max(0, Math.min(100, ((currentTime.value - txStart) / txDurationSec) * 100))
+const packetEntries = computed(() => packets.value.map((packet) => {
+  const sourceNode = nodeById.value.get(packet.src)
+  const receivers = packet.receivers.map((receiver) => {
+    const dstNode = nodeById.value.get(receiver.dst)
+    const reason = receiver.status === 'ok' ? '成功' : reasonLabel(receiver.reason)
+    const tone = receiver.status === 'ok'
+      ? 'ok'
+      : receiver.reason === 'collision_rx_tx'
+        ? 'rxtx'
+        : receiver.reason === 'collision_rx_rx'
+          ? 'rxrx'
+          : 'fail'
 
     return {
-      ...tx,
-      startUs: txStart,
-      endUs: txEnd,
-      durationUs: txDurationUs,
-      durationMs: (txDurationUs / 1000).toFixed(2),
-      prettyTime: timeDisplay(tx.timeStart),
-      sourceLabel: src ? src.name : `Node-${tx.src}`,
-      dstLabel: tx.dst != null ? `Node-${tx.dst}` : null,
-      delayMs: '0.00',
-      status: txStatusById.value.get(tx.tx_id) || 'normal',
-      trackProgressPct: Number.isFinite(txTrackProgress) ? txTrackProgress : 0,
-      _eventKind: 0,
-      type: 'tx',
+      ...receiver,
+      dstLabel: dstNode ? dstNode.name : `Node-${receiver.dst}`,
+      reasonLabel: reason,
+      tone,
     }
   })
 
-  const rxRows = rxEvents.value.map((rx) => {
-    const dst = nodeById.value.get(rx.dst)
-    const rxSrc = nodeById.value.get(rx.src)
-    const rxDurationUs = normalizeTime(rx.duration_us)
-    const rxStart = normalizeTime(rx.timeStart)
-    const rxEnd = normalizeTime(rx.timeEnd)
-    const rxDurationSec = Math.max(1, rxEnd - rxStart)
-    const rxTrackProgress = Math.max(0, Math.min(100, ((currentTime.value - rxStart) / rxDurationSec) * 100))
+  const okCount = receivers.filter((receiver) => receiver.status === 'ok').length
+  const failCount = receivers.length - okCount
+  const rxrxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
+  const rxtxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
+  const packetKind = failCount === 0 ? 'ok' : (okCount > 0 ? 'mixed' : 'fail')
+  const totalDurationUs = Math.max(1, packet.timeEnd - packet.tx_start_us)
+  const progressPct = clampRatio((currentTime.value - packet.tx_start_us) / totalDurationUs) * 100
 
-    return {
-      ...rx,
-      startUs: rxStart,
-      endUs: rxEnd,
-      durationUs: rxDurationUs,
-      durationMs: (rxDurationUs / 1000).toFixed(2),
-      prettyTime: timeDisplay(rx.timeStart),
-      sourceLabel: rxSrc ? rxSrc.name : `Node-${rx.src}`,
-      dstLabel: dst ? dst.name : `Node-${rx.dst}`,
-      delayMs: ((rx.prop_delay_us || 0) / 1000).toFixed(2),
-      status: formatPacketStatus(rx.collision),
-      trackProgressPct: Number.isFinite(rxTrackProgress) ? rxTrackProgress : 0,
-      _eventKind: 1,
-      type: 'rx',
+  return {
+    ...packet,
+    sourceLabel: sourceNode ? sourceNode.name : `Node-${packet.src}`,
+    receivers,
+    okCount,
+    failCount,
+    rxrxCount,
+    rxtxCount,
+    packetKind,
+    packetKindLabel: packetTagLabel(packetKind),
+    packetKindClass: packetTagClass(packetKind),
+    packetDurationLabel: timeDisplay(totalDurationUs),
+    prettyTime: timeDisplay(packet.tx_start_us),
+    progressPct,
+    startUs: packet.tx_start_us,
+    endUs: packet.timeEnd,
+  }
+}))
+
+const visiblePacketEntries = computed(() => packetEntries.value.slice(-120))
+
+const currentPacketIds = computed(() => new Set(
+  packetEntries.value
+    .filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
+    .map((packet) => packet.packet_id),
+))
+
+const activePacket = computed(() => {
+  for (let i = packetEntries.value.length - 1; i >= 0; i -= 1) {
+    const packet = packetEntries.value[i]
+    if (currentTime.value >= packet.startUs && currentTime.value <= packet.endUs) {
+      return packet
     }
-  })
-
-  return [...txRows, ...rxRows]
-    .filter((item) => item.durationUs >= 0)
-    .sort((a, b) => {
-      const dt = normalizeTime(a.timeStart) - normalizeTime(b.timeStart)
-      if (dt !== 0) return dt
-      const kind = Number(a._eventKind) - Number(b._eventKind)
-      if (kind !== 0) return kind
-      return (a.eventId || '').localeCompare(b.eventId || '')
-    })
+  }
+  return null
 })
 
-const visibleLogEvents = computed(() => logEvents.value.slice(-120))
+const focusedPacket = computed(() => (
+  focusedPacketId.value
+    ? packetEntries.value.find((packet) => packet.packet_id === focusedPacketId.value) || null
+    : null
+))
 
-const activeEvent = computed(() => visibleLogEvents.value.find((item) => currentTime.value >= item.timeStart && currentTime.value <= item.timeEnd))
+const displayPackets = computed(() => {
+  const activePackets = packetEntries.value.filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
+  if (showAllActivePackets.value) return activePackets
+  if (focusedPacket.value) return [focusedPacket.value]
+  return activePacket.value ? [activePacket.value] : []
+})
 
 const summary = computed(() => {
-  const total = txs.value.length
-  const collision = txs.value.filter((tx) => txStatusById.value.get(tx.tx_id) === 'collision').length
-  const ok = total - collision
-  return {
-    total,
-    ok,
-    collision,
-    rate: total ? ((ok / total) * 100).toFixed(1) : '0.0',
+  let okReceivers = 0
+  let rxrxCollisions = 0
+  let rxtxCollisions = 0
+
+  for (const packet of packets.value) {
+    for (const receiver of packet.receivers) {
+      if (receiver.status === 'ok') okReceivers += 1
+      if (receiver.reason === 'collision_rx_rx') rxrxCollisions += 1
+      if (receiver.reason === 'collision_rx_tx') rxtxCollisions += 1
+    }
   }
+
+  return {
+    packetCount: packets.value.length,
+    okReceivers,
+    rxrxCollisions,
+    rxtxCollisions,
+  }
+})
+
+const txEventsByNode = computed(() => {
+  const map = new Map()
+  for (const packet of packets.value) {
+    const list = map.get(packet.src) || []
+    list.push(packet)
+    map.set(packet.src, list)
+  }
+  return map
+})
+
+const rxEventsByNode = computed(() => {
+  const map = new Map()
+  for (const packet of packets.value) {
+    for (const receiver of packet.receivers) {
+      const list = map.get(receiver.dst) || []
+      list.push({
+        ...receiver,
+        packet_id: packet.packet_id,
+        src: packet.src,
+      })
+      map.set(receiver.dst, list)
+    }
+  }
+  return map
+})
+
+const nodeVisuals = computed(() => {
+  const time = currentTime.value
+
+  return nodesState.value.map((node) => {
+    const txEvents = txEventsByNode.value.get(node.node_id) || []
+    const rxEvents = rxEventsByNode.value.get(node.node_id) || []
+
+    const activeTx = txEvents
+      .filter((packet) => time >= packet.tx_start_us && time <= packet.tx_end_us)
+      .sort((a, b) => a.tx_start_us - b.tx_start_us)
+      .at(-1) || null
+
+    const activeReceivers = rxEvents
+      .filter((receiver) => time >= receiver.rx_start_us && time <= receiver.rx_end_us)
+      .sort((a, b) => a.rx_start_us - b.rx_start_us)
+
+    const activeRxTxConflict = activeReceivers
+      .filter((receiver) => receiver.reason === 'collision_rx_tx')
+      .at(-1) || null
+
+    const activeRxRxConflict = activeReceivers
+      .filter((receiver) => receiver.reason === 'collision_rx_rx' && time >= receiver.collision_start_us)
+      .at(-1) || null
+
+    const preCollisionReceive = activeReceivers
+      .filter((receiver) => receiver.reason === 'collision_rx_rx' && time < receiver.collision_start_us)
+      .at(-1) || null
+
+    const activeReceive = activeReceivers
+      .filter((receiver) => receiver.status === 'ok')
+      .at(-1) || null
+
+    const recentSuccess = rxEvents
+      .filter((receiver) => receiver.status === 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_OK_HOLD_US)
+      .sort((a, b) => a.rx_end_us - b.rx_end_us)
+      .at(-1) || null
+
+    const recentFailure = rxEvents
+      .filter((receiver) => receiver.status !== 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_FAIL_HOLD_US)
+      .sort((a, b) => a.rx_end_us - b.rx_end_us)
+      .at(-1) || null
+
+    if (activeTx) {
+      const txProgress = clampRatio((time - activeTx.tx_start_us) / Math.max(activeTx.tx_duration_us, 1))
+      return {
+        ...node,
+        mode: 'tx',
+        fillProgress: txProgress,
+        fade: 1,
+        statusText: activeRxTxConflict ? '发送中 / rx-tx 冲突' : '发送中',
+        packetId: activeTx.packet_id,
+        overlay: activeRxTxConflict
+          ? {
+            kind: 'collision_rx_tx',
+            strength: 1,
+            packetId: activeRxTxConflict.packet_id,
+          }
+          : null,
+      }
+    }
+
+    if (activeRxRxConflict) {
+      return {
+        ...node,
+        mode: 'collision',
+        fillProgress: 1,
+        fade: 1,
+        statusText: '接收冲突',
+        packetId: activeRxRxConflict.packet_id,
+        overlay: {
+          kind: 'collision_rx_rx',
+          strength: 1,
+          packetId: activeRxRxConflict.packet_id,
+        },
+      }
+    }
+
+    if (activeReceive) {
+      return {
+        ...node,
+        mode: 'rx',
+        fillProgress: clampRatio((time - activeReceive.rx_start_us) / Math.max(activeReceive.rx_duration_us, 1)),
+        fade: 1,
+        statusText: '接收中',
+        packetId: activeReceive.packet_id,
+        overlay: null,
+      }
+    }
+
+    if (preCollisionReceive) {
+      return {
+        ...node,
+        mode: 'rx',
+        fillProgress: clampRatio((time - preCollisionReceive.rx_start_us) / Math.max(preCollisionReceive.rx_duration_us, 1)),
+        fade: 1,
+        statusText: '接收中',
+        packetId: preCollisionReceive.packet_id,
+        overlay: null,
+      }
+    }
+
+    if (recentFailure) {
+      return {
+        ...node,
+        mode: 'collision-linger',
+        fillProgress: 1,
+        fade: clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US)),
+        statusText: reasonLabel(recentFailure.reason),
+        packetId: recentFailure.packet_id,
+        overlay: {
+          kind: recentFailure.reason,
+          strength: clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US)),
+          packetId: recentFailure.packet_id,
+        },
+      }
+    }
+
+    if (recentSuccess) {
+      return {
+        ...node,
+        mode: 'rx-done',
+        fillProgress: 1,
+        fade: clampRatio(1 - ((time - recentSuccess.rx_end_us) / RX_OK_HOLD_US)),
+        statusText: '接收成功',
+        packetId: recentSuccess.packet_id,
+        overlay: null,
+      }
+    }
+
+    return {
+      ...node,
+      mode: 'idle',
+      fillProgress: 0,
+      fade: 1,
+      statusText: '空闲',
+      packetId: null,
+      overlay: null,
+    }
+  })
 })
 
 const formatNodeGap = () => {
-  const nodes = nodesState.value
-  if (nodes.length < 2) return '1.0 km'
+  if (nodesState.value.length < 2) return '1.00 km'
 
   let minGap = Infinity
-  for (let i = 0; i < nodes.length; i += 1) {
-    for (let j = i + 1; j < nodes.length; j += 1) {
-      const d = distanceMeters(nodes[i], nodes[j])
-      if (d < minGap) minGap = d
+  for (let i = 0; i < nodesState.value.length; i += 1) {
+    for (let j = i + 1; j < nodesState.value.length; j += 1) {
+      minGap = Math.min(minGap, distanceMeters(nodesState.value[i], nodesState.value[j]))
     }
   }
+
   return `${(minGap / 1000).toFixed(2)} km`
 }
 
 const togglePlay = () => {
+  if (!isPlaying.value && currentTime.value >= cycleEndUs.value) {
+    currentTime.value = 0
+    focusedPacketId.value = null
+  }
+  if (!isPlaying.value) lastTs = 0
   isPlaying.value = !isPlaying.value
 }
 
 const pauseForTool = () => {
   isPlaying.value = false
+  lastTs = 0
 }
 
 const seekTime = (us) => {
   currentTime.value = clampTime(us)
+  lastTs = 0
 }
 
 const reset = () => {
   isPlaying.value = false
+  focusedPacketId.value = null
   currentTime.value = 0
+  lastTs = 0
 }
 
 const onJump = (event) => {
-  const v = Number(event.target.value)
-  if (Number.isFinite(v)) {
-    seekTime(v)
-  }
+  const next = Number(event.target.value)
+  if (Number.isFinite(next)) seekTime(next)
 }
 
 const onSpeed = (event) => {
@@ -361,79 +600,72 @@ const onKeydown = (event) => {
   togglePlay()
 }
 
-const onLogSelect = (ev) => {
-  if (suppressLogClick.value === ev.eventId) {
+const onLogSelect = (packet) => {
+  if (suppressLogClick.value === packet.packet_id) {
     suppressLogClick.value = null
     return
   }
 
-  if (activeDragEvent.value && activeDragEvent.value.eventId === ev.eventId) {
+  if (activeDragEvent.value && activeDragEvent.value.eventId === packet.packet_id) {
     return
   }
 
-  seekTime(ev.timeStart)
+  focusedPacketId.value = packet.packet_id
+  seekTime(packet.tx_start_us)
 }
 
-const onEventTrackPointerDown = (ev, event) => {
+const onEventTrackPointerDown = (packet, event) => {
   event.preventDefault()
   event.stopPropagation()
   event.stopImmediatePropagation()
 
-  const startUs = Number(ev.startUs ?? ev.timeStart)
-  const durationUs = Math.max(1, Number(ev.durationUs ?? Math.max(0, (ev.endUs ?? 0) - (ev.startUs ?? 0))))
+  focusedPacketId.value = packet.packet_id
+
+  const startUs = Number(packet.startUs)
+  const durationUs = Math.max(1, Number(packet.endUs - packet.startUs))
   const rect = event.currentTarget.getBoundingClientRect()
-  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(rect.width, 1)))
-  seekTime(startUs + durationUs * ratio)
+  const ratio = clampRatio((event.clientX - rect.left) / Math.max(rect.width, 1))
+  seekTime(startUs + (durationUs * ratio))
 
   activeDragEvent.value = {
-    eventId: ev.eventId,
+    eventId: packet.packet_id,
     minUs: startUs,
     maxUs: startUs + durationUs,
     left: rect.left,
     width: Math.max(rect.width, 1),
   }
-  suppressLogClick.value = ev.eventId
+  suppressLogClick.value = packet.packet_id
 }
 
 const onGlobalPointerMove = (event) => {
   if (!activeDragEvent.value) return
-  const duration = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
-  const ratio = Math.min(
-    1,
-    Math.max(
-      0,
-      (event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width,
-    ),
-  )
-  seekTime(activeDragEvent.value.minUs + duration * ratio)
+
+  const durationUs = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
+  const ratio = clampRatio((event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width)
+  seekTime(activeDragEvent.value.minUs + (durationUs * ratio))
 }
 
 const onGlobalPointerUp = () => {
   if (activeDragEvent.value) {
-    const evId = activeDragEvent.value.eventId
+    const eventId = activeDragEvent.value.eventId
     requestAnimationFrame(() => {
-      if (suppressLogClick.value === evId) {
-        suppressLogClick.value = null
-      }
+      if (suppressLogClick.value === eventId) suppressLogClick.value = null
     })
   }
   activeDragEvent.value = null
 }
 
-const tick = (ts) => {
+const tick = (timestamp) => {
   if (!isPlaying.value) {
     lastTs = 0
     return
   }
 
-  if (!lastTs) {
-    lastTs = ts
-  }
+  if (!lastTs) lastTs = timestamp
+  const diff = timestamp - lastTs
+  lastTs = timestamp
 
-  const diff = ts - lastTs
-  lastTs = ts
-  const next = currentTime.value + diff * 1000 * speed.value
-
+  const next = currentTime.value + (diff * 1000 * speed.value)
   if (next >= cycleEndUs.value) {
     currentTime.value = cycleEndUs.value
     isPlaying.value = false
@@ -447,16 +679,13 @@ const tick = (ts) => {
 watch(isPlaying, (next) => {
   if (!next) {
     if (raf) cancelAnimationFrame(raf)
+    lastTs = 0
     return
   }
   raf = requestAnimationFrame(tick)
 })
 
 onMounted(() => {
-  if (currentTime.value > cycleEndUs.value) {
-    currentTime.value = cycleEndUs.value
-  }
-
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('pointermove', onGlobalPointerMove)
   window.addEventListener('pointerup', onGlobalPointerUp)
@@ -470,7 +699,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', onGlobalPointerUp)
   window.removeEventListener('pointercancel', onGlobalPointerUp)
 })
-
 </script>
 
 <template>
@@ -478,15 +706,21 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div>
         <p class="eyebrow">ns-3 Acoustic Replay</p>
-        <h1>日志可视化</h1>
+        <h1>节点状态回放</h1>
       </div>
-      <p class="meta">当前：{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }}</p>
+      <p class="meta">
+        当前：{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }}
+        <span v-if="focusedPacket"> | 聚焦：{{ focusedPacket.packet_id }}</span>
+      </p>
     </header>
 
     <section class="panel controls">
       <div class="control-grid">
         <button class="btn primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
         <button class="btn" @click="reset">重置</button>
+        <button class="btn" :class="{ active: showAllActivePackets }" @click="showAllActivePackets = !showAllActivePackets">
+          {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
+        </button>
         <label class="field">
           <span>倍速</span>
           <select class="select" :value="speed" @change="onSpeed">
@@ -497,86 +731,126 @@ onBeforeUnmount(() => {
             <option :value="4">4x</option>
           </select>
         </label>
-        <p class="hint">传输速度：1500 m/s | 节点最小间距：{{ formatNodeGap() }}</p>
+        <p class="hint">声速参考：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }}</p>
       </div>
-        <label class="field range-wrap">
-          <span>时间进度（拖拽滑条，空格键暂停/播放）</span>
-          <input
-            class="range"
-            type="range"
-            :min="0"
-            :max="cycleEndUs"
-            :step="1000"
-            :value="currentTime"
-            @input="onJump"
-            :style="{ '--range-progress': rangeProgressStyle }"
-          />
-        </label>
-      <p class="hint">说明：日志文件来源固定 `src/assets/net.log`，未写后端。
-      </p>
+
+      <label class="field range-wrap">
+        <span>全局时间进度（拖拽滑条，空格暂停/播放）</span>
+        <input
+          class="range"
+          type="range"
+          :min="0"
+          :max="cycleEndUs"
+          :step="1000"
+          :value="currentTime"
+          :style="{ '--range-progress': rangeProgressStyle }"
+          @input="onJump"
+        />
+      </label>
+
+      <p class="hint">可切换显示全部活跃传播或仅显示聚焦包；点击右侧某个包会把时间跳到该包开始时刻。</p>
     </section>
 
     <section class="panel card-grid">
       <div class="card visual">
-        <div class="card-title">节点视图（画布可拖拽）</div>
+        <div class="card-title-row">
+          <div class="card-title">节点状态视图</div>
+          <div class="view-switch" role="tablist" aria-label="视图模式">
+            <button class="view-switch-btn" :class="{ active: visualMode === '2d' }" @click="visualMode = '2d'">2D</button>
+            <button class="view-switch-btn" :class="{ active: visualMode === '3d' }" @click="visualMode = '3d'">3D</button>
+          </div>
+        </div>
         <NodeCanvas
+          v-if="visualMode === '2d'"
           :nodes="nodesState"
-          :txs="activeTxs"
-          :rxs="activeRxs"
+          :node-visuals="nodeVisuals"
+          :visible-packets="displayPackets"
           :current-time="currentTime"
           @pause-request="pauseForTool"
         />
+        <Suspense v-else>
+          <template #default>
+            <NodeScene3D
+              :nodes="nodesState"
+              :node-visuals="nodeVisuals"
+              :visible-packets="displayPackets"
+              :current-time="currentTime"
+            />
+          </template>
+          <template #fallback>
+            <div class="visual-loading">
+              <div class="visual-loading-core" aria-hidden="true">
+                <span class="visual-loading-ring ring-a"></span>
+                <span class="visual-loading-ring ring-b"></span>
+                <span class="visual-loading-dot"></span>
+              </div>
+              <p class="visual-loading-title">3D 视图加载中</p>
+              <p class="visual-loading-text">正在初始化 Babylon 场景与节点材质</p>
+            </div>
+          </template>
+        </Suspense>
       </div>
 
       <aside class="card log">
-        <div class="card-title">日志时间记录（近120条）</div>
+        <div class="card-title">包级日志（旧在上，新在下）</div>
         <ul class="log-list">
-          <li v-if="parseErrors.length" class="log-item parse-error">日志解析失败：{{ parseErrors.length }} 条</li>
-          <li v-if="visibleLogEvents.length === 0" class="log-item empty">暂无日志...</li>
+          <li v-if="parseErrors.length" class="log-item parse-error">
+            日志解析失败：{{ parseErrors.length }} 条
+          </li>
+          <li v-if="visiblePacketEntries.length === 0" class="log-item empty">
+            暂无日志...
+          </li>
           <li
-            v-for="ev in visibleLogEvents"
-            :key="ev.eventId"
+            v-for="packet in visiblePacketEntries"
+            :key="packet.packet_id"
             class="log-item"
-            :class="{ 'log-item-active': activeEvent?.eventId === ev.eventId }"
-            @click="onLogSelect(ev)"
+            :class="{
+              'log-item-active': currentPacketIds.has(packet.packet_id),
+              'log-item-focused': focusedPacketId === packet.packet_id,
+            }"
+            @click="onLogSelect(packet)"
           >
-            <div
-              class="event-track"
-              @pointerdown="onEventTrackPointerDown(ev, $event)"
-            >
-              <div
-                class="event-band"
-                :style="{ width: `${ev.trackProgressPct}%` }"
-                aria-hidden="true"
-              ></div>
+            <div class="event-track" @pointerdown="onEventTrackPointerDown(packet, $event)">
+              <div class="event-band" :style="{ width: `${packet.progressPct}%` }" aria-hidden="true"></div>
             </div>
+
             <div class="log-content">
-              <span class="time">{{ ev.prettyTime }}</span>
-              <span class="tag" :class="`tag-${ev.status}`">{{ ev.status === 'normal' ? '正常包' : '冲突包' }}</span>
-              <span class="duration">时长 {{ ev.durationMs }} ms</span>
-              <span v-if="ev.type === 'tx'">
-                {{ ev.tx_id }} {{ ev.sourceLabel }} 发射广播（{{ ev.packet_uid }}）
-              </span>
-              <span v-else>
-                {{ ev.rx_id }} {{ ev.sourceLabel }} -> {{ ev.dstLabel }} {{ ev.status === 'collision' ? '冲突包' : '正常包' }}
-                | delay {{ ev.delayMs }} ms
-              </span>
-              <span class="track-hint">进度 {{ ev.trackProgressPct.toFixed(0) }}%</span>
+              <div class="log-head">
+                <span class="time">{{ packet.prettyTime }}</span>
+                <span class="tag" :class="packet.packetKindClass">{{ packet.packetKindLabel }}</span>
+                <span class="duration">总历时 {{ packet.packetDurationLabel }}</span>
+                <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} 发射广播</span>
+                <span class="packet-hint">成功 {{ packet.okCount }} / rx-rx {{ packet.rxrxCount }} / rx-tx {{ packet.rxtxCount }}</span>
+              </div>
+
+              <div class="receiver-strip">
+                <span
+                  v-for="receiver in packet.receivers"
+                  :key="receiver.receiver_id"
+                  class="receiver-pill"
+                  :class="receiverPillClass(receiver)"
+                >
+                  <span class="receiver-name">{{ receiver.dstLabel }}</span>
+                  <span class="receiver-reason">{{ receiver.reasonLabel }}</span>
+                </span>
+              </div>
             </div>
           </li>
         </ul>
 
         <div class="stat-grid">
-          <div>发包总数: {{ summary.total }}</div>
-          <div>成功: {{ summary.ok }}</div>
-          <div>碰撞: {{ summary.collision }}</div>
-          <div>成功率: {{ summary.rate }}%</div>
+          <div>广播包数：{{ summary.packetCount }}</div>
+          <div>成功接收：{{ summary.okReceivers }}</div>
+          <div>rx-rx 冲突：{{ summary.rxrxCollisions }}</div>
+          <div>rx-tx 冲突：{{ summary.rxtxCollisions }}</div>
         </div>
       </aside>
     </section>
 
     <section class="panel legend">
-      <p>周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，会自动补零时间段）。</p>
+      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突</p>
+      <p>其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。</p>
+      <p>周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
     </section>
   </div>
 </template>
