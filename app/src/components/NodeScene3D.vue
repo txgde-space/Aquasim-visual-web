@@ -9,6 +9,23 @@
       @click="resetCameraView"
       title="重置 3D 视角"
     />
+    <button
+      class="scene-audio-toggle"
+      @click="emit('toggle-mute')"
+      :title="props.isMuted ? '取消静音' : '静音'"
+      :aria-label="props.isMuted ? '取消静音' : '静音'"
+    >
+      <svg v-if="props.isMuted" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h4l5-4v12l-5-4H4z" />
+        <path d="m19 9-4 6" />
+        <path d="m15 9 4 6" />
+      </svg>
+      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h4l5-4v12l-5-4H4z" />
+        <path d="M16 9a4 4 0 0 1 0 6" />
+        <path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" />
+      </svg>
+    </button>
 
     <div class="scene-help" @pointerdown.stop>
       <span>Babylon 3D 视图</span>
@@ -59,7 +76,9 @@ const props = defineProps({
   currentTime: { type: Number, required: true },
   themeKey: { type: String, default: 'ocean-sonar' },
   fxLevel: { type: String, default: 'standard' },
+  isMuted: { type: Boolean, default: false },
 })
+const emit = defineEmits(['toggle-mute'])
 
 const hostEl = ref(null)
 const canvasEl = ref(null)
@@ -383,7 +402,12 @@ const buildNodes = () => {
     entry.base.setEnabled(true)
     if (fx > 1) {
       const pulse = 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
-      entry.base.scaling.setAll(pulse)
+      const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
+      if (isSink) {
+        entry.base.scaling.set(1.72 * pulse, 0.42 * pulse, 0.66 * pulse)
+      } else {
+        entry.base.scaling.set(1.36 * pulse, 0.44 * pulse, 0.56 * pulse)
+      }
     } else {
       entry.base.scaling.setAll(1)
     }
@@ -929,6 +953,62 @@ onBeforeUnmount(() => {
   width: 84px;
   height: 84px;
   cursor: pointer;
+  transition: transform 130ms ease, filter 170ms ease;
+}
+
+.scene-audio-toggle {
+  position: absolute;
+  top: 12px;
+  right: 102px;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 88%, #020617 12%);
+  color: var(--accent-soft, #dbeafe);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 130ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 160ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 5px 14px rgba(2, 8, 20, 0.26);
+}
+
+.scene-audio-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.scene-axes:hover,
+.scene-audio-toggle:hover {
+  filter: brightness(1.07);
+}
+
+.scene-audio-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent-soft, #93c5fd) 48%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 18px color-mix(in srgb, var(--accent, #38bdf8) 22%, transparent);
+}
+
+.scene-axes:active,
+.scene-audio-toggle:active {
+  transform: translateY(1.4px) scale(0.96);
+}
+
+.scene-audio-toggle:active {
+  box-shadow:
+    inset 0 3px 9px rgba(2, 8, 20, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 2px 6px rgba(2, 8, 20, 0.22);
 }
 
 .scene-help {

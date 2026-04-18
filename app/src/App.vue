@@ -245,8 +245,13 @@ const THEME_OPTIONS = Object.freeze([
   { key: 'timeline-story', label: '时间轴叙事' },
 ])
 const FX_LEVEL_OPTIONS = Object.freeze([
-  { key: 'standard', label: '标准（当前）' },
-  { key: 'extreme', label: '狂暴（夸张）' },
+  { key: 'standard', label: '标准' },
+  { key: 'extreme', label: 'Beta' },
+])
+const UNDERWATER_DETAIL_OPTIONS = Object.freeze([
+  { key: 'low', label: '轻量' },
+  { key: 'standard', label: '标准' },
+  { key: 'cinematic', label: '电影级' },
 ])
 
 const normalizePacketsFromParsed = (parsed) => (
@@ -258,6 +263,8 @@ const initialParsed = parseLog(LOG_SOURCES.default.raw)
 const logSourceKey = ref('default')
 const selectedTheme = ref('ocean-sonar')
 const fxLevel = ref('standard')
+const underwaterDetail = ref('standard')
+const isMuted = ref(false)
 const nodesState = ref(enforceMinGap(initialParsed.nodes))
 const packetRows = ref(normalizePacketsFromParsed(initialParsed))
 const parseErrors = ref(initialParsed.parseErrors)
@@ -324,6 +331,22 @@ const globalLogListEl = ref(null)
 const lifecycleLogListEl = ref(null)
 let raf = 0
 let lastTs = 0
+let audioCtx = null
+let audioMaster = null
+let schedulerTimer = null
+let bgmStep = 0
+let bgmNextTime = 0
+
+const BGM_PATTERN = Object.freeze([
+  [55, 82.41],
+  [58.27, 87.31],
+  [61.74, 92.5],
+  [65.41, 98],
+  [58.27, 87.31],
+  [55, 82.41],
+  [51.91, 77.78],
+  [49, 73.42],
+])
 
 const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
 
@@ -754,13 +777,127 @@ const reset = () => {
   lastTs = 0
 }
 
+const makeVoice = (ctx, destination, frequency, when, duration, options = {}) => {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  const filter = ctx.createBiquadFilter()
+  osc.type = options.type || 'triangle'
+  osc.frequency.setValueAtTime(frequency, when)
+  if (options.detune) osc.detune.setValueAtTime(options.detune, when)
+
+  filter.type = 'lowpass'
+  filter.frequency.setValueAtTime(options.cutoff ?? 900, when)
+  filter.Q.value = 0.6
+
+  const attack = options.attack ?? 0.02
+  const release = options.release ?? 0.22
+  const peak = options.volume ?? 0.08
+  gain.gain.setValueAtTime(0.0001, when)
+  gain.gain.exponentialRampToValueAtTime(peak, when + attack)
+  gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(attack + 0.02, duration - release))
+
+  osc.connect(filter)
+  filter.connect(gain)
+  gain.connect(destination)
+  osc.start(when)
+  osc.stop(when + duration)
+}
+
+const scheduleBgmTick = () => {
+  if (!audioCtx || !audioMaster || isMuted.value) return
+  const lookAhead = 0.32
+  const stepLen = 0.34
+  while (bgmNextTime < audioCtx.currentTime + lookAhead) {
+    const [bass, pulse] = BGM_PATTERN[bgmStep % BGM_PATTERN.length]
+    makeVoice(audioCtx, audioMaster, bass, bgmNextTime, stepLen * 1.45, {
+      type: 'sawtooth',
+      volume: 0.045,
+      cutoff: 420,
+      attack: 0.04,
+      release: 0.42,
+    })
+
+    makeVoice(audioCtx, audioMaster, pulse, bgmNextTime + 0.05, stepLen * 0.8, {
+      type: 'triangle',
+      volume: 0.028,
+      cutoff: 1300,
+      attack: 0.01,
+      release: 0.2,
+    })
+
+    if (bgmStep % 4 === 3) {
+      makeVoice(audioCtx, audioMaster, pulse * 1.5, bgmNextTime + 0.16, stepLen * 0.5, {
+        type: 'sine',
+        volume: 0.018,
+        cutoff: 1900,
+        attack: 0.01,
+        release: 0.16,
+      })
+    }
+
+    bgmStep += 1
+    bgmNextTime += stepLen
+  }
+}
+
+const ensureBgm = async () => {
+  if (isMuted.value) return
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextCtor) return
+
+  if (!audioCtx) {
+    audioCtx = new AudioContextCtor()
+    audioMaster = audioCtx.createGain()
+    audioMaster.gain.value = 0.0001
+    audioMaster.connect(audioCtx.destination)
+    bgmNextTime = audioCtx.currentTime + 0.05
+    schedulerTimer = window.setInterval(scheduleBgmTick, 80)
+  }
+
+  if (audioCtx.state === 'suspended') {
+    try {
+      await audioCtx.resume()
+    } catch {
+      return
+    }
+  }
+
+  audioMaster.gain.cancelScheduledValues(audioCtx.currentTime)
+  audioMaster.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.25)
+}
+
+const setMuteState = async (nextMuted) => {
+  isMuted.value = nextMuted
+  try {
+    localStorage.setItem('aquasim_mute', nextMuted ? '1' : '0')
+  } catch {
+    // ignore persistence errors
+  }
+
+  if (nextMuted) {
+    if (audioCtx && audioMaster) {
+      audioMaster.gain.cancelScheduledValues(audioCtx.currentTime)
+      audioMaster.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15)
+    }
+    return
+  }
+
+  await ensureBgm()
+}
+
+const toggleMute = () => {
+  setMuteState(!isMuted.value)
+}
+
 const onJump = (event) => {
   const next = Number(event.target.value)
   if (Number.isFinite(next)) seekTime(next)
+  ensureBgm()
 }
 
 const onSpeed = (event) => {
   speed.value = Number(event.target.value)
+  ensureBgm()
 }
 
 const onLogSourceChange = (event) => {
@@ -769,14 +906,20 @@ const onLogSourceChange = (event) => {
 
 const onThemeChange = (event) => {
   selectedTheme.value = event.target.value
+  ensureBgm()
 }
 
 const onFxLevelChange = (event) => {
   fxLevel.value = event.target.value
 }
 
+const onUnderwaterDetailChange = (event) => {
+  underwaterDetail.value = event.target.value
+}
+
 const onReplayModeChange = (event) => {
   replayMode.value = event.target.value
+  ensureBgm()
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
     focusedPacketId.value = lifecyclePacket.value.packet_id
     seekTime(lifecyclePacket.value.startUs)
@@ -789,6 +932,7 @@ const onLifecyclePacketChange = (event) => {
     focusedPacketId.value = lifecyclePacket.value.packet_id
     seekTime(lifecyclePacket.value.startUs)
   }
+  ensureBgm()
 }
 
 const onKeydown = (event) => {
@@ -797,6 +941,7 @@ const onKeydown = (event) => {
   }
   event.preventDefault()
   togglePlay()
+  ensureBgm()
 }
 
 const onLogSelect = (packet) => {
@@ -811,11 +956,13 @@ const onLogSelect = (packet) => {
 
   focusedPacketId.value = packet.eventId
   seekTime(packet.tx_start_us)
+  ensureBgm()
 }
 
 const onLifecycleStageSelect = (stage) => {
   if (!stage) return
   seekTime(stage.startUs)
+  ensureBgm()
 }
 
 const onEventTrackPointerDown = (packet, event) => {
@@ -839,6 +986,7 @@ const onEventTrackPointerDown = (packet, event) => {
     width: Math.max(rect.width, 1),
   }
   suppressLogClick.value = packet.eventId
+  ensureBgm()
 }
 
 const onGlobalPointerMove = (event) => {
@@ -904,6 +1052,7 @@ watch(isPlaying, (next) => {
     lastTs = 0
     return
   }
+  ensureBgm()
   raf = requestAnimationFrame(tick)
 })
 
@@ -933,6 +1082,14 @@ watch(selectedTheme, (next) => {
 watch(fxLevel, (next) => {
   try {
     localStorage.setItem('aquasim_fx_level', next)
+  } catch {
+    // ignore persistence errors
+  }
+})
+
+watch(underwaterDetail, (next) => {
+  try {
+    localStorage.setItem('aquasim_underwater_detail', next)
   } catch {
     // ignore persistence errors
   }
@@ -972,6 +1129,11 @@ onMounted(() => {
     if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
       fxLevel.value = savedFx
     }
+    const savedUnderwaterDetail = localStorage.getItem('aquasim_underwater_detail')
+    if (savedUnderwaterDetail && UNDERWATER_DETAIL_OPTIONS.some((item) => item.key === savedUnderwaterDetail)) {
+      underwaterDetail.value = savedUnderwaterDetail
+    }
+    isMuted.value = localStorage.getItem('aquasim_mute') === '1'
   } catch {
     // ignore persistence errors
   }
@@ -980,6 +1142,7 @@ onMounted(() => {
   window.addEventListener('pointermove', onGlobalPointerMove)
   window.addEventListener('pointerup', onGlobalPointerUp)
   window.addEventListener('pointercancel', onGlobalPointerUp)
+  window.addEventListener('pointerdown', ensureBgm, { once: true })
 })
 
 onBeforeUnmount(() => {
@@ -988,11 +1151,21 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onGlobalPointerMove)
   window.removeEventListener('pointerup', onGlobalPointerUp)
   window.removeEventListener('pointercancel', onGlobalPointerUp)
+  window.removeEventListener('pointerdown', ensureBgm)
+  if (schedulerTimer) {
+    clearInterval(schedulerTimer)
+    schedulerTimer = null
+  }
+  if (audioCtx) {
+    audioCtx.close().catch(() => {})
+    audioCtx = null
+    audioMaster = null
+  }
 })
 </script>
 
 <template>
-  <div class="page-wrap" :class="`theme-${selectedTheme}`">
+  <div class="page-wrap" :class="[`theme-${selectedTheme}`, `fx-${fxLevel}`]">
     <header class="topbar">
       <div>
         <p class="eyebrow">ns-3 Acoustic Replay</p>
@@ -1009,6 +1182,7 @@ onBeforeUnmount(() => {
         <div class="card-title-row">
           <div class="card-title">节点状态视图</div>
           <div class="view-switch" role="tablist" aria-label="视图模式">
+            <span class="view-switch-indicator" :class="{ right: visualMode === '3d' }" aria-hidden="true"></span>
             <button class="view-switch-btn" :class="{ active: visualMode === '2d' }" @click="visualMode = '2d'">2D</button>
             <button class="view-switch-btn" :class="{ active: visualMode === '3d' }" @click="visualMode = '3d'">3D</button>
           </div>
@@ -1022,7 +1196,10 @@ onBeforeUnmount(() => {
             :current-time="currentTime"
             :theme-key="selectedTheme"
             :fx-level="fxLevel"
+            :underwater-detail="underwaterDetail"
+            :is-muted="isMuted"
             @pause-request="pauseForTool"
+            @toggle-mute="toggleMute"
           />
           <Suspense v-else>
             <template #default>
@@ -1033,6 +1210,8 @@ onBeforeUnmount(() => {
                 :current-time="currentTime"
                 :theme-key="selectedTheme"
                 :fx-level="fxLevel"
+                :is-muted="isMuted"
+                @toggle-mute="toggleMute"
               />
             </template>
             <template #fallback>
@@ -1081,7 +1260,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="control-fields-grid">
               <label class="field field-compact">
-                <span>倍速</span>
+                <div class="field-head"><span>倍速</span></div>
                 <select class="select" :value="speed" @change="onSpeed">
                   <option :value="0.05">0.05x</option>
                   <option :value="0.1">0.1x</option>
@@ -1093,21 +1272,21 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="field field-compact">
-                <span>日志源</span>
+                <div class="field-head"><span>日志源</span></div>
                 <select class="select" :value="logSourceKey" @change="onLogSourceChange">
                   <option value="default">{{ LOG_SOURCES.default.label }}</option>
                   <option value="multihop">{{ LOG_SOURCES.multihop.label }}</option>
                 </select>
               </label>
               <label class="field field-compact">
-                <span>回放模式</span>
+                <div class="field-head"><span>回放模式</span></div>
                 <select class="select" :value="replayMode" @change="onReplayModeChange">
                   <option value="global">全局模式</option>
                   <option value="lifecycle">生命周期模式</option>
                 </select>
               </label>
               <label class="field field-compact">
-                <span>主题风格</span>
+                <div class="field-head"><span>主题风格</span></div>
                 <select class="select" :value="selectedTheme" @change="onThemeChange">
                   <option
                     v-for="theme in THEME_OPTIONS"
@@ -1119,10 +1298,22 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="field field-compact">
-                <span>特效等级</span>
+                <div class="field-head"><span>特效等级</span></div>
                 <select class="select" :value="fxLevel" @change="onFxLevelChange">
                   <option
                     v-for="item in FX_LEVEL_OPTIONS"
+                    :key="item.key"
+                    :value="item.key"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="field field-compact" :class="{ 'field-hidden': fxLevel !== 'extreme' }">
+                <div class="field-head"><span>水下环境</span></div>
+                <select class="select" :value="underwaterDetail" @change="onUnderwaterDetailChange">
+                  <option
+                    v-for="item in UNDERWATER_DETAIL_OPTIONS"
                     :key="item.key"
                     :value="item.key"
                   >

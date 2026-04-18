@@ -70,6 +70,23 @@
         <circle cx="12" cy="12" r="3.5" />
       </svg>
     </button>
+    <button
+      class="canvas-audio-toggle"
+      @click="emit('toggle-mute')"
+      :title="props.isMuted ? '取消静音' : '静音'"
+      :aria-label="props.isMuted ? '取消静音' : '静音'"
+    >
+      <svg v-if="props.isMuted" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h4l5-4v12l-5-4H4z" />
+        <path d="m19 9-4 6" />
+        <path d="m15 9 4 6" />
+      </svg>
+      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10h4l5-4v12l-5-4H4z" />
+        <path d="M16 9a4 4 0 0 1 0 6" />
+        <path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" />
+      </svg>
+    </button>
 
     <div
       v-if="selectedNodePos && selectedNode"
@@ -97,6 +114,8 @@ const props = defineProps({
   currentTime: { type: Number, required: true },
   themeKey: { type: String, default: 'ocean-sonar' },
   fxLevel: { type: String, default: 'standard' },
+  underwaterDetail: { type: String, default: 'standard' },
+  isMuted: { type: Boolean, default: false },
 })
 
 const TOOL_MODES = Object.freeze({
@@ -238,6 +257,36 @@ const THEME_PROFILES = Object.freeze({
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
 const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
+const underwaterDetailProfile = computed(() => {
+  if (props.underwaterDetail === 'low') {
+    return {
+      flowLines: 4,
+      reefCount: 4,
+      fishSchools: 2,
+      fishBaseCount: 6,
+      bubbleCount: 20,
+      hazeLayers: 2,
+    }
+  }
+  if (props.underwaterDetail === 'cinematic') {
+    return {
+      flowLines: 9,
+      reefCount: 10,
+      fishSchools: 6,
+      fishBaseCount: 11,
+      bubbleCount: 68,
+      hazeLayers: 4,
+    }
+  }
+  return {
+    flowLines: 6,
+    reefCount: 7,
+    fishSchools: 4,
+    fishBaseCount: 9,
+    bubbleCount: 42,
+    hazeLayers: 3,
+  }
+})
 const canvasEl = ref(null)
 const containerEl = ref(null)
 const displayWidth = ref(900)
@@ -257,7 +306,7 @@ const measurementHistory = ref([[]])
 const measurementHistoryIndex = ref(0)
 const selectedMeasurementId = ref(null)
 const padding = 44
-const emit = defineEmits(['node-select', 'pause-request'])
+const emit = defineEmits(['node-select', 'pause-request', 'toggle-mute'])
 let resizeObserver = null
 let activePointerId = null
 
@@ -436,6 +485,134 @@ const strokeCircle = (ctx, x, y, radius, strokeStyle, lineWidth, alpha = 1) => {
   ctx.restore()
 }
 
+const drawPlanePulse = (ctx, x, y, angle, color, size, alpha = 1) => {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+  ctx.globalAlpha = alpha
+  ctx.fillStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = 12
+  ctx.beginPath()
+  ctx.moveTo(size * 1.2, 0)
+  ctx.lineTo(-size * 0.55, size * 0.4)
+  ctx.lineTo(-size * 0.2, 0)
+  ctx.lineTo(-size * 0.55, -size * 0.4)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.2, 0)
+  ctx.lineTo(-size * 0.9, size * 0.65)
+  ctx.lineTo(-size * 0.72, 0)
+  ctx.lineTo(-size * 0.9, -size * 0.65)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
+
+const drawShellBurst = (ctx, x, y, color, phase, power = 1) => {
+  const pulse = 0.5 + (Math.sin(phase * 18) * 0.5)
+  const r = (16 + (pulse * 12)) * power
+  ctx.save()
+  ctx.globalCompositeOperation = 'screen'
+  const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1)
+  glow.addColorStop(0, color)
+  glow.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(x, y, r * 2.1, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.6
+  for (let i = 0; i < 3; i += 1) {
+    ctx.globalAlpha = 0.58 - (i * 0.16)
+    ctx.beginPath()
+    ctx.arc(x, y, r + (i * 8), 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+const drawSubmarineNode = (ctx, p, fillColor, strokeColor, profile, pulse) => {
+  const hullW = 38
+  const hullH = 16
+  roundedRectPath(ctx, p.x - (hullW / 2), p.y - (hullH / 2), hullW, hullH, 8)
+  ctx.fillStyle = fillColor
+  ctx.shadowColor = profile.ring
+  ctx.shadowBlur = 12 + (pulse * 5)
+  ctx.fill()
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = 1.4
+  ctx.stroke()
+
+  roundedRectPath(ctx, p.x - 6, p.y - 16, 12, 8, 3)
+  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.15)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(p.x - 19, p.y)
+  ctx.lineTo(p.x - 26, p.y - 5)
+  ctx.lineTo(p.x - 26, p.y + 5)
+  ctx.closePath()
+  ctx.fillStyle = strokeColor
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(p.x + 8, p.y, 2.2, 0, Math.PI * 2)
+  ctx.fillStyle = '#dbeafe'
+  ctx.fill()
+}
+
+const drawCarrierNode = (ctx, p, fillColor, strokeColor, profile, phase) => {
+  const deckW = 56
+  const deckH = 20
+  roundedRectPath(ctx, p.x - (deckW / 2), p.y - (deckH / 2), deckW, deckH, 6)
+  ctx.fillStyle = fillColor
+  ctx.shadowColor = profile.ring
+  ctx.shadowBlur = 16
+  ctx.fill()
+  ctx.strokeStyle = strokeColor
+  ctx.lineWidth = 1.8
+  ctx.stroke()
+
+  roundedRectPath(ctx, p.x - 6, p.y - 18, 18, 9, 3)
+  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.22)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(p.x - 22, p.y)
+  ctx.lineTo(p.x + 22, p.y)
+  ctx.strokeStyle = '#f8fafc'
+  ctx.lineWidth = 1
+  ctx.setLineDash([3, 3])
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  const pulse = 0.45 + (Math.sin((phase * 6) + (p.x * 0.01)) * 0.2)
+  strokeCircle(ctx, p.x, p.y, 18 + (pulse * 10), profile.ring, 1.2, 0.34)
+}
+
+const colorMix = (hexA, hexB, ratio = 0.5) => {
+  const parse = (hex) => {
+    const clean = hex.replace('#', '')
+    const expanded = clean.length === 3
+      ? clean.split('').map((c) => c + c).join('')
+      : clean
+    const num = parseInt(expanded, 16)
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255]
+  }
+  try {
+    const a = parse(hexA)
+    const b = parse(hexB)
+    const m = a.map((v, i) => Math.round((v * (1 - ratio)) + (b[i] * ratio)))
+    return `rgb(${m[0]} ${m[1]} ${m[2]})`
+  } catch {
+    return hexA
+  }
+}
+
 const packetSegmentColor = (packet, receiver, now, profile) => {
   const txColor = profile.tx
   const rxColor = profile.rx
@@ -491,6 +668,7 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
   const pulse = 0.7 + (Math.sin((phase * (8 + fx)) + (packet.tx_start_us * 0.000001)) * 0.3)
   const halfWidth = (2.6 + (pulse * 1.6)) * (fx > 1 ? 1.26 : 1)
   const color = packetSegmentColor(packet, receiver, now, profile)
+  const angle = Math.atan2(dy, dx)
 
   ctx.save()
   if (profile.effect === 'minimal') ctx.setLineDash([2, 5])
@@ -538,6 +716,20 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
       const ty = src.y + (dy * t)
       fillCircle(ctx, tx, ty, Math.max(1.2, (2.8 - (i * 0.65))), color, 0.3 - (i * 0.07))
     }
+
+    drawPlanePulse(ctx, headX, headY, angle, color, 5.5 + (pulse * 1.6), 0.92)
+
+    if (receiver.status !== 'ok') {
+      const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
+      if (now >= collisionAt) {
+        const impactRatio = Math.max(0, Math.min(1, (now - collisionAt) / Math.max(1, receiver.rx_duration_us)))
+        const shellX = src.x + (dx * (0.72 + (impactRatio * 0.28)))
+        const shellY = src.y + (dy * (0.72 + (impactRatio * 0.28)))
+        fillCircle(ctx, shellX, shellY, 3.6, '#fb923c', 0.92)
+        fillCircle(ctx, shellX - (ux * 8), shellY - (uy * 8), 2.2, '#fdba74', 0.5)
+        drawShellBurst(ctx, dst.x, dst.y, '#ef4444', phase + impactRatio, 1.05)
+      }
+    }
   }
 }
 
@@ -557,6 +749,7 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
   idleGradient.addColorStop(0, profile.idleInner)
   idleGradient.addColorStop(1, profile.idleOuter)
 
+  const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
   fillCircle(ctx, p.x, p.y, NODE_RADIUS, idleGradient, 0.92)
   strokeCircle(ctx, p.x, p.y, NODE_RADIUS, profile.nodeStroke, 1.4, 0.9)
 
@@ -591,12 +784,27 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
     }
   }
 
+  if (fx > 1) {
+    const baseColor = visual.mode === 'collision' || visual.mode === 'collision-linger'
+      ? profile.bad
+      : visual.mode === 'tx'
+        ? profile.tx
+        : visual.mode === 'rx' || visual.mode === 'rx-done'
+          ? profile.rx
+          : profile.idleInner
+    const strokeColor = colorMix(baseColor, '#ffffff', 0.32)
+    ctx.save()
+    if (isSink) drawCarrierNode(ctx, p, baseColor, strokeColor, profile, phase)
+    else drawSubmarineNode(ctx, p, baseColor, strokeColor, profile, pulse)
+    ctx.restore()
+  }
+
   ctx.save()
   ctx.fillStyle = '#f8fafc'
-  ctx.font = '600 11px "IBM Plex Sans", "Segoe UI", sans-serif'
+  ctx.font = fx > 1 ? '700 10px "IBM Plex Sans", "Segoe UI", sans-serif' : '600 11px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(String(node.node_id), p.x, p.y + 0.5)
+  ctx.fillText(String(node.node_id), p.x, p.y + (fx > 1 ? 20 : 0.5))
   ctx.restore()
 
   ctx.save()
@@ -604,10 +812,11 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
   ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
-  ctx.fillText(node.name, p.x + NODE_RADIUS + 10, p.y + 2)
+  const labelOffset = fx > 1 ? NODE_RADIUS + 14 : NODE_RADIUS + 10
+  ctx.fillText(node.name, p.x + labelOffset, p.y + 2)
   ctx.fillStyle = profile.depth
   ctx.font = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillText(`z ${node.z ?? 0}m`, p.x + NODE_RADIUS + 10, p.y + 16)
+  ctx.fillText(`z ${node.z ?? 0}m`, p.x + labelOffset, p.y + 16)
   ctx.restore()
 }
 
@@ -696,14 +905,275 @@ const drawMeasurementLines = (ctx) => {
   }
 }
 
+const hashNoise = (seed) => {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return x - Math.floor(x)
+}
+
+const drawUnderwaterBackdrop = (ctx, w, h, profile, phase, detail) => {
+  ctx.save()
+
+  const seabedTop = h * 0.78
+  const seabedGradient = ctx.createLinearGradient(0, seabedTop, 0, h)
+  seabedGradient.addColorStop(0, 'rgba(10, 39, 57, 0.42)')
+  seabedGradient.addColorStop(1, 'rgba(10, 22, 35, 0.84)')
+  ctx.fillStyle = seabedGradient
+  ctx.fillRect(0, seabedTop, w, h - seabedTop)
+
+  ctx.strokeStyle = 'rgba(120, 210, 255, 0.14)'
+  ctx.lineWidth = 1.1
+  for (let r = 0; r < detail.flowLines; r += 1) {
+    const yBase = (h * 0.16) + (r * h * 0.1)
+    ctx.beginPath()
+    for (let x = 0; x <= w; x += 14) {
+      const y = yBase + (Math.sin((x * 0.013) + (phase * (0.8 + (r * 0.12)))) * (8 + r))
+      if (x === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+  }
+
+  const reefCount = detail.reefCount
+  for (let i = 0; i < reefCount; i += 1) {
+    const n = hashNoise(i * 17.3)
+    const x = (i / (reefCount - 1)) * w
+    const baseY = h * (0.81 + (hashNoise(i * 9.1) * 0.07))
+    const width = 55 + (n * 120)
+    const height = 26 + (hashNoise(i * 23.7) * 78)
+    const drift = Math.sin((phase * 0.4) + i) * 2.6
+    const grad = ctx.createLinearGradient(x, baseY - height, x, baseY + 2)
+    grad.addColorStop(0, 'rgba(26, 64, 87, 0.55)')
+    grad.addColorStop(1, 'rgba(8, 24, 39, 0.86)')
+    ctx.fillStyle = grad
+    ctx.beginPath()
+    ctx.moveTo(x - width + drift, baseY)
+    ctx.quadraticCurveTo(x - (width * 0.34) + drift, baseY - height, x + drift, baseY - (height * 0.38))
+    ctx.quadraticCurveTo(x + (width * 0.35) + drift, baseY - (height * 1.06), x + width + drift, baseY)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  const fishSchools = detail.fishSchools
+  for (let s = 0; s < fishSchools; s += 1) {
+    const fishCount = detail.fishBaseCount + (s * 2)
+    const yBase = h * (0.22 + (s * 0.12))
+    const dir = s % 2 === 0 ? 1 : -1
+    for (let i = 0; i < fishCount; i += 1) {
+      const offset = i / fishCount
+      const travel = ((phase * (44 + (s * 8))) + (offset * w * 1.2)) % (w + 180)
+      const x = dir > 0 ? (travel - 90) : (w - travel + 90)
+      const y = yBase
+        + (Math.sin((phase * 1.3) + (i * 0.8) + s) * 8)
+        + (Math.sin((phase * 3.2) + (i * 0.2)) * 3)
+      const size = 3.6 + ((i % 4) * 0.55)
+      const angle = dir > 0 ? 0 : Math.PI
+      ctx.save()
+      ctx.translate(x, y)
+      ctx.rotate(angle)
+      ctx.globalAlpha = 0.26 + ((i % 3) * 0.1)
+      ctx.fillStyle = profile.particle
+      ctx.beginPath()
+      ctx.moveTo(size * 1.2, 0)
+      ctx.lineTo(-size * 0.4, size * 0.5)
+      ctx.lineTo(-size * 0.1, 0)
+      ctx.lineTo(-size * 0.4, -size * 0.5)
+      ctx.closePath()
+      ctx.fill()
+      ctx.restore()
+    }
+  }
+
+  const bubbleCount = detail.bubbleCount
+  for (let i = 0; i < bubbleCount; i += 1) {
+    const col = i % 7
+    const columnX = ((col + 0.5) / 7) * w
+    const wobble = Math.sin((phase * 1.8) + i) * (4 + (i % 5))
+    const speed = 26 + ((i % 6) * 7)
+    const y = h - (((phase * speed) + (i * 29)) % (h + 120))
+    const x = columnX + wobble
+    const radius = 1.2 + ((i % 4) * 0.58)
+    strokeCircle(ctx, x, y, radius, 'rgba(186, 230, 253, 0.34)', 1, 0.8)
+  }
+
+  for (let i = 0; i < detail.hazeLayers; i += 1) {
+    const fog = ctx.createLinearGradient(0, 0, 0, h)
+    fog.addColorStop(0, `rgba(125, 211, 252, ${0.03 + (i * 0.008)})`)
+    fog.addColorStop(0.55, `rgba(2, 14, 28, ${0.08 + (i * 0.03)})`)
+    fog.addColorStop(1, `rgba(2, 10, 20, ${0.2 + (i * 0.05)})`)
+    ctx.fillStyle = fog
+    ctx.fillRect(0, 0, w, h)
+  }
+
+  ctx.restore()
+}
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v))
+
+const drawBetaTelemetry = (ctx, w, h, profile, phase) => {
+  const txCount = props.nodeVisuals.filter((item) => item.mode === 'tx').length
+  const rxCount = props.nodeVisuals.filter((item) => item.mode === 'rx' || item.mode === 'rx-done').length
+  const collisionCount = props.nodeVisuals.filter((item) => item.mode === 'collision' || item.mode === 'collision-linger').length
+  const activePackets = props.visiblePackets.length
+  const totalNodes = Math.max(1, props.nodes.length)
+
+  const load = clamp01((txCount + rxCount + (activePackets * 1.8)) / (totalNodes * 1.9))
+  const risk = clamp01((collisionCount * 1.4) / totalNodes)
+  const spread = clamp01(activePackets / Math.max(1, totalNodes / 2))
+  const linkQuality = clamp01(1 - (risk * 0.92))
+  const energy = clamp01(0.42 + (Math.sin((phase * 0.9) + (load * 2.4)) * 0.2) + (load * 0.25))
+  const stability = clamp01((linkQuality * 0.65) + ((1 - load) * 0.35))
+
+  const panelW = 230
+  const panelH = 86
+  const panelX = 14
+  const panelY = h - panelH - 56
+  roundedRectPath(ctx, panelX, panelY, panelW, panelH, 11)
+  ctx.fillStyle = 'rgba(8, 23, 39, 0.72)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.22)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  const graphX = panelX + 10
+  const graphY = panelY + 14
+  const graphW = panelW - 20
+  const graphH = panelH - 26
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(graphX, graphY, graphW, graphH)
+  ctx.clip()
+
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.16)'
+  ctx.lineWidth = 1
+  for (let i = 0; i <= 4; i += 1) {
+    const y = graphY + ((graphH / 4) * i)
+    ctx.beginPath()
+    ctx.moveTo(graphX, y)
+    ctx.lineTo(graphX + graphW, y)
+    ctx.stroke()
+  }
+
+  const samples = 84
+  ctx.beginPath()
+  for (let i = 0; i < samples; i += 1) {
+    const t = (i / (samples - 1))
+    const x = graphX + (t * graphW)
+    const moving = ((phase * 0.9) + (t * 6.2))
+    const yNorm = clamp01((0.36 + (Math.sin(moving * 2.6) * 0.22) + (Math.sin(moving * 6.4) * 0.08) + (load * 0.18) - (risk * 0.24)))
+    const y = graphY + ((1 - yNorm) * graphH)
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.strokeStyle = profile.idleInner
+  ctx.lineWidth = 1.8
+  ctx.shadowColor = profile.idleInner
+  ctx.shadowBlur = 10
+  ctx.stroke()
+  ctx.restore()
+
+  ctx.save()
+  ctx.font = '600 10px "IBM Plex Sans", "Segoe UI", sans-serif'
+  ctx.fillStyle = 'rgba(191, 219, 254, 0.88)'
+  ctx.fillText(`Signal Flux ${Math.round((load * 100))}%`, panelX + 12, panelY + panelH - 8)
+  ctx.restore()
+
+  const radarSize = 120
+  const radarX = w - radarSize - 124
+  const radarY = 16
+  roundedRectPath(ctx, radarX, radarY, radarSize, radarSize, 12)
+  ctx.fillStyle = 'rgba(8, 23, 39, 0.72)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.24)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  const cx = radarX + (radarSize / 2)
+  const cy = radarY + (radarSize / 2) + 2
+  const radius = 40
+  const dims = [
+    { label: 'TX', value: load },
+    { label: 'RX', value: clamp01(rxCount / totalNodes) },
+    { label: 'RISK', value: risk },
+    { label: 'SPREAD', value: spread },
+    { label: 'LINK', value: linkQuality },
+    { label: 'ENG', value: energy },
+  ]
+
+  ctx.save()
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.18)'
+  ctx.lineWidth = 1
+  for (let ring = 1; ring <= 4; ring += 1) {
+    ctx.beginPath()
+    ctx.arc(cx, cy, (radius / 4) * ring, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  for (let i = 0; i < dims.length; i += 1) {
+    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
+    const ax = cx + (Math.cos(ang) * radius)
+    const ay = cy + (Math.sin(ang) * radius)
+    ctx.beginPath()
+    ctx.moveTo(cx, cy)
+    ctx.lineTo(ax, ay)
+    ctx.stroke()
+  }
+
+  ctx.beginPath()
+  for (let i = 0; i < dims.length; i += 1) {
+    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
+    const r = radius * dims[i].value
+    const px = cx + (Math.cos(ang) * r)
+    const py = cy + (Math.sin(ang) * r)
+    if (i === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  }
+  ctx.closePath()
+  ctx.fillStyle = 'rgba(56, 189, 248, 0.22)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.86)'
+  ctx.lineWidth = 1.6
+  ctx.stroke()
+
+  const sweepAngle = (phase * 1.2) % (Math.PI * 2)
+  ctx.strokeStyle = 'rgba(96, 250, 255, 0.8)'
+  ctx.lineWidth = 1.2
+  ctx.beginPath()
+  ctx.moveTo(cx, cy)
+  ctx.lineTo(cx + (Math.cos(sweepAngle) * radius), cy + (Math.sin(sweepAngle) * radius))
+  ctx.stroke()
+
+  ctx.font = '600 9px "IBM Plex Sans", "Segoe UI", sans-serif'
+  ctx.fillStyle = 'rgba(191, 219, 254, 0.78)'
+  ctx.textAlign = 'center'
+  for (let i = 0; i < dims.length; i += 1) {
+    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
+    const lx = cx + (Math.cos(ang) * (radius + 11))
+    const ly = cy + (Math.sin(ang) * (radius + 11)) + 3
+    ctx.fillText(dims[i].label, lx, ly)
+  }
+  ctx.restore()
+
+  const badgeW = 124
+  roundedRectPath(ctx, w - badgeW - 16, h - 42, badgeW, 26, 999)
+  ctx.fillStyle = 'rgba(11, 33, 54, 0.82)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.28)'
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(191, 219, 254, 0.92)'
+  ctx.font = '600 10px "IBM Plex Sans", "Segoe UI", sans-serif'
+  ctx.fillText(`Stability ${Math.round(stability * 100)}%`, w - badgeW + 10, h - 24)
+}
+
 const drawThemeAmbient = (ctx, w, h, profile, phase, fx) => {
-  const sweep = ((phase * 0.07) % 1) * w
-  const sweepGradient = ctx.createLinearGradient(sweep - 240, 0, sweep + 240, 0)
-  sweepGradient.addColorStop(0, 'rgba(0,0,0,0)')
-  sweepGradient.addColorStop(0.5, profile.sweep)
-  sweepGradient.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = sweepGradient
-  ctx.fillRect(0, 0, w, h)
+  if (fx <= 1) {
+    const sweep = ((phase * 0.07) % 1) * w
+    const sweepGradient = ctx.createLinearGradient(sweep - 240, 0, sweep + 240, 0)
+    sweepGradient.addColorStop(0, 'rgba(0,0,0,0)')
+    sweepGradient.addColorStop(0.5, profile.sweep)
+    sweepGradient.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = sweepGradient
+    ctx.fillRect(0, 0, w, h)
+  }
 
   if (profile.effect === 'sonar' || profile.effect === 'radar') {
     ctx.save()
@@ -738,7 +1208,7 @@ const drawThemeAmbient = (ctx, w, h, profile, phase, fx) => {
     ctx.restore()
   }
 
-  if (profile.effect === 'scanline') {
+  if (profile.effect === 'scanline' && fx <= 1) {
     ctx.save()
     const y = (phase * (45 + (fx * 14))) % h
     const line = ctx.createLinearGradient(0, y - 80, 0, y + 80)
@@ -814,6 +1284,7 @@ const draw = () => {
   const h = displayHeight.value
   const profile = themeProfile.value
   const fx = fxIntensity.value
+  const underwaterDetail = underwaterDetailProfile.value
   const phase = props.currentTime / 1_000_000
 
   const background = ctx.createRadialGradient(w * 0.2, h * 0.18, 0, w * 0.2, h * 0.18, Math.max(w, h))
@@ -822,6 +1293,10 @@ const draw = () => {
   background.addColorStop(1, profile.bg[2])
   ctx.fillStyle = background
   ctx.fillRect(0, 0, w, h)
+
+  if (fx > 1) {
+    drawUnderwaterBackdrop(ctx, w, h, profile, phase, underwaterDetail)
+  }
 
   drawThemeAmbient(ctx, w, h, profile, phase, fx)
   drawVisiblePackets(ctx, profile, phase, fx)
@@ -837,6 +1312,10 @@ const draw = () => {
       packetId: null,
     }
     drawNode(ctx, node, visual, profile, phase, fx)
+  }
+
+  if (fx > 1) {
+    drawBetaTelemetry(ctx, w, h, profile, phase)
   }
 
   ctx.save()
@@ -1091,7 +1570,7 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel],
+  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail],
   () => {
     requestAnimationFrame(draw)
   },
@@ -1157,6 +1636,60 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: transform 130ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 160ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 5px 14px rgba(2, 8, 20, 0.26);
+}
+
+.canvas-audio-toggle {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 56px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 86%, #020617 14%);
+  backdrop-filter: blur(6px);
+  color: var(--accent-soft, #dbeafe);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 130ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 160ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 5px 14px rgba(2, 8, 20, 0.26);
+}
+
+.canvas-reset-view:hover,
+.canvas-audio-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent-soft, #93c5fd) 48%, transparent);
+  filter: brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 18px color-mix(in srgb, var(--accent, #38bdf8) 22%, transparent);
+}
+
+.canvas-reset-view:active,
+.canvas-audio-toggle:active {
+  transform: translateY(1.5px) scale(0.96);
+  box-shadow:
+    inset 0 3px 9px rgba(2, 8, 20, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 2px 6px rgba(2, 8, 20, 0.22);
+}
+
+.canvas-audio-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .canvas-reset-view svg {
@@ -1194,6 +1727,10 @@ onBeforeUnmount(() => {
   font-size: 0.76rem;
   cursor: pointer;
   font-family: inherit;
+  transition: transform 120ms ease, box-shadow 170ms ease, border-color 180ms ease, filter 150ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 4px 10px rgba(2, 8, 20, 0.23);
 }
 
 .toolbar-btn svg {
@@ -1219,6 +1756,22 @@ onBeforeUnmount(() => {
   border-color: color-mix(in srgb, var(--accent, #38bdf8) 68%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #38bdf8) 26%, transparent) inset;
   color: #f8fafc;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  filter: brightness(1.07);
+  border-color: color-mix(in srgb, var(--accent-soft, #93c5fd) 44%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 7px 14px color-mix(in srgb, var(--accent, #38bdf8) 18%, transparent);
+}
+
+.toolbar-btn:active:not(:disabled) {
+  transform: translateY(1.2px) scale(0.97);
+  box-shadow:
+    inset 0 3px 8px rgba(2, 8, 20, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 2px 6px rgba(2, 8, 20, 0.2);
 }
 
 .toolbar-btn:disabled {
