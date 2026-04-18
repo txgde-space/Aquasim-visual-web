@@ -200,7 +200,15 @@ const THEME_3D = Object.freeze({
   },
 })
 const theme3D = computed(() => THEME_3D[props.themeKey] || THEME_3D['ocean-sonar'])
-const fx3D = computed(() => (props.fxLevel === 'extreme' ? 1.85 : 1))
+const fx3D = computed(() => {
+  if (props.fxLevel === 'extreme') return 1.85
+  return 1
+})
+const isCrazyFx = computed(() => false)
+const glowKernelByLevel = (level) => {
+  if (level === 'extreme') return 48
+  return 32
+}
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
@@ -362,6 +370,7 @@ const syncSelectedNodePos = () => {
 const buildNodes = () => {
   const palette = theme3D.value
   const fx = fx3D.value
+  const crazy = isCrazyFx.value
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id)
     const pos = worldPos(node)
@@ -392,24 +401,53 @@ const buildNodes = () => {
       progress.material.needDepthPrePass = true
       progress.renderingGroupId = 1
 
-      entry = { base, progress }
+      const sinkBridge = bindNodeMeta(MeshBuilder.CreateBox(`node-${node.node_id}-sink-bridge`, {
+        width: 168,
+        height: 84,
+        depth: 112,
+      }, scene), node.node_id)
+      sinkBridge.material = makeMaterial(
+        `node-${node.node_id}-sink-bridge-mat`,
+        palette.idleDiffuse.scale(0.88),
+        palette.idleEmissive.scale(0.8),
+        0.96,
+      )
+      sinkBridge.renderingGroupId = 1
+
+      const sinkMast = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${node.node_id}-sink-mast`, {
+        diameterTop: 22,
+        diameterBottom: 28,
+        height: 120,
+        tessellation: 16,
+      }, scene), node.node_id)
+      sinkMast.material = makeMaterial(
+        `node-${node.node_id}-sink-mast-mat`,
+        palette.idleDiffuse.scale(1.04),
+        palette.idleEmissive.scale(1.05),
+        0.98,
+      )
+      sinkMast.renderingGroupId = 1
+
+      entry = { base, progress, sinkBridge, sinkMast }
       nodeMeshMap.set(node.node_id, entry)
-      nodeMeshes.push(base, progress)
+      nodeMeshes.push(base, progress, sinkBridge, sinkMast)
     }
 
     entry.base.position.copyFrom(pos)
     entry.progress.position.copyFrom(pos)
     entry.base.setEnabled(true)
+    const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
     if (fx > 1) {
       const pulse = 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
-      const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
+      const crazyScale = crazy ? 1.2 : 1
       if (isSink) {
-        entry.base.scaling.set(1.72 * pulse, 0.42 * pulse, 0.66 * pulse)
+        entry.base.scaling.set(1.72 * pulse * crazyScale, 0.42 * pulse * crazyScale, 0.66 * pulse * crazyScale)
       } else {
-        entry.base.scaling.set(1.36 * pulse, 0.44 * pulse, 0.56 * pulse)
+        entry.base.scaling.set(1.36 * pulse * crazyScale, 0.44 * pulse * crazyScale, 0.56 * pulse * crazyScale)
       }
     } else {
-      entry.base.scaling.setAll(1)
+      if (isSink) entry.base.scaling.set(1.62, 0.4, 0.62)
+      else entry.base.scaling.setAll(1)
     }
     entry.progress.setEnabled(true)
     entry.progress.scaling.setAll(0.01)
@@ -420,6 +458,30 @@ const buildNodes = () => {
     })
     const state = visualStateColor(visual, palette)
     syncMaterialColor(entry.base.material, state)
+    if (isSink && entry.sinkBridge && entry.sinkMast) {
+      entry.sinkBridge.setEnabled(true)
+      entry.sinkMast.setEnabled(true)
+
+      const pulse = 1 + (Math.sin((props.currentTime * 0.0000034) + (node.node_id * 0.31)) * 0.018)
+      entry.sinkBridge.position.copyFromFloats(pos.x + 48, pos.y + 52, pos.z)
+      entry.sinkBridge.scaling.set(1.04 * pulse, 1.02 * pulse, 1.1 * pulse)
+      entry.sinkMast.position.copyFromFloats(pos.x + 74, pos.y + 122, pos.z)
+      entry.sinkMast.scaling.set(1, 1 + (Math.sin((props.currentTime * 0.000006) + node.node_id) * 0.04), 1)
+
+      syncMaterialColor(entry.sinkBridge.material, {
+        diffuse: state.diffuse.scale(0.88),
+        emissive: state.emissive.scale(0.92),
+        alpha: state.alpha,
+      })
+      syncMaterialColor(entry.sinkMast.material, {
+        diffuse: state.diffuse.scale(1.05),
+        emissive: state.emissive.scale(1.14),
+        alpha: state.alpha,
+      })
+    } else if (entry.sinkBridge && entry.sinkMast) {
+      entry.sinkBridge.setEnabled(false)
+      entry.sinkMast.setEnabled(false)
+    }
     const progressStyle = visualProgressStyle(visual, palette)
     if (progressStyle) {
       if (progressStyle.alpha > 0.001) {
@@ -437,6 +499,8 @@ const buildNodes = () => {
     if (nodeById.value.has(nodeId)) continue
     entry.base.dispose()
     entry.progress.dispose()
+    if (entry.sinkBridge) entry.sinkBridge.dispose()
+    if (entry.sinkMast) entry.sinkMast.dispose()
     nodeMeshMap.delete(nodeId)
   }
 }
@@ -444,6 +508,7 @@ const buildNodes = () => {
 const buildPackets = () => {
   const palette = theme3D.value
   const fx = fx3D.value
+  const crazy = isCrazyFx.value
   const now = props.currentTime
   const activeKeys = new Set()
 
@@ -507,21 +572,32 @@ const buildPackets = () => {
         instance: entry.line,
       })
       entry.line.setEnabled(true)
+      entry.line.alpha = crazy ? 0.78 : (fx > 1 ? 0.62 : 0.52)
+      entry.line.color = crazy ? color.scale(0.88) : palette.line
       entry.block.setEnabled(true)
       entry.marker.setEnabled(now >= receiver.rx_start_us)
 
       entry.block.position.copyFrom(midPos)
-      entry.block.scaling.x = fx > 1 ? 1.15 : 1
+      entry.block.scaling.x = fx > 1 ? (crazy ? 1.42 : 1.15) : 1
       entry.block.scaling.y = segLength / 100
-      entry.block.scaling.z = fx > 1 ? 1.15 : 1
+      entry.block.scaling.z = fx > 1 ? (crazy ? 1.42 : 1.15) : 1
       entry.block.rotationQuaternion = null
       entry.block.lookAt(dstPos)
       entry.block.rotate(Vector3.Right(), Math.PI / 2)
-      const pulseAlpha = fx > 1 ? (0.78 + ((Math.sin((now * 0.000009) + segLength) + 1) * 0.08)) : 0.96
+      const pulseAlpha = fx > 1
+        ? (crazy ? (0.82 + ((Math.sin((now * 0.000011) + segLength) + 1) * 0.11)) : (0.78 + ((Math.sin((now * 0.000009) + segLength) + 1) * 0.08)))
+        : 0.96
       setMaterialColor(entry.block.material, color, color.scale(0.12 * fx), pulseAlpha)
 
       entry.marker.position.copyFrom(dstPos)
-      setMaterialColor(entry.marker.material, color, color.scale(0.12 * fx), Math.min(0.82, palette.markerAlpha * fx))
+      const markerPulse = crazy ? (1.08 + (Math.sin((now * 0.000012) + pathLength) * 0.24)) : 1
+      entry.marker.scaling.setAll(markerPulse)
+      setMaterialColor(
+        entry.marker.material,
+        color,
+        color.scale(0.12 * fx),
+        Math.min(crazy ? 0.94 : 0.82, palette.markerAlpha * (crazy ? fx * 1.18 : fx)),
+      )
     }
   }
 
@@ -822,7 +898,7 @@ onMounted(() => {
   scene.clearColor = theme3D.value.clear.clone()
   glowLayer = new GlowLayer('scene-glow', scene, {
     mainTextureSamples: 4,
-    blurKernelSize: 32,
+    blurKernelSize: glowKernelByLevel(props.fxLevel),
   })
   glowLayer.intensity = 0.44 * fx3D.value
 
@@ -897,7 +973,7 @@ watch(
   () => {
     if (glowLayer) {
       glowLayer.intensity = 0.44 * fx3D.value
-      glowLayer.blurKernelSize = props.fxLevel === 'extreme' ? 48 : 32
+      glowLayer.blurKernelSize = glowKernelByLevel(props.fxLevel)
     }
     queueRefresh()
   },

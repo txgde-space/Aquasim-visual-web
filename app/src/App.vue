@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import netLogDefaultText from './assets/net.log?raw'
 import netLogMultiHopText from './assets/net_multihop.log?raw'
+import netLogMultiHopComplexText from './assets/net_multihop_complex.log?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
@@ -232,6 +233,10 @@ const LOG_SOURCES = Object.freeze({
     label: '多跳转发日志（net_multihop.log）',
     raw: netLogMultiHopText,
   },
+  complex: {
+    label: '复杂冲突日志（net_multihop_complex.log）',
+    raw: netLogMultiHopComplexText,
+  },
 })
 
 const THEME_OPTIONS = Object.freeze([
@@ -338,14 +343,14 @@ let bgmStep = 0
 let bgmNextTime = 0
 
 const BGM_PATTERN = Object.freeze([
-  [55, 82.41],
-  [58.27, 87.31],
-  [61.74, 92.5],
-  [65.41, 98],
-  [58.27, 87.31],
-  [55, 82.41],
-  [51.91, 77.78],
-  [49, 73.42],
+  [110, 164.81],
+  [123.47, 185],
+  [130.81, 196],
+  [146.83, 220],
+  [123.47, 185],
+  [110, 164.81],
+  [98, 146.83],
+  [92.5, 138.59],
 ])
 
 const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
@@ -803,36 +808,75 @@ const makeVoice = (ctx, destination, frequency, when, duration, options = {}) =>
   osc.stop(when + duration)
 }
 
+const makeTick = (ctx, destination, when, duration = 0.07, volume = 0.02) => {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  const filter = ctx.createBiquadFilter()
+  osc.type = 'square'
+  osc.frequency.setValueAtTime(880, when)
+  filter.type = 'highpass'
+  filter.frequency.setValueAtTime(1300, when)
+  gain.gain.setValueAtTime(0.0001, when)
+  gain.gain.exponentialRampToValueAtTime(volume, when + 0.008)
+  gain.gain.exponentialRampToValueAtTime(0.0001, when + duration)
+  osc.connect(filter)
+  filter.connect(gain)
+  gain.connect(destination)
+  osc.start(when)
+  osc.stop(when + duration)
+}
+
+const playUnlockChime = (ctx, destination, startAt) => {
+  makeVoice(ctx, destination, 392, startAt, 0.18, {
+    type: 'sine',
+    volume: 0.035,
+    cutoff: 2400,
+    attack: 0.01,
+    release: 0.1,
+  })
+  makeVoice(ctx, destination, 523.25, startAt + 0.12, 0.22, {
+    type: 'triangle',
+    volume: 0.042,
+    cutoff: 2600,
+    attack: 0.01,
+    release: 0.14,
+  })
+}
+
 const scheduleBgmTick = () => {
   if (!audioCtx || !audioMaster || isMuted.value) return
-  const lookAhead = 0.32
-  const stepLen = 0.34
+  const lookAhead = 0.36
+  const stepLen = 0.31
   while (bgmNextTime < audioCtx.currentTime + lookAhead) {
     const [bass, pulse] = BGM_PATTERN[bgmStep % BGM_PATTERN.length]
     makeVoice(audioCtx, audioMaster, bass, bgmNextTime, stepLen * 1.45, {
       type: 'sawtooth',
-      volume: 0.045,
-      cutoff: 420,
-      attack: 0.04,
-      release: 0.42,
+      volume: 0.06,
+      cutoff: 760,
+      attack: 0.025,
+      release: 0.34,
     })
 
-    makeVoice(audioCtx, audioMaster, pulse, bgmNextTime + 0.05, stepLen * 0.8, {
+    makeVoice(audioCtx, audioMaster, pulse, bgmNextTime + 0.03, stepLen * 0.82, {
       type: 'triangle',
-      volume: 0.028,
-      cutoff: 1300,
+      volume: 0.048,
+      cutoff: 2100,
       attack: 0.01,
-      release: 0.2,
+      release: 0.18,
     })
 
     if (bgmStep % 4 === 3) {
-      makeVoice(audioCtx, audioMaster, pulse * 1.5, bgmNextTime + 0.16, stepLen * 0.5, {
+      makeVoice(audioCtx, audioMaster, pulse * 1.5, bgmNextTime + 0.12, stepLen * 0.5, {
         type: 'sine',
-        volume: 0.018,
-        cutoff: 1900,
+        volume: 0.032,
+        cutoff: 2600,
         attack: 0.01,
         release: 0.16,
       })
+    }
+    makeTick(audioCtx, audioMaster, bgmNextTime + 0.015, 0.06, 0.015)
+    if (bgmStep % 2 === 1) {
+      makeTick(audioCtx, audioMaster, bgmNextTime + 0.17, 0.05, 0.012)
     }
 
     bgmStep += 1
@@ -863,7 +907,12 @@ const ensureBgm = async () => {
   }
 
   audioMaster.gain.cancelScheduledValues(audioCtx.currentTime)
-  audioMaster.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.25)
+  audioMaster.gain.setValueAtTime(Math.max(0.0001, audioMaster.gain.value), audioCtx.currentTime)
+  audioMaster.gain.exponentialRampToValueAtTime(0.22, audioCtx.currentTime + 0.2)
+  scheduleBgmTick()
+  if (bgmStep < 2) {
+    playUnlockChime(audioCtx, audioMaster, audioCtx.currentTime + 0.03)
+  }
 }
 
 const setMuteState = async (nextMuted) => {
@@ -1143,6 +1192,8 @@ onMounted(() => {
   window.addEventListener('pointerup', onGlobalPointerUp)
   window.addEventListener('pointercancel', onGlobalPointerUp)
   window.addEventListener('pointerdown', ensureBgm, { once: true })
+  window.addEventListener('keydown', ensureBgm, { once: true })
+  window.addEventListener('touchstart', ensureBgm, { once: true, passive: true })
 })
 
 onBeforeUnmount(() => {
@@ -1152,6 +1203,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', onGlobalPointerUp)
   window.removeEventListener('pointercancel', onGlobalPointerUp)
   window.removeEventListener('pointerdown', ensureBgm)
+  window.removeEventListener('keydown', ensureBgm)
+  window.removeEventListener('touchstart', ensureBgm)
   if (schedulerTimer) {
     clearInterval(schedulerTimer)
     schedulerTimer = null
@@ -1274,8 +1327,13 @@ onBeforeUnmount(() => {
               <label class="field field-compact">
                 <div class="field-head"><span>日志源</span></div>
                 <select class="select" :value="logSourceKey" @change="onLogSourceChange">
-                  <option value="default">{{ LOG_SOURCES.default.label }}</option>
-                  <option value="multihop">{{ LOG_SOURCES.multihop.label }}</option>
+                  <option
+                    v-for="[key, source] in Object.entries(LOG_SOURCES)"
+                    :key="key"
+                    :value="key"
+                  >
+                    {{ source.label }}
+                  </option>
                 </select>
               </label>
               <label class="field field-compact">
@@ -1309,7 +1367,7 @@ onBeforeUnmount(() => {
                   </option>
                 </select>
               </label>
-              <label class="field field-compact" :class="{ 'field-hidden': fxLevel !== 'extreme' }">
+              <label class="field field-compact" :class="{ 'field-hidden': fxLevel === 'standard' }">
                 <div class="field-head"><span>水下环境</span></div>
                 <select class="select" :value="underwaterDetail" @change="onUnderwaterDetailChange">
                   <option
