@@ -95,6 +95,8 @@ const props = defineProps({
   nodeVisuals: { type: Array, required: true },
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
+  themeKey: { type: String, default: 'ocean-sonar' },
+  fxLevel: { type: String, default: 'standard' },
 })
 
 const TOOL_MODES = Object.freeze({
@@ -103,6 +105,139 @@ const TOOL_MODES = Object.freeze({
 })
 
 const NODE_RADIUS = 18
+const THEME_PROFILES = Object.freeze({
+  'ocean-sonar': {
+    effect: 'sonar',
+    bg: ['#16325d', '#0b1628', '#030711'],
+    tx: '#f59e0b',
+    rx: '#22c55e',
+    bad: '#ef4444',
+    idleInner: '#7dd3fc',
+    idleOuter: '#1d4ed8',
+    nodeStroke: 'rgba(186, 230, 253, 0.6)',
+    lane: 'rgba(148, 163, 184, 0.3)',
+    sweep: 'rgba(56, 189, 248, 0.08)',
+    ring: 'rgba(56, 189, 248, 0.22)',
+    particle: 'rgba(125, 211, 252, 0.5)',
+    label: '#dbeafe',
+    depth: 'rgba(191, 219, 254, 0.7)',
+  },
+  'research-lab': {
+    effect: 'grid',
+    bg: ['#1a2338', '#111827', '#0a0f1d'],
+    tx: '#f59e0b',
+    rx: '#34d399',
+    bad: '#f87171',
+    idleInner: '#a5b4fc',
+    idleOuter: '#2563eb',
+    nodeStroke: 'rgba(191, 219, 254, 0.52)',
+    lane: 'rgba(148, 163, 184, 0.28)',
+    sweep: 'rgba(96, 165, 250, 0.07)',
+    ring: 'rgba(147, 197, 253, 0.22)',
+    particle: 'rgba(191, 219, 254, 0.44)',
+    label: '#dbeafe',
+    depth: 'rgba(191, 219, 254, 0.68)',
+  },
+  'tactical-ops': {
+    effect: 'radar',
+    bg: ['#263a1d', '#121f12', '#090f0a'],
+    tx: '#f59e0b',
+    rx: '#4ade80',
+    bad: '#ef4444',
+    idleInner: '#a3e635',
+    idleOuter: '#166534',
+    nodeStroke: 'rgba(187, 247, 208, 0.5)',
+    lane: 'rgba(163, 230, 53, 0.23)',
+    sweep: 'rgba(132, 204, 22, 0.08)',
+    ring: 'rgba(132, 204, 22, 0.24)',
+    particle: 'rgba(190, 242, 100, 0.4)',
+    label: '#dcfce7',
+    depth: 'rgba(187, 247, 208, 0.66)',
+  },
+  'industrial-scada': {
+    effect: 'scanline',
+    bg: ['#1f2937', '#111827', '#0b1220'],
+    tx: '#f97316',
+    rx: '#14b8a6',
+    bad: '#ef4444',
+    idleInner: '#67e8f9',
+    idleOuter: '#0369a1',
+    nodeStroke: 'rgba(165, 243, 252, 0.5)',
+    lane: 'rgba(148, 163, 184, 0.24)',
+    sweep: 'rgba(45, 212, 191, 0.06)',
+    ring: 'rgba(45, 212, 191, 0.22)',
+    particle: 'rgba(153, 246, 228, 0.45)',
+    label: '#ccfbf1',
+    depth: 'rgba(153, 246, 228, 0.62)',
+  },
+  'cyber-neon': {
+    effect: 'neon',
+    bg: ['#2b1244', '#100b22', '#07060f'],
+    tx: '#f97316',
+    rx: '#2dd4bf',
+    bad: '#fb7185',
+    idleInner: '#22d3ee',
+    idleOuter: '#c026d3',
+    nodeStroke: 'rgba(217, 70, 239, 0.52)',
+    lane: 'rgba(217, 70, 239, 0.26)',
+    sweep: 'rgba(236, 72, 153, 0.08)',
+    ring: 'rgba(244, 114, 182, 0.24)',
+    particle: 'rgba(34, 211, 238, 0.42)',
+    label: '#f5d0fe',
+    depth: 'rgba(196, 181, 253, 0.68)',
+  },
+  'light-minimal': {
+    effect: 'minimal',
+    bg: ['#e8f1ff', '#dbeafe', '#cbd5e1'],
+    tx: '#f97316',
+    rx: '#16a34a',
+    bad: '#dc2626',
+    idleInner: '#93c5fd',
+    idleOuter: '#2563eb',
+    nodeStroke: 'rgba(59, 130, 246, 0.4)',
+    lane: 'rgba(71, 85, 105, 0.24)',
+    sweep: 'rgba(56, 189, 248, 0.08)',
+    ring: 'rgba(59, 130, 246, 0.2)',
+    particle: 'rgba(59, 130, 246, 0.36)',
+    label: '#0f172a',
+    depth: 'rgba(30, 41, 59, 0.7)',
+  },
+  'gis-map': {
+    effect: 'terrain',
+    bg: ['#27453c', '#132823', '#0b1714'],
+    tx: '#f59e0b',
+    rx: '#22c55e',
+    bad: '#ef4444',
+    idleInner: '#86efac',
+    idleOuter: '#0f766e',
+    nodeStroke: 'rgba(134, 239, 172, 0.46)',
+    lane: 'rgba(110, 231, 183, 0.26)',
+    sweep: 'rgba(34, 197, 94, 0.07)',
+    ring: 'rgba(34, 197, 94, 0.24)',
+    particle: 'rgba(110, 231, 183, 0.38)',
+    label: '#dcfce7',
+    depth: 'rgba(167, 243, 208, 0.64)',
+  },
+  'timeline-story': {
+    effect: 'timeline',
+    bg: ['#2f1a3d', '#171730', '#0c1221'],
+    tx: '#f59e0b',
+    rx: '#60a5fa',
+    bad: '#f43f5e',
+    idleInner: '#c4b5fd',
+    idleOuter: '#4f46e5',
+    nodeStroke: 'rgba(196, 181, 253, 0.48)',
+    lane: 'rgba(167, 139, 250, 0.26)',
+    sweep: 'rgba(196, 181, 253, 0.08)',
+    ring: 'rgba(196, 181, 253, 0.22)',
+    particle: 'rgba(221, 214, 254, 0.42)',
+    label: '#ede9fe',
+    depth: 'rgba(196, 181, 253, 0.66)',
+  },
+})
+
+const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
+const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
 const canvasEl = ref(null)
 const containerEl = ref(null)
 const displayWidth = ref(900)
@@ -301,10 +436,10 @@ const strokeCircle = (ctx, x, y, radius, strokeStyle, lineWidth, alpha = 1) => {
   ctx.restore()
 }
 
-const packetSegmentColor = (packet, receiver, now) => {
-  const txColor = 'rgba(245, 158, 11, 0.92)'
-  const rxColor = 'rgba(34, 197, 94, 0.92)'
-  const collisionColor = 'rgba(220, 38, 38, 0.94)'
+const packetSegmentColor = (packet, receiver, now, profile) => {
+  const txColor = profile.tx
+  const rxColor = profile.rx
+  const collisionColor = profile.bad
 
   if (now < receiver.rx_start_us) {
     return txColor
@@ -326,7 +461,7 @@ const packetSegmentColor = (packet, receiver, now) => {
   return collisionColor
 }
 
-const drawPacketRect = (ctx, packet, receiver, now) => {
+const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
   const srcNode = nodeById.value.get(packet.src)
   const dstNode = nodeById.value.get(receiver.dst)
   if (!srcNode || !dstNode) return
@@ -353,12 +488,16 @@ const drawPacketRect = (ctx, packet, receiver, now) => {
   const segStartY = src.y + (dy * startRatio)
   const segEndX = src.x + (dx * endRatio)
   const segEndY = src.y + (dy * endRatio)
-  const halfWidth = 3
-  const color = packetSegmentColor(packet, receiver, now)
+  const pulse = 0.7 + (Math.sin((phase * (8 + fx)) + (packet.tx_start_us * 0.000001)) * 0.3)
+  const halfWidth = (2.6 + (pulse * 1.6)) * (fx > 1 ? 1.26 : 1)
+  const color = packetSegmentColor(packet, receiver, now, profile)
 
   ctx.save()
-  ctx.setLineDash([5, 6])
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.34)'
+  if (profile.effect === 'minimal') ctx.setLineDash([2, 5])
+  else if (profile.effect === 'timeline') ctx.setLineDash([10, 7])
+  else if (profile.effect === 'neon') ctx.setLineDash([4, 4])
+  else ctx.setLineDash([5, 6])
+  ctx.strokeStyle = profile.lane
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(src.x, src.y)
@@ -367,6 +506,8 @@ const drawPacketRect = (ctx, packet, receiver, now) => {
   ctx.restore()
 
   ctx.save()
+  ctx.shadowColor = color
+  ctx.shadowBlur = (8 + (pulse * 10)) * (fx > 1 ? 1.8 : 1)
   ctx.fillStyle = color
   ctx.beginPath()
   ctx.moveTo(segStartX + (nx * halfWidth), segStartY + (ny * halfWidth))
@@ -383,41 +524,71 @@ const drawPacketRect = (ctx, packet, receiver, now) => {
       fillCircle(ctx, dst.x, dst.y, 2.8, color, 0.45 + (linger * 0.3))
     }
   }
-}
 
-const drawVisiblePackets = (ctx) => {
-  const now = props.currentTime
-  for (const packet of props.visiblePackets) {
-    for (const receiver of packet.receivers) {
-      if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
-      drawPacketRect(ctx, packet, receiver, now)
+  const headRatio = Math.max(0, Math.min(1, frontRatio))
+  const headX = src.x + (dx * headRatio)
+  const headY = src.y + (dy * headRatio)
+  fillCircle(ctx, headX, headY, (1.5 + (pulse * 1.8)) * (fx > 1 ? 1.6 : 1), color, fx > 1 ? 0.95 : 0.85)
+
+  if (fx > 1) {
+    const trailCount = 3
+    for (let i = 1; i <= trailCount; i += 1) {
+      const t = Math.max(0, headRatio - (i * 0.05))
+      const tx = src.x + (dx * t)
+      const ty = src.y + (dy * t)
+      fillCircle(ctx, tx, ty, Math.max(1.2, (2.8 - (i * 0.65))), color, 0.3 - (i * 0.07))
     }
   }
 }
 
-const drawNode = (ctx, node, visual) => {
+const drawVisiblePackets = (ctx, profile, phase, fx) => {
+  const now = props.currentTime
+  for (const packet of props.visiblePackets) {
+    for (const receiver of packet.receivers) {
+      if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
+      drawPacketRect(ctx, packet, receiver, now, profile, phase, fx)
+    }
+  }
+}
+
+const drawNode = (ctx, node, visual, profile, phase, fx) => {
   const p = toScreen(node.x, node.y)
   const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, NODE_RADIUS + 6)
-  idleGradient.addColorStop(0, '#7dd3fc')
-  idleGradient.addColorStop(1, '#1d4ed8')
+  idleGradient.addColorStop(0, profile.idleInner)
+  idleGradient.addColorStop(1, profile.idleOuter)
 
   fillCircle(ctx, p.x, p.y, NODE_RADIUS, idleGradient, 0.92)
-  strokeCircle(ctx, p.x, p.y, NODE_RADIUS, 'rgba(186, 230, 253, 0.6)', 1.4, 0.9)
+  strokeCircle(ctx, p.x, p.y, NODE_RADIUS, profile.nodeStroke, 1.4, 0.9)
+
+  const pulse = 0.5 + (Math.sin((phase * (4.2 + (fx * 0.8))) + (node.node_id * 0.6)) * 0.5)
+  strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 4 + (pulse * 3), profile.ring, 1, 0.35 + (pulse * 0.3))
+  if (fx > 1) {
+    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 10 + (pulse * 6), profile.ring, 1.2, 0.3)
+  }
 
   if (visual.mode === 'tx') {
     const progressRadius = 3 + ((NODE_RADIUS - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, '#f59e0b', 0.98)
+    fillCircle(ctx, p.x, p.y, progressRadius, profile.tx, 0.98)
+    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 8 + (pulse * 5), profile.tx, 1.2, 0.35)
 
     if (visual.overlay?.kind === 'collision_rx_tx') {
-      fillCircle(ctx, p.x, p.y, NODE_RADIUS * 0.8, '#dc2626', 0.78)
+      fillCircle(ctx, p.x, p.y, NODE_RADIUS * 0.8, profile.bad, 0.78)
     }
   } else if (visual.mode === 'rx' || visual.mode === 'rx-done') {
     const progressRadius = visual.mode === 'rx-done'
       ? NODE_RADIUS
       : 3 + ((NODE_RADIUS - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, '#22c55e', visual.fade ?? 1)
+    fillCircle(ctx, p.x, p.y, progressRadius, profile.rx, visual.fade ?? 1)
+    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 7 + (pulse * 4), profile.rx, 1, 0.28)
   } else if (visual.mode === 'collision' || visual.mode === 'collision-linger') {
-    fillCircle(ctx, p.x, p.y, NODE_RADIUS, '#dc2626', visual.fade ?? 1)
+    fillCircle(ctx, p.x, p.y, NODE_RADIUS, profile.bad, visual.fade ?? 1)
+    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 10 + (pulse * 4), profile.bad, 1.6, 0.5)
+    if (fx > 1) {
+      for (let i = 0; i < 3; i += 1) {
+        const rr = NODE_RADIUS + 13 + (i * 7) + (((phase * 42) + (i * 8)) % 10)
+        strokeCircle(ctx, p.x, p.y, rr, profile.bad, 1.1, 0.22 - (i * 0.05))
+      }
+    }
   }
 
   ctx.save()
@@ -429,12 +600,12 @@ const drawNode = (ctx, node, visual) => {
   ctx.restore()
 
   ctx.save()
-  ctx.fillStyle = '#dbeafe'
+  ctx.fillStyle = profile.label
   ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
   ctx.fillText(node.name, p.x + NODE_RADIUS + 10, p.y + 2)
-  ctx.fillStyle = 'rgba(191, 219, 254, 0.7)'
+  ctx.fillStyle = profile.depth
   ctx.font = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.fillText(`z ${node.z ?? 0}m`, p.x + NODE_RADIUS + 10, p.y + 16)
   ctx.restore()
@@ -525,6 +696,103 @@ const drawMeasurementLines = (ctx) => {
   }
 }
 
+const drawThemeAmbient = (ctx, w, h, profile, phase, fx) => {
+  const sweep = ((phase * 0.07) % 1) * w
+  const sweepGradient = ctx.createLinearGradient(sweep - 240, 0, sweep + 240, 0)
+  sweepGradient.addColorStop(0, 'rgba(0,0,0,0)')
+  sweepGradient.addColorStop(0.5, profile.sweep)
+  sweepGradient.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = sweepGradient
+  ctx.fillRect(0, 0, w, h)
+
+  if (profile.effect === 'sonar' || profile.effect === 'radar') {
+    ctx.save()
+    ctx.strokeStyle = profile.ring
+    ctx.lineWidth = 1
+    for (let i = 0; i < 4; i += 1) {
+      const r = ((phase * (36 + (fx * 8))) + (i * 95)) % Math.max(w, h)
+      ctx.beginPath()
+      ctx.arc(w * (profile.effect === 'radar' ? 0.2 : 0.12), h * 0.2, r, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  if (profile.effect === 'grid' || profile.effect === 'timeline') {
+    ctx.save()
+    ctx.strokeStyle = profile.ring
+    ctx.lineWidth = 0.6
+    const spacing = profile.effect === 'grid' ? 44 : 56
+    for (let x = 0; x < w; x += spacing) {
+      ctx.beginPath()
+      ctx.moveTo(x + ((phase * (5 + fx)) % spacing), 0)
+      ctx.lineTo(x + ((phase * (5 + fx)) % spacing), h)
+      ctx.stroke()
+    }
+    for (let y = 0; y < h; y += spacing) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(w, y)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  if (profile.effect === 'scanline') {
+    ctx.save()
+    const y = (phase * (45 + (fx * 14))) % h
+    const line = ctx.createLinearGradient(0, y - 80, 0, y + 80)
+    line.addColorStop(0, 'rgba(0,0,0,0)')
+    line.addColorStop(0.5, profile.sweep)
+    line.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = line
+    ctx.fillRect(0, y - 80, w, 160)
+    ctx.restore()
+  }
+
+  if (profile.effect === 'neon' || profile.effect === 'terrain' || profile.effect === 'minimal') {
+    ctx.save()
+    const waveCount = profile.effect === 'minimal' ? 2 : (fx > 1 ? 6 : 4)
+    ctx.strokeStyle = profile.ring
+    ctx.lineWidth = profile.effect === 'minimal' ? 0.8 : 1.2
+    for (let i = 0; i < waveCount; i += 1) {
+      const y0 = h * (0.2 + (i * 0.18))
+      ctx.beginPath()
+      for (let x = 0; x <= w; x += 18) {
+        const y = y0 + Math.sin((x * 0.008) + (phase * ((1.2 + (i * 0.2)) * (1 + (fx * 0.18))))) * (6 + (i * 2) + (fx > 1 ? 3 : 0))
+        if (x === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  ctx.save()
+  const particles = fx > 1 ? 52 : 26
+  for (let i = 0; i < particles; i += 1) {
+    const px = ((i * 213) + (phase * (9 + (i % 5)))) % w
+    const py = (((i * 127) % h) + (Math.sin((phase * 0.8) + i) * 14))
+    fillCircle(ctx, px, py, 1.2 + ((i % 3) * 0.3), profile.particle, 0.25 + ((i % 4) * 0.09))
+  }
+  ctx.restore()
+
+  if (fx > 1) {
+    ctx.save()
+    ctx.globalCompositeOperation = 'screen'
+    for (let i = 0; i < 3; i += 1) {
+      const cx = w * (0.2 + (i * 0.28))
+      const cy = h * (0.22 + (Math.sin((phase * 0.7) + i) * 0.06))
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.35)
+      g.addColorStop(0, profile.sweep)
+      g.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, w, h)
+    }
+    ctx.restore()
+  }
+}
+
 const draw = () => {
   const canvas = canvasEl.value
   if (!canvas) return
@@ -544,15 +812,19 @@ const draw = () => {
 
   const w = displayWidth.value
   const h = displayHeight.value
+  const profile = themeProfile.value
+  const fx = fxIntensity.value
+  const phase = props.currentTime / 1_000_000
 
   const background = ctx.createRadialGradient(w * 0.2, h * 0.18, 0, w * 0.2, h * 0.18, Math.max(w, h))
-  background.addColorStop(0, '#16325d')
-  background.addColorStop(0.45, '#0b1628')
-  background.addColorStop(1, '#030711')
+  background.addColorStop(0, profile.bg[0])
+  background.addColorStop(0.45, profile.bg[1])
+  background.addColorStop(1, profile.bg[2])
   ctx.fillStyle = background
   ctx.fillRect(0, 0, w, h)
 
-  drawVisiblePackets(ctx)
+  drawThemeAmbient(ctx, w, h, profile, phase, fx)
+  drawVisiblePackets(ctx, profile, phase, fx)
 
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id) || {
@@ -564,15 +836,15 @@ const draw = () => {
       statusText: '空闲',
       packetId: null,
     }
-    drawNode(ctx, node, visual)
+    drawNode(ctx, node, visual, profile, phase, fx)
   }
 
   ctx.save()
-  ctx.fillStyle = '#bfdbfe'
+  ctx.fillStyle = profile.label
   ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.fillText(`time: ${(props.currentTime / 1000).toFixed(1)} ms`, 18, 22)
   if (props.visiblePackets.length === 1) {
-    ctx.fillStyle = '#7dd3fc'
+    ctx.fillStyle = profile.idleInner
     ctx.fillText(`focus: ${props.visiblePackets[0].packet_id}`, 18, 42)
   }
   ctx.restore()
@@ -819,7 +1091,7 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets],
+  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel],
   () => {
     requestAnimationFrame(draw)
   },
@@ -877,10 +1149,10 @@ onBeforeUnmount(() => {
   width: 38px;
   height: 38px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(12, 20, 37, 0.86);
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 86%, #020617 14%);
   backdrop-filter: blur(6px);
-  color: #dbeafe;
+  color: var(--accent-soft, #dbeafe);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -903,21 +1175,21 @@ onBeforeUnmount(() => {
   gap: 0.45rem;
   padding: 0.42rem 0.52rem;
   border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(12, 20, 37, 0.86);
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 24%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 90%, #020617 10%);
   backdrop-filter: blur(6px);
 }
 
 .toolbar-group-history {
-  border-color: rgba(245, 158, 11, 0.24);
-  background: rgba(18, 25, 39, 0.9);
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 30%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 92%, #020617 8%);
 }
 
 .toolbar-btn {
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.42);
-  color: #e2e8f0;
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 28%, transparent);
+  color: var(--text, #e2e8f0);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--btn-top, #1c2a46) 92%, transparent), color-mix(in srgb, var(--btn-bottom, #151f34) 94%, transparent));
   padding: 0.3rem 0.68rem;
   font-size: 0.76rem;
   cursor: pointer;
@@ -944,8 +1216,8 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn.active {
-  border-color: rgba(56, 189, 248, 0.7);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.24) inset;
+  border-color: color-mix(in srgb, var(--accent, #38bdf8) 68%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #38bdf8) 26%, transparent) inset;
   color: #f8fafc;
 }
 
@@ -960,7 +1232,7 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-help {
-  color: #93c5fd;
+  color: var(--accent-soft, #93c5fd);
   font-size: 0.75rem;
   white-space: nowrap;
 }
@@ -969,8 +1241,8 @@ onBeforeUnmount(() => {
   position: absolute;
   transform: translate(16px, -50%);
   z-index: 2;
-  background: rgba(8, 18, 34, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 94%, #020617 6%);
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
   border-radius: 10px;
   padding: 0.45rem 0.65rem;
   min-width: 200px;

@@ -41,6 +41,7 @@ import {
   Color4,
   DynamicTexture,
   Engine,
+  GlowLayer,
   HemisphericLight,
   Matrix,
   MeshBuilder,
@@ -56,6 +57,8 @@ const props = defineProps({
   nodeVisuals: { type: Array, required: true },
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
+  themeKey: { type: String, default: 'ocean-sonar' },
+  fxLevel: { type: String, default: 'standard' },
 })
 
 const hostEl = ref(null)
@@ -85,6 +88,7 @@ let renderQueued = false
 let defaultCameraState = null
 let middlePanPointerId = null
 let middlePanLast = null
+let glowLayer = null
 
 const NODE_RADIUS = 130
 const DEPTH_SCALE = 38
@@ -93,22 +97,107 @@ const PROGRESS_CORE_SCALE = 0.94
 const AXIS_X_COLOR = new Color3(0.9725, 0.4431, 0.4431)
 const AXIS_Y_COLOR = new Color3(0.2902, 0.8706, 0.502)
 const AXIS_Z_COLOR = new Color3(0.3765, 0.6471, 0.9804)
+const color3 = (hex) => Color3.FromHexString(hex)
+const THEME_3D = Object.freeze({
+  'ocean-sonar': {
+    clear: new Color4(0.03, 0.07, 0.13, 1),
+    idleDiffuse: color3('#2963eb'),
+    idleEmissive: color3('#123066'),
+    tx: color3('#f59e0b'),
+    rx: color3('#22c55e'),
+    bad: color3('#dc2626'),
+    line: color3('#6f8bbd'),
+    markerAlpha: 0.45,
+  },
+  'research-lab': {
+    clear: new Color4(0.05, 0.08, 0.16, 1),
+    idleDiffuse: color3('#3b82f6'),
+    idleEmissive: color3('#1e3a8a'),
+    tx: color3('#f59e0b'),
+    rx: color3('#10b981'),
+    bad: color3('#ef4444'),
+    line: color3('#7b9ac8'),
+    markerAlpha: 0.42,
+  },
+  'tactical-ops': {
+    clear: new Color4(0.04, 0.08, 0.04, 1),
+    idleDiffuse: color3('#65a30d'),
+    idleEmissive: color3('#1f4c2c'),
+    tx: color3('#f59e0b'),
+    rx: color3('#4ade80'),
+    bad: color3('#ef4444'),
+    line: color3('#7faa4b'),
+    markerAlpha: 0.45,
+  },
+  'industrial-scada': {
+    clear: new Color4(0.04, 0.08, 0.12, 1),
+    idleDiffuse: color3('#0ea5e9'),
+    idleEmissive: color3('#164e63'),
+    tx: color3('#f97316'),
+    rx: color3('#14b8a6'),
+    bad: color3('#ef4444'),
+    line: color3('#6d90a6'),
+    markerAlpha: 0.42,
+  },
+  'cyber-neon': {
+    clear: new Color4(0.08, 0.03, 0.12, 1),
+    idleDiffuse: color3('#c026d3'),
+    idleEmissive: color3('#4a145f'),
+    tx: color3('#f97316'),
+    rx: color3('#2dd4bf'),
+    bad: color3('#fb7185'),
+    line: color3('#b26ac6'),
+    markerAlpha: 0.48,
+  },
+  'light-minimal': {
+    clear: new Color4(0.84, 0.9, 0.97, 1),
+    idleDiffuse: color3('#2563eb'),
+    idleEmissive: color3('#93c5fd'),
+    tx: color3('#f97316'),
+    rx: color3('#16a34a'),
+    bad: color3('#dc2626'),
+    line: color3('#64748b'),
+    markerAlpha: 0.36,
+  },
+  'gis-map': {
+    clear: new Color4(0.05, 0.11, 0.1, 1),
+    idleDiffuse: color3('#0f766e'),
+    idleEmissive: color3('#14532d'),
+    tx: color3('#f59e0b'),
+    rx: color3('#22c55e'),
+    bad: color3('#ef4444'),
+    line: color3('#6ba58c'),
+    markerAlpha: 0.44,
+  },
+  'timeline-story': {
+    clear: new Color4(0.08, 0.07, 0.14, 1),
+    idleDiffuse: color3('#4f46e5'),
+    idleEmissive: color3('#312e81'),
+    tx: color3('#f59e0b'),
+    rx: color3('#60a5fa'),
+    bad: color3('#f43f5e'),
+    line: color3('#9f8fc6'),
+    markerAlpha: 0.45,
+  },
+})
+const theme3D = computed(() => THEME_3D[props.themeKey] || THEME_3D['ocean-sonar'])
+const fx3D = computed(() => (props.fxLevel === 'extreme' ? 1.85 : 1))
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
 const worldPos = (node) => new Vector3(node.x, -(node.z ?? 0) * DEPTH_SCALE, node.y)
 
-const packetColor = (receiver, now) => {
-  if (now < receiver.rx_start_us) return new Color3(0.96, 0.62, 0.04)
-  if (receiver.status === 'ok') return new Color3(0.13, 0.77, 0.37)
+const packetColor = (receiver, now, palette) => {
+  if (now < receiver.rx_start_us) return palette.tx
+  if (receiver.status === 'ok') return palette.rx
   if (receiver.reason === 'collision_rx_rx') {
     const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
-    return now < collisionAt ? new Color3(0.13, 0.77, 0.37) : new Color3(0.86, 0.15, 0.15)
+    return now < collisionAt ? palette.rx : palette.bad
   }
   if (receiver.reason === 'collision_rx_tx') {
-    return now < receiver.rx_start_us ? new Color3(0.96, 0.62, 0.04) : new Color3(0.86, 0.15, 0.15)
+    return now < receiver.rx_start_us ? palette.tx : palette.bad
   }
-  return new Color3(0.86, 0.15, 0.15)
+  return palette.bad
 }
 
 const disposeMeshList = (list) => {
@@ -174,17 +263,17 @@ const syncMaterialColor = (material, next) => {
   material.metadata = { ...(material.metadata || {}), stateKey }
 }
 
-const visualStateColor = (visual) => {
-  return { diffuse: new Color3(0.16, 0.39, 0.92), emissive: new Color3(0.08, 0.19, 0.45), alpha: 1 }
+const visualStateColor = (visual, palette) => {
+  return { diffuse: palette.idleDiffuse, emissive: palette.idleEmissive, alpha: 1 }
 }
 
-const visualProgressStyle = (visual) => {
+const visualProgressStyle = (visual, palette) => {
   if (!visual) return null
   if (visual.mode === 'tx') {
     if (visual.overlay?.kind === 'collision_rx_tx') {
       return {
-        diffuse: new Color3(0.86, 0.15, 0.15),
-        emissive: new Color3(0.38, 0.02, 0.02),
+        diffuse: palette.bad,
+        emissive: palette.bad.scale(0.44),
         alpha: 0.98,
         scaleX: PROGRESS_CORE_SCALE,
         scaleY: PROGRESS_CORE_SCALE,
@@ -192,8 +281,8 @@ const visualProgressStyle = (visual) => {
       }
     }
     return {
-      diffuse: new Color3(0.96, 0.62, 0.04),
-      emissive: new Color3(0.42, 0.22, 0.04),
+      diffuse: palette.tx,
+      emissive: palette.tx.scale(0.36),
       alpha: 0.68,
       scaleX: 0.08 + (PROGRESS_CORE_SCALE * Math.max(0, Math.min(1, visual.fillProgress ?? 0))),
       scaleY: 0.08 + (PROGRESS_CORE_SCALE * Math.max(0, Math.min(1, visual.fillProgress ?? 0))),
@@ -202,8 +291,8 @@ const visualProgressStyle = (visual) => {
   }
   if (visual.mode === 'rx') {
     return {
-      diffuse: new Color3(0.16, 0.92, 0.43),
-      emissive: new Color3(0.08, 0.42, 0.18),
+      diffuse: palette.rx,
+      emissive: palette.rx.scale(0.4),
       alpha: 0.82,
       scaleX: 0.08 + (PROGRESS_CORE_SCALE * Math.max(0, Math.min(1, visual.fillProgress ?? 0))),
       scaleY: 0.08 + (PROGRESS_CORE_SCALE * Math.max(0, Math.min(1, visual.fillProgress ?? 0))),
@@ -212,8 +301,8 @@ const visualProgressStyle = (visual) => {
   }
   if (visual.mode === 'rx-done') {
     return {
-      diffuse: new Color3(0.16, 0.92, 0.43),
-      emissive: new Color3(0.08, 0.42, 0.18),
+      diffuse: palette.rx,
+      emissive: palette.rx.scale(0.4),
       alpha: (visual.fade ?? 1) * 0.78,
       scaleX: PROGRESS_CORE_SCALE,
       scaleY: PROGRESS_CORE_SCALE,
@@ -222,8 +311,8 @@ const visualProgressStyle = (visual) => {
   }
   if (visual.mode === 'collision' || visual.mode === 'collision-linger') {
     return {
-      diffuse: new Color3(0.86, 0.15, 0.15),
-      emissive: new Color3(0.38, 0.02, 0.02),
+      diffuse: palette.bad,
+      emissive: palette.bad.scale(0.44),
       alpha: Math.max(0, (visual.fade ?? 1) * 0.72),
       scaleX: PROGRESS_CORE_SCALE,
       scaleY: PROGRESS_CORE_SCALE,
@@ -252,6 +341,8 @@ const syncSelectedNodePos = () => {
 }
 
 const buildNodes = () => {
+  const palette = theme3D.value
+  const fx = fx3D.value
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id)
     const pos = worldPos(node)
@@ -263,8 +354,8 @@ const buildNodes = () => {
       }, scene), node.node_id)
       base.material = makeMaterial(
         `node-${node.node_id}-base-mat`,
-        new Color3(0.16, 0.39, 0.92),
-        new Color3(0.08, 0.19, 0.45),
+        palette.idleDiffuse,
+        palette.idleEmissive,
         1,
       )
       const progress = bindNodeMeta(MeshBuilder.CreateSphere(`node-${node.node_id}-progress`, {
@@ -274,8 +365,8 @@ const buildNodes = () => {
       progress.position = pos.clone()
       progress.material = makeMaterial(
         `node-${node.node_id}-progress-mat`,
-        new Color3(0.13, 0.77, 0.37),
-        new Color3(0.04, 0.26, 0.12),
+        palette.rx,
+        palette.rx.scale(0.28),
         0,
       )
       progress.material.backFaceCulling = false
@@ -290,17 +381,22 @@ const buildNodes = () => {
     entry.base.position.copyFrom(pos)
     entry.progress.position.copyFrom(pos)
     entry.base.setEnabled(true)
-    entry.base.scaling.setAll(1)
+    if (fx > 1) {
+      const pulse = 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
+      entry.base.scaling.setAll(pulse)
+    } else {
+      entry.base.scaling.setAll(1)
+    }
     entry.progress.setEnabled(true)
     entry.progress.scaling.setAll(0.01)
     syncMaterialColor(entry.progress.material, {
-      diffuse: new Color3(0.13, 0.77, 0.37),
-      emissive: new Color3(0.04, 0.26, 0.12),
+      diffuse: palette.rx,
+      emissive: palette.rx.scale(0.28),
       alpha: 0,
     })
-    const state = visualStateColor(visual)
+    const state = visualStateColor(visual, palette)
     syncMaterialColor(entry.base.material, state)
-    const progressStyle = visualProgressStyle(visual)
+    const progressStyle = visualProgressStyle(visual, palette)
     if (progressStyle) {
       if (progressStyle.alpha > 0.001) {
         entry.progress.scaling.set(
@@ -322,6 +418,8 @@ const buildNodes = () => {
 }
 
 const buildPackets = () => {
+  const palette = theme3D.value
+  const fx = fx3D.value
   const now = props.currentTime
   const activeKeys = new Set()
 
@@ -351,7 +449,7 @@ const buildPackets = () => {
       const pathDirection = fullDirection.clone().normalize()
       const segLength = Math.max(80, pathLength * Math.max(0.001, endRatio - startRatio))
       const midPos = srcPos.add(fullDirection.scale((startRatio + endRatio) / 2))
-      const color = packetColor(receiver, now)
+      const color = packetColor(receiver, now, palette)
 
       let entry = packetMeshMap.get(key)
       if (!entry) {
@@ -359,7 +457,7 @@ const buildPackets = () => {
           points: [srcPos, dstPos],
           updatable: true,
         }, scene)
-        line.color = new Color3(0.46, 0.52, 0.62)
+        line.color = palette.line
         line.alpha = 0.52
 
         const block = MeshBuilder.CreateCylinder(`packet-${packet.packet_id}-${receiver.dst}-block`, {
@@ -373,7 +471,7 @@ const buildPackets = () => {
           diameter: 70,
           segments: 14,
         }, scene)
-        marker.material = makeMaterial(`packet-${packet.packet_id}-${receiver.dst}-marker-mat`, color, color.scale(0.12), 0.45)
+        marker.material = makeMaterial(`packet-${packet.packet_id}-${receiver.dst}-marker-mat`, color, color.scale(0.12), palette.markerAlpha)
 
         entry = { line, block, marker }
         packetMeshMap.set(key, entry)
@@ -389,16 +487,17 @@ const buildPackets = () => {
       entry.marker.setEnabled(now >= receiver.rx_start_us)
 
       entry.block.position.copyFrom(midPos)
-      entry.block.scaling.x = 1
+      entry.block.scaling.x = fx > 1 ? 1.15 : 1
       entry.block.scaling.y = segLength / 100
-      entry.block.scaling.z = 1
+      entry.block.scaling.z = fx > 1 ? 1.15 : 1
       entry.block.rotationQuaternion = null
       entry.block.lookAt(dstPos)
       entry.block.rotate(Vector3.Right(), Math.PI / 2)
-      setMaterialColor(entry.block.material, color, color.scale(0.12), 0.96)
+      const pulseAlpha = fx > 1 ? (0.78 + ((Math.sin((now * 0.000009) + segLength) + 1) * 0.08)) : 0.96
+      setMaterialColor(entry.block.material, color, color.scale(0.12 * fx), pulseAlpha)
 
       entry.marker.position.copyFrom(dstPos)
-      setMaterialColor(entry.marker.material, color, color.scale(0.12), 0.45)
+      setMaterialColor(entry.marker.material, color, color.scale(0.12 * fx), Math.min(0.82, palette.markerAlpha * fx))
     }
   }
 
@@ -696,7 +795,12 @@ onMounted(() => {
     antialias: true,
   })
   scene = new Scene(engine)
-  scene.clearColor = new Color4(0.03, 0.07, 0.13, 1)
+  scene.clearColor = theme3D.value.clear.clone()
+  glowLayer = new GlowLayer('scene-glow', scene, {
+    mainTextureSamples: 4,
+    blurKernelSize: 32,
+  })
+  glowLayer.intensity = 0.44 * fx3D.value
 
   camera = new ArcRotateCamera('camera', -Math.PI / 3, Math.PI / 2.9, 9200, Vector3.Zero(), scene)
   camera.lowerRadiusLimit = 2200
@@ -751,9 +855,28 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.nodes, props.nodeVisuals, props.visiblePackets, props.currentTime],
+  () => [props.nodes, props.nodeVisuals, props.visiblePackets, props.currentTime, props.themeKey, props.fxLevel],
   () => queueRefresh(),
   { deep: true },
+)
+
+watch(
+  () => props.themeKey,
+  () => {
+    if (scene) scene.clearColor = theme3D.value.clear.clone()
+    queueRefresh()
+  },
+)
+
+watch(
+  () => props.fxLevel,
+  () => {
+    if (glowLayer) {
+      glowLayer.intensity = 0.44 * fx3D.value
+      glowLayer.blurKernelSize = props.fxLevel === 'extreme' ? 48 : 32
+    }
+    queueRefresh()
+  },
 )
 
 onBeforeUnmount(() => {
@@ -767,6 +890,10 @@ onBeforeUnmount(() => {
   }
   if (resizeObserver) resizeObserver.disconnect()
   if (scene && pointerObserver) scene.onPointerObservable.remove(pointerObserver)
+  if (glowLayer) {
+    glowLayer.dispose()
+    glowLayer = null
+  }
   disposeEntryMap(nodeMeshMap)
   disposeEntryMap(packetMeshMap)
   disposeEntryMap(worldAxesMap)
@@ -814,10 +941,10 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 0.42rem 0.6rem;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(8, 15, 28, 0.78);
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 22%, transparent);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 88%, #020617 12%);
   backdrop-filter: blur(6px);
-  color: #bfdbfe;
+  color: var(--accent-soft, #bfdbfe);
   font-size: 0.76rem;
 }
 
@@ -825,8 +952,8 @@ onBeforeUnmount(() => {
   position: absolute;
   transform: translate(14px, -50%);
   z-index: 2;
-  background: rgba(8, 18, 34, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.42);
+  background: color-mix(in srgb, var(--card, #0b1a2d) 94%, #020617 6%);
+  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
   border-radius: 10px;
   padding: 0.45rem 0.65rem;
   min-width: 200px;
@@ -844,7 +971,7 @@ onBeforeUnmount(() => {
 .scene-tooltip-role {
   font-size: 0.72rem;
   margin-left: 0.35rem;
-  color: #93c5fd;
+  color: var(--accent-soft, #93c5fd);
 }
 
 .scene-tooltip-row {

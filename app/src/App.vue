@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import netLogDefaultText from './assets/net.log?raw'
 import netLogMultiHopText from './assets/net_multihop.log?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
@@ -27,7 +27,7 @@ const timeDisplay = (us) => {
 const reasonLabel = (reason) => {
   if (reason === 'collision_rx_rx') return 'rx-rx 冲突'
   if (reason === 'collision_rx_tx') return 'rx-tx 冲突'
-  if (reason === 'below_rx_thresh') return '门限不足'
+  if (reason === 'below_rx_thresh') return '门限不足（信号低于接收阈值）'
   return '接收失败'
 }
 
@@ -234,6 +234,21 @@ const LOG_SOURCES = Object.freeze({
   },
 })
 
+const THEME_OPTIONS = Object.freeze([
+  { key: 'ocean-sonar', label: '海洋声呐' },
+  { key: 'research-lab', label: '科研仪表盘' },
+  { key: 'tactical-ops', label: '战术态势' },
+  { key: 'industrial-scada', label: '工业监控' },
+  { key: 'cyber-neon', label: '赛博霓虹' },
+  { key: 'light-minimal', label: '极简浅色' },
+  { key: 'gis-map', label: 'GIS地图' },
+  { key: 'timeline-story', label: '时间轴叙事' },
+])
+const FX_LEVEL_OPTIONS = Object.freeze([
+  { key: 'standard', label: '标准（当前）' },
+  { key: 'extreme', label: '狂暴（夸张）' },
+])
+
 const normalizePacketsFromParsed = (parsed) => (
   (parsed.packets.length > 0 ? parsed.packets : buildPacketsFromLegacy(parsed.tx, parsed.rx))
     .map((packet, index) => normalizePacket(packet, index))
@@ -241,6 +256,8 @@ const normalizePacketsFromParsed = (parsed) => (
 
 const initialParsed = parseLog(LOG_SOURCES.default.raw)
 const logSourceKey = ref('default')
+const selectedTheme = ref('ocean-sonar')
+const fxLevel = ref('standard')
 const nodesState = ref(enforceMinGap(initialParsed.nodes))
 const packetRows = ref(normalizePacketsFromParsed(initialParsed))
 const parseErrors = ref(initialParsed.parseErrors)
@@ -303,6 +320,8 @@ const showAllActivePackets = ref(true)
 const visualMode = ref('2d')
 const activeDragEvent = ref(null)
 const suppressLogClick = ref(null)
+const globalLogListEl = ref(null)
+const lifecycleLogListEl = ref(null)
 let raf = 0
 let lastTs = 0
 
@@ -312,7 +331,12 @@ const packetEntries = computed(() => packets.value.map((packet) => {
   const sourceNode = nodeById.value.get(packet.src)
   const receivers = packet.receivers.map((receiver) => {
     const dstNode = nodeById.value.get(receiver.dst)
-    const reason = receiver.status === 'ok' ? '成功' : reasonLabel(receiver.reason)
+    const overlapHint = receiver.status !== 'ok'
+      && Array.isArray(receiver.with)
+      && receiver.with.length > 0
+      ? `（与 ${receiver.with.join(', ')} 重叠）`
+      : ''
+    const reason = receiver.status === 'ok' ? '成功' : `${reasonLabel(receiver.reason)}${overlapHint}`
     const tone = receiver.status === 'ok'
       ? 'ok'
       : receiver.reason === 'collision_rx_tx'
@@ -489,6 +513,8 @@ const lifecycleStages = computed(() => {
 })
 
 const activeLifecycleStage = computed(() => lifecycleStages.value.find((stage) => stage.active) || null)
+const globalActiveEventId = computed(() => activePacket.value?.eventId || null)
+const lifecycleActiveEventId = computed(() => activeLifecycleStage.value?.eventId || null)
 
 const displayPackets = computed(() => {
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
@@ -741,6 +767,14 @@ const onLogSourceChange = (event) => {
   logSourceKey.value = event.target.value
 }
 
+const onThemeChange = (event) => {
+  selectedTheme.value = event.target.value
+}
+
+const onFxLevelChange = (event) => {
+  fxLevel.value = event.target.value
+}
+
 const onReplayModeChange = (event) => {
   replayMode.value = event.target.value
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
@@ -825,6 +859,24 @@ const onGlobalPointerUp = () => {
   activeDragEvent.value = null
 }
 
+const scrollLogItemIntoView = (listEl, eventId) => {
+  if (!listEl || !eventId) return
+  const target = [...listEl.querySelectorAll('.log-item')].find((item) => item.dataset.eventId === eventId)
+  if (!target) return
+
+  const listRect = listEl.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const outOfViewTop = targetRect.top < listRect.top
+  const outOfViewBottom = targetRect.bottom > listRect.bottom
+  if (!outOfViewTop && !outOfViewBottom) return
+
+  target.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest',
+    behavior: isPlaying.value ? 'smooth' : 'auto',
+  })
+}
+
 const tick = (timestamp) => {
   if (!isPlaying.value) {
     lastTs = 0
@@ -870,6 +922,36 @@ watch(logSourceKey, (nextKey) => {
   lastTs = 0
 }, { immediate: false })
 
+watch(selectedTheme, (next) => {
+  try {
+    localStorage.setItem('aquasim_theme', next)
+  } catch {
+    // ignore persistence errors
+  }
+})
+
+watch(fxLevel, (next) => {
+  try {
+    localStorage.setItem('aquasim_fx_level', next)
+  } catch {
+    // ignore persistence errors
+  }
+})
+
+watch([replayMode, globalActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
+  if (mode !== 'global' || !eventId) return
+  if (mode === prevMode && eventId === prevEventId) return
+  await nextTick()
+  scrollLogItemIntoView(globalLogListEl.value, eventId)
+})
+
+watch([replayMode, lifecycleActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
+  if (mode !== 'lifecycle' || !eventId) return
+  if (mode === prevMode && eventId === prevEventId) return
+  await nextTick()
+  scrollLogItemIntoView(lifecycleLogListEl.value, eventId)
+})
+
 watch(lifecyclePacketOptions, (options) => {
   if (!options.length) {
     selectedLifecyclePacketId.value = ''
@@ -881,6 +963,19 @@ watch(lifecyclePacketOptions, (options) => {
 }, { immediate: true })
 
 onMounted(() => {
+  try {
+    const saved = localStorage.getItem('aquasim_theme')
+    if (saved && THEME_OPTIONS.some((item) => item.key === saved)) {
+      selectedTheme.value = saved
+    }
+    const savedFx = localStorage.getItem('aquasim_fx_level')
+    if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
+      fxLevel.value = savedFx
+    }
+  } catch {
+    // ignore persistence errors
+  }
+
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('pointermove', onGlobalPointerMove)
   window.addEventListener('pointerup', onGlobalPointerUp)
@@ -897,7 +992,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page-wrap">
+  <div class="page-wrap" :class="`theme-${selectedTheme}`">
     <header class="topbar">
       <div>
         <p class="eyebrow">ns-3 Acoustic Replay</p>
@@ -909,69 +1004,6 @@ onBeforeUnmount(() => {
       </p>
     </header>
 
-    <section class="panel controls">
-      <div class="control-grid">
-        <button class="btn primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
-        <button class="btn" @click="reset">重置</button>
-        <button v-if="replayMode === 'global'" class="btn" :class="{ active: showAllActivePackets }" @click="showAllActivePackets = !showAllActivePackets">
-          {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
-        </button>
-        <label class="field">
-          <span>倍速</span>
-          <select class="select" :value="speed" @change="onSpeed">
-            <option :value="0.25">0.25x</option>
-            <option :value="0.5">0.5x</option>
-            <option :value="1">1x</option>
-            <option :value="2">2x</option>
-            <option :value="4">4x</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>日志源</span>
-          <select class="select" :value="logSourceKey" @change="onLogSourceChange">
-            <option value="default">{{ LOG_SOURCES.default.label }}</option>
-            <option value="multihop">{{ LOG_SOURCES.multihop.label }}</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>回放模式</span>
-          <select class="select" :value="replayMode" @change="onReplayModeChange">
-            <option value="global">全局模式</option>
-            <option value="lifecycle">生命周期模式</option>
-          </select>
-        </label>
-        <label v-if="replayMode === 'lifecycle'" class="field">
-          <span>选择包</span>
-          <select class="select" :value="selectedLifecyclePacketId" @change="onLifecyclePacketChange">
-            <option
-              v-for="packet in lifecyclePacketOptions"
-              :key="packet.id"
-              :value="packet.id"
-            >
-              {{ packet.label }}
-            </option>
-          </select>
-        </label>
-        <p class="hint">声速参考：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }}</p>
-      </div>
-
-      <label class="field range-wrap">
-        <span>全局时间进度（拖拽滑条，空格暂停/播放）</span>
-        <input
-          class="range"
-          type="range"
-          :min="0"
-          :max="cycleEndUs"
-          :step="1000"
-          :value="currentTime"
-          :style="{ '--range-progress': rangeProgressStyle }"
-          @input="onJump"
-        />
-      </label>
-
-      <p class="hint">全局模式查看整体传播；生命周期模式可按包选择并演示单包全流程。当前日志：{{ logSourceKey === 'multihop' ? 'net_multihop.log' : 'net.log' }}</p>
-    </section>
-
     <section class="panel card-grid">
       <div class="card visual">
         <div class="card-title-row">
@@ -981,74 +1013,177 @@ onBeforeUnmount(() => {
             <button class="view-switch-btn" :class="{ active: visualMode === '3d' }" @click="visualMode = '3d'">3D</button>
           </div>
         </div>
-        <NodeCanvas
-          v-if="visualMode === '2d'"
-          :nodes="nodesState"
-          :node-visuals="nodeVisuals"
-          :visible-packets="displayPackets"
-          :current-time="currentTime"
-          @pause-request="pauseForTool"
-        />
-        <Suspense v-else>
-          <template #default>
-            <NodeScene3D
-              :nodes="nodesState"
-              :node-visuals="nodeVisuals"
-              :visible-packets="displayPackets"
-              :current-time="currentTime"
-            />
-          </template>
-          <template #fallback>
-            <div class="visual-loading">
-              <div class="visual-loading-core" aria-hidden="true">
-                <span class="visual-loading-ring ring-a"></span>
-                <span class="visual-loading-ring ring-b"></span>
-                <span class="visual-loading-dot"></span>
+        <div class="visual-main">
+          <NodeCanvas
+            v-if="visualMode === '2d'"
+            :nodes="nodesState"
+            :node-visuals="nodeVisuals"
+            :visible-packets="displayPackets"
+            :current-time="currentTime"
+            :theme-key="selectedTheme"
+            :fx-level="fxLevel"
+            @pause-request="pauseForTool"
+          />
+          <Suspense v-else>
+            <template #default>
+              <NodeScene3D
+                :nodes="nodesState"
+                :node-visuals="nodeVisuals"
+                :visible-packets="displayPackets"
+                :current-time="currentTime"
+                :theme-key="selectedTheme"
+                :fx-level="fxLevel"
+              />
+            </template>
+            <template #fallback>
+              <div class="visual-loading">
+                <div class="visual-loading-core" aria-hidden="true">
+                  <span class="visual-loading-ring ring-a"></span>
+                  <span class="visual-loading-ring ring-b"></span>
+                  <span class="visual-loading-dot"></span>
+                </div>
+                <p class="visual-loading-title">3D 视图加载中</p>
+                <p class="visual-loading-text">正在初始化 Babylon 场景与节点材质</p>
               </div>
-              <p class="visual-loading-title">3D 视图加载中</p>
-              <p class="visual-loading-text">正在初始化 Babylon 场景与节点材质</p>
-            </div>
-          </template>
-        </Suspense>
+            </template>
+          </Suspense>
+        </div>
+        <div class="visual-timeline">
+          <label class="field range-wrap">
+            <input
+              class="range"
+              type="range"
+              :min="0"
+              :max="cycleEndUs"
+              :step="1000"
+              :value="currentTime"
+              :style="{ '--range-progress': rangeProgressStyle }"
+              @input="onJump"
+            />
+          </label>
+        </div>
       </div>
 
       <aside class="card log">
+        <div class="side-controls">
+          <div class="control-actions">
+            <div class="control-btn-row">
+              <button class="btn btn-compact primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
+              <button class="btn btn-compact" @click="reset">重置</button>
+              <button
+                v-if="replayMode === 'global'"
+                class="btn btn-compact btn-wide"
+                :class="{ active: showAllActivePackets }"
+                @click="showAllActivePackets = !showAllActivePackets"
+              >
+                {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
+              </button>
+            </div>
+            <div class="control-fields-grid">
+              <label class="field field-compact">
+                <span>倍速</span>
+                <select class="select" :value="speed" @change="onSpeed">
+                  <option :value="0.05">0.05x</option>
+                  <option :value="0.1">0.1x</option>
+                  <option :value="0.25">0.25x</option>
+                  <option :value="0.5">0.5x</option>
+                  <option :value="1">1x</option>
+                  <option :value="2">2x</option>
+                  <option :value="4">4x</option>
+                </select>
+              </label>
+              <label class="field field-compact">
+                <span>日志源</span>
+                <select class="select" :value="logSourceKey" @change="onLogSourceChange">
+                  <option value="default">{{ LOG_SOURCES.default.label }}</option>
+                  <option value="multihop">{{ LOG_SOURCES.multihop.label }}</option>
+                </select>
+              </label>
+              <label class="field field-compact">
+                <span>回放模式</span>
+                <select class="select" :value="replayMode" @change="onReplayModeChange">
+                  <option value="global">全局模式</option>
+                  <option value="lifecycle">生命周期模式</option>
+                </select>
+              </label>
+              <label class="field field-compact">
+                <span>主题风格</span>
+                <select class="select" :value="selectedTheme" @change="onThemeChange">
+                  <option
+                    v-for="theme in THEME_OPTIONS"
+                    :key="theme.key"
+                    :value="theme.key"
+                  >
+                    {{ theme.label }}
+                  </option>
+                </select>
+              </label>
+              <label class="field field-compact">
+                <span>特效等级</span>
+                <select class="select" :value="fxLevel" @change="onFxLevelChange">
+                  <option
+                    v-for="item in FX_LEVEL_OPTIONS"
+                    :key="item.key"
+                    :value="item.key"
+                  >
+                    {{ item.label }}
+                  </option>
+                </select>
+              </label>
+              <label v-if="replayMode === 'lifecycle'" class="field field-compact field-span-2">
+                <span>选择包</span>
+                <select class="select" :value="selectedLifecyclePacketId" @change="onLifecyclePacketChange">
+                  <option
+                    v-for="packet in lifecyclePacketOptions"
+                    :key="packet.id"
+                    :value="packet.id"
+                  >
+                    {{ packet.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
         <div class="card-title">{{ replayMode === 'lifecycle' ? '包生命周期阶段' : '包级日志（旧在上，新在下）' }}</div>
 
-        <div v-if="replayMode === 'lifecycle' && lifecyclePacket" class="lifecycle-summary">
-          <div>当前包：<strong>{{ lifecyclePacket.packet_id }}</strong></div>
-          <div>源节点：{{ lifecyclePacket.sourceLabel }}</div>
-          <div>生命周期：{{ timeDisplay(lifecyclePacket.startUs) }} - {{ timeDisplay(lifecyclePacket.endUs) }}</div>
-          <div>当前阶段：{{ activeLifecycleStage ? activeLifecycleStage.title : '无' }}</div>
+        <div v-if="replayMode === 'lifecycle'" class="lifecycle-panel">
+          <div v-if="lifecyclePacket" class="lifecycle-summary">
+            <div>当前包：<strong>{{ lifecyclePacket.packet_id }}</strong></div>
+            <div>源节点：{{ lifecyclePacket.sourceLabel }}</div>
+            <div>生命周期：{{ timeDisplay(lifecyclePacket.startUs) }} - {{ timeDisplay(lifecyclePacket.endUs) }}</div>
+            <div>当前阶段：{{ activeLifecycleStage ? activeLifecycleStage.title : '无' }}</div>
+          </div>
+
+          <ul ref="lifecycleLogListEl" class="log-list lifecycle-list">
+            <li v-if="!lifecycleStages.length" class="log-item empty">暂无阶段数据</li>
+            <li
+              v-for="stage in lifecycleStages"
+              :key="stage.eventId"
+              class="log-item"
+              :data-event-id="stage.eventId"
+              :class="{ 'log-item-active': stage.active }"
+              @click="onLifecycleStageSelect(stage)"
+            >
+              <div class="event-track" @pointerdown="onEventTrackPointerDown({ ...lifecyclePacket, eventId: stage.eventId, packet_id: stage.eventId, startUs: stage.startUs, endUs: stage.endUs }, $event)">
+                <div class="event-band" :style="{ width: `${stage.progressPct}%` }" aria-hidden="true"></div>
+              </div>
+              <div class="log-content">
+                <div class="log-head">
+                  <span class="time">{{ timeDisplay(stage.startUs) }}</span>
+                  <span class="tag" :class="stage.type === 'tx' ? 'tag-ok' : (stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' ? 'tag-fail' : 'tag-mixed'))">
+                    {{ stage.type.toUpperCase() }}
+                  </span>
+                  <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs) }}</span>
+                  <span class="packet-title">{{ stage.title }}</span>
+                </div>
+                <div class="packet-hint">{{ stage.detail }}</div>
+              </div>
+            </li>
+          </ul>
         </div>
 
-        <ul v-if="replayMode === 'lifecycle'" class="log-list lifecycle-list">
-          <li v-if="!lifecycleStages.length" class="log-item empty">暂无阶段数据</li>
-          <li
-            v-for="stage in lifecycleStages"
-            :key="stage.eventId"
-            class="log-item"
-            :class="{ 'log-item-active': stage.active }"
-            @click="onLifecycleStageSelect(stage)"
-          >
-            <div class="event-track" @pointerdown="onEventTrackPointerDown({ ...lifecyclePacket, eventId: stage.eventId, packet_id: stage.eventId, startUs: stage.startUs, endUs: stage.endUs }, $event)">
-              <div class="event-band" :style="{ width: `${stage.progressPct}%` }" aria-hidden="true"></div>
-            </div>
-            <div class="log-content">
-              <div class="log-head">
-                <span class="time">{{ timeDisplay(stage.startUs) }}</span>
-                <span class="tag" :class="stage.type === 'tx' ? 'tag-ok' : (stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' ? 'tag-fail' : 'tag-mixed'))">
-                  {{ stage.type.toUpperCase() }}
-                </span>
-                <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs) }}</span>
-                <span class="packet-title">{{ stage.title }}</span>
-              </div>
-              <div class="packet-hint">{{ stage.detail }}</div>
-            </div>
-          </li>
-        </ul>
-
-        <ul v-if="replayMode === 'global'" class="log-list">
+        <ul v-if="replayMode === 'global'" ref="globalLogListEl" class="log-list">
           <li v-if="parseErrors.length" class="log-item parse-error">
             日志解析失败：{{ parseErrors.length }} 条
           </li>
@@ -1059,6 +1194,7 @@ onBeforeUnmount(() => {
             v-for="packet in visiblePacketEntries"
             :key="packet.eventId"
             class="log-item"
+            :data-event-id="packet.eventId"
             :class="{
               'log-item-active': currentPacketIds.has(packet.eventId),
               'log-item-focused': focusedPacketId === packet.eventId,
@@ -1103,9 +1239,8 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="panel legend">
-      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突</p>
-      <p>其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。</p>
-      <p>周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
+      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }}</p>
+      <p>其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
     </section>
   </div>
 </template>
