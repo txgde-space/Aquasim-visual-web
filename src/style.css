@@ -211,6 +211,10 @@ body {
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.24), 0 6px 16px rgba(2, 6, 15, 0.7);
 }
 
+.hidden-file-input {
+  display: none;
+}
+
 .range::-moz-range-thumb {
   width: 20px;
   height: 20px;

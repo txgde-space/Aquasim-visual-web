@@ -1,8 +1,8 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import netLogDefaultText from './assets/net.log?raw'
-import netLogMultiHopText from './assets/net_multihop.log?raw'
-import netLogMultiHopComplexText from './assets/net_multihop_complex.log?raw'
+import netLogDefaultText from './assets/net.json?raw'
+import netLogMultiHopText from './assets/net_multihop.json?raw'
+import netLogMultiHopComplexText from './assets/net_multihop_complex.json?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
@@ -32,13 +32,20 @@ const reasonLabel = (reason) => {
   return '接收失败'
 }
 
+const blockedReasonLabel = (reason) => {
+  if (reason === 'busy') return 'PHY busy'
+  return reason ? String(reason) : '未知原因'
+}
+
 const packetTagLabel = (kind) => {
+  if (kind === 'blocked') return '发送阻塞'
   if (kind === 'ok') return '全成功'
   if (kind === 'mixed') return '混合结果'
   return '全失败'
 }
 
 const packetTagClass = (kind) => {
+  if (kind === 'blocked') return 'tag-fail'
   if (kind === 'ok') return 'tag-ok'
   if (kind === 'mixed') return 'tag-mixed'
   return 'tag-fail'
@@ -58,14 +65,192 @@ const deriveReasonFromLegacy = (result) => {
   return 'decode_error'
 }
 
-const parseLog = (raw) => {
+const finiteOrNull = (value) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
+const resolveNodePoint = (rawPoint, fallbackPoint = null) => ({
+  x: finiteOrNull(rawPoint.x) ?? fallbackPoint?.x ?? 0,
+  y: finiteOrNull(rawPoint.y) ?? fallbackPoint?.y ?? 0,
+  z: finiteOrNull(rawPoint.z) ?? fallbackPoint?.z ?? 0,
+})
+
+const interpolateNodePoint = (start, end, ratio) => ({
+  x: start.x + ((end.x - start.x) * ratio),
+  y: start.y + ((end.y - start.y) * ratio),
+  z: start.z + ((end.z - start.z) * ratio),
+})
+
+const normalizeMovements = (movementRows, nodes) => {
+  const nodeDefaults = new Map(nodes.map((node) => [node.node_id, { x: node.x, y: node.y, z: node.z ?? 0 }]))
+  const lastNodePoint = new Map(nodeDefaults)
+
+  return movementRows
+    .filter((item) => Number.isFinite(Number(item.node_id)))
+    .map((item, index) => ({ ...item, node_id: Number(item.node_id), __index: index }))
+    .sort((a, b) => normalizeTime(a.start_us) - normalizeTime(b.start_us) || a.__index - b.__index)
+    .map((item) => {
+      const previousPoint = lastNodePoint.get(item.node_id) || nodeDefaults.get(item.node_id) || { x: 0, y: 0, z: 0 }
+      const start = resolveNodePoint({
+        x: item.from_x ?? item.start_x ?? item.start?.x ?? item.x,
+        y: item.from_y ?? item.start_y ?? item.start?.y ?? item.y,
+        z: item.from_z ?? item.start_z ?? item.start?.z ?? item.z,
+      }, previousPoint)
+      const end = resolveNodePoint({
+        x: item.to_x ?? item.end_x ?? item.target_x ?? item.end?.x,
+        y: item.to_y ?? item.end_y ?? item.target_y ?? item.end?.y,
+        z: item.to_z ?? item.end_z ?? item.target_z ?? item.end?.z,
+      }, start)
+      const startUs = normalizeTime(item.start_us)
+      const endUs = Math.max(startUs, normalizeTime(item.end_us ?? item.stop_us))
+      const durationUs = Math.max(1, endUs - startUs)
+
+      lastNodePoint.set(item.node_id, end)
+
+      return {
+        ...item,
+        type: 'movement',
+        node_id: item.node_id,
+        start,
+        end,
+        start_us: startUs,
+        end_us: endUs,
+        duration_us: durationUs,
+      }
+    })
+}
+
+const resolveMovingNodes = (nodes, movements, timeUs) => {
+  const nodeMap = new Map(nodes.map((node) => [node.node_id, { ...node }]))
+
+  for (const movement of movements) {
+    const node = nodeMap.get(movement.node_id)
+    if (!node || timeUs < movement.start_us) continue
+
+    if (timeUs >= movement.end_us) {
+      Object.assign(node, movement.end)
+      continue
+    }
+
+    const ratio = clampRatio((timeUs - movement.start_us) / Math.max(1, movement.duration_us))
+    Object.assign(node, interpolateNodePoint(movement.start, movement.end, ratio))
+  }
+
+  return [...nodeMap.values()]
+}
+
+const createEmptyParsedLog = () => ({
+  nodes: [],
+  movements: [],
+  packets: [],
+  nodeEvents: [],
+  tx: [],
+  rx: [],
+  parseErrors: [],
+  meta: {
+    type: 'meta',
+    schema: 'uan-vis-packet-log/v1',
+    time_unit: 'us',
+    distance_unit: 'm',
+    sim_end_us: 0,
+  },
+})
+
+const appendParsedObject = (obj, parsed) => {
+  if (!obj || typeof obj !== 'object') return
+
+  if (obj.type === 'meta') {
+    Object.assign(parsed.meta, obj)
+  } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
+    const nodeId = Number(obj.node_id)
+    parsed.nodes.push({
+      ...obj,
+      node_id: nodeId,
+      x: Number(obj.x ?? 0),
+      y: Number(obj.y ?? 0),
+      z: Number(obj.z ?? 0),
+    })
+    if (Array.isArray(obj.movements)) {
+      for (const movement of obj.movements) {
+        parsed.movements.push({
+          ...movement,
+          node_id: nodeId,
+        })
+      }
+    }
+  } else if (obj.type === 'movement') {
+    parsed.movements.push({ ...obj })
+  } else if (obj.type === 'packet' && Number.isFinite(Number(obj.src))) {
+    parsed.packets.push({ ...obj })
+  } else if (
+    obj.type === 'tx_blocked'
+    || obj.type === 'tx_start'
+    || obj.type === 'rx_success'
+    || obj.type === 'rx_drop'
+    || obj.type === 'drop'
+    || obj.type === 'node_event'
+  ) {
+    parsed.nodeEvents.push({ ...obj })
+  } else if (obj.type === 'tx') {
+    parsed.tx.push({ ...obj })
+  } else if (obj.type === 'rx') {
+    parsed.rx.push({ ...obj })
+  }
+}
+
+const finalizeParsedLog = (parsed) => ({
+  ...parsed,
+  movements: normalizeMovements(parsed.movements, parsed.nodes),
+})
+
+const parseStructuredLog = (raw) => {
+  const parsed = createEmptyParsedLog()
+  const data = JSON.parse(raw)
+
+  if (Array.isArray(data)) {
+    for (const entry of data) appendParsedObject(entry, parsed)
+    return finalizeParsedLog(parsed)
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('invalid structured log')
+  }
+
+  if (data.meta && typeof data.meta === 'object') {
+    appendParsedObject({ ...data.meta, type: 'meta' }, parsed)
+  }
+  if (Array.isArray(data.nodes)) {
+    for (const entry of data.nodes) appendParsedObject({ ...entry, type: 'node' }, parsed)
+  }
+  if (Array.isArray(data.movements)) {
+    for (const entry of data.movements) appendParsedObject({ ...entry, type: 'movement' }, parsed)
+  }
+  if (Array.isArray(data.packets)) {
+    for (const entry of data.packets) appendParsedObject({ ...entry, type: 'packet' }, parsed)
+  }
+  if (Array.isArray(data.events)) {
+    for (const entry of data.events) parsed.nodeEvents.push({ ...entry })
+  }
+  if (Array.isArray(data.tx)) {
+    for (const entry of data.tx) appendParsedObject({ ...entry, type: 'tx' }, parsed)
+  }
+  if (Array.isArray(data.rx)) {
+    for (const entry of data.rx) appendParsedObject({ ...entry, type: 'rx' }, parsed)
+  }
+
+  return finalizeParsedLog(parsed)
+}
+
+const parseJsonLinesLog = (raw) => {
   const lines = String(raw ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-
   const nodes = []
+  const movements = []
   const packets = []
+  const nodeEvents = []
   const tx = []
   const rx = []
   const parseErrors = []
@@ -79,31 +264,24 @@ const parseLog = (raw) => {
 
   for (const line of lines) {
     try {
-      const obj = JSON.parse(line)
-
-      if (obj.type === 'meta') {
-        Object.assign(meta, obj)
-      } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
-        nodes.push({
-          ...obj,
-          node_id: Number(obj.node_id),
-          x: Number(obj.x ?? 0),
-          y: Number(obj.y ?? 0),
-          z: Number(obj.z ?? 0),
-        })
-      } else if (obj.type === 'packet' && Number.isFinite(Number(obj.src))) {
-        packets.push({ ...obj })
-      } else if (obj.type === 'tx') {
-        tx.push({ ...obj })
-      } else if (obj.type === 'rx') {
-        rx.push({ ...obj })
-      }
+      appendParsedObject(JSON.parse(line), { nodes, movements, packets, nodeEvents, tx, rx, parseErrors, meta })
     } catch {
       parseErrors.push(line)
     }
   }
 
-  return { nodes, packets, tx, rx, parseErrors, meta }
+  return { nodes, movements: normalizeMovements(movements, nodes), packets, nodeEvents, tx, rx, parseErrors, meta }
+}
+
+const parseLog = (raw) => {
+  const text = String(raw ?? '').trim()
+  if (!text) return createEmptyParsedLog()
+
+  try {
+    return parseStructuredLog(text)
+  } catch {
+    return parseJsonLinesLog(text)
+  }
 }
 
 const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
@@ -129,11 +307,15 @@ const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
   }
 }
 
+const normalizeCommitted = (value) => !(value === false || value === 'false')
+
 const normalizePacket = (packet, index) => {
   const packetId = String(packet.packet_id || packet.tx_id || `pkt-${index + 1}`)
   const eventId = String(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`)
   const txStartUs = normalizeTime(packet.tx_start_us ?? packet.start_us)
-  const txDurationUs = Math.max(1, normalizeTime(packet.tx_duration_us ?? packet.duration_us))
+  const txCommitted = normalizeCommitted(packet.tx_committed)
+  const txDurationRawUs = normalizeTime(packet.tx_duration_us ?? packet.duration_us)
+  const txDurationUs = txCommitted ? Math.max(1, txDurationRawUs) : Math.max(0, txDurationRawUs)
   const txEndUs = normalizeTime(packet.tx_end_us ?? packet.end_us ?? (txStartUs + txDurationUs))
   const receivers = Array.isArray(packet.receivers)
     ? packet.receivers
@@ -149,6 +331,8 @@ const normalizePacket = (packet, index) => {
     eventId,
     packet_id: packetId,
     src: Number(packet.src),
+    tx_committed: txCommitted,
+    tx_blocked_reason: txCommitted ? null : (packet.tx_blocked_reason ? String(packet.tx_blocked_reason) : null),
     tx_start_us: txStartUs,
     tx_duration_us: txDurationUs,
     tx_end_us: txEndUs,
@@ -184,6 +368,176 @@ const buildPacketsFromLegacy = (txRows, rxRows) => {
       with: Array.isArray(rxItem.collided_with) ? rxItem.collided_with.map(String) : [],
     })),
   }))
+}
+
+const eventTimeUs = (event) => normalizeTime(
+  event.time_us
+  ?? event.tx_start_us
+  ?? event.rx_start_us
+  ?? event.start_us
+  ?? event.local_time_us
+  ?? event.utc_us,
+)
+
+const nodeEventPacketId = (event, fallbackIndex) => String(
+  event.packet_id
+  || event.packet_uid
+  || event.tx_id
+  || event.seq
+  || event.sequence
+  || `node-event-${fallbackIndex + 1}`,
+)
+
+const nodeEventTxKey = (event, fallbackIndex) => String(
+  event.event_id
+  || event.tx_id
+  || `${nodeEventPacketId(event, fallbackIndex)}-src-${event.src ?? event.node_id ?? 'x'}-t-${eventTimeUs(event)}`,
+)
+
+const normalizeNodeTxEvent = (event, index) => {
+  const packetId = nodeEventPacketId(event, index)
+  const txStartUs = normalizeTime(event.tx_start_us ?? event.start_us ?? event.time_us ?? event.utc_us)
+  const txDurationUs = Math.max(0, normalizeTime(event.tx_duration_us ?? event.duration_us))
+  const txCommitted = event.type !== 'tx_blocked' && normalizeCommitted(event.tx_committed)
+
+  return {
+    ...event,
+    type: 'packet',
+    event_id: nodeEventTxKey(event, index),
+    packet_id: packetId,
+    src: Number(event.src ?? event.node_id),
+    tx_start_us: txStartUs,
+    tx_duration_us: txCommitted ? Math.max(1, txDurationUs) : txDurationUs,
+    tx_end_us: normalizeTime(event.tx_end_us ?? event.end_us ?? (txStartUs + txDurationUs)),
+    tx_committed: txCommitted,
+    tx_blocked_reason: txCommitted ? null : String(event.tx_blocked_reason || event.reason || 'busy'),
+    receivers: [],
+  }
+}
+
+const normalizeNodeRxEvent = (event, index) => {
+  const packetId = nodeEventPacketId(event, index)
+  const rxStartUs = normalizeTime(event.rx_start_us ?? event.start_us ?? event.time_us ?? event.utc_us)
+  const rxDurationUs = Math.max(1, normalizeTime(event.rx_duration_us ?? event.duration_us))
+  const status = event.status === 'ok' || event.result === 'ok' ? 'ok' : 'fail'
+
+  return {
+    ...event,
+    packet_id: packetId,
+    tx_key: event.event_id || event.tx_id || null,
+    src: Number(event.src),
+    receiver_id: String(event.receiver_id || event.rx_id || `${packetId}-node-rx-${index + 1}`),
+    dst: Number(event.dst ?? event.node_id),
+    rx_start_us: rxStartUs,
+    rx_duration_us: rxDurationUs,
+    status,
+    reason: status === 'ok' ? null : String(event.reason || deriveReasonFromLegacy(event.result)),
+    with: Array.isArray(event.with)
+      ? event.with.map(String)
+      : Array.isArray(event.collided_with)
+        ? event.collided_with.map(String)
+        : [],
+  }
+}
+
+const mergeParsedNodeLogs = (parsedLogs, fileNames = []) => {
+  const merged = createEmptyParsedLog()
+  const nodeById = new Map()
+  const txEvents = []
+  const rxEvents = []
+
+  parsedLogs.forEach((parsed, fileIndex) => {
+    Object.assign(merged.meta, parsed.meta || {})
+    for (const node of parsed.nodes || []) {
+      if (!Number.isFinite(Number(node.node_id))) continue
+      const nodeId = Number(node.node_id)
+      const existing = nodeById.get(nodeId)
+      nodeById.set(nodeId, {
+        ...(existing || {}),
+        ...node,
+        node_id: nodeId,
+        movements: [
+          ...((existing && Array.isArray(existing.movements)) ? existing.movements : []),
+          ...(Array.isArray(node.movements) ? node.movements : []),
+        ],
+      })
+    }
+    for (const movement of parsed.movements || []) merged.movements.push({ ...movement })
+
+    const sourceLabel = fileNames[fileIndex] || `node-log-${fileIndex + 1}`
+    for (const event of parsed.nodeEvents || []) {
+      const eventType = String(event.type === 'node_event' ? event.event : (event.type || event.event || '')).toLowerCase()
+      const taggedEvent = { ...event, type: eventType, source_file: sourceLabel }
+      if (eventType === 'tx' || eventType === 'tx_start' || eventType === 'tx_blocked') {
+        txEvents.push(taggedEvent)
+      } else if (eventType === 'rx' || eventType === 'rx_success' || eventType === 'drop' || eventType === 'rx_drop') {
+        rxEvents.push(taggedEvent)
+      }
+    }
+    for (const tx of parsed.tx || []) txEvents.push({ ...tx, type: 'tx', source_file: sourceLabel })
+    for (const rx of parsed.rx || []) rxEvents.push({ ...rx, type: 'rx', source_file: sourceLabel })
+    for (const packet of parsed.packets || []) merged.packets.push({ ...packet })
+    for (const error of parsed.parseErrors || []) merged.parseErrors.push(`${sourceLabel}: ${error}`)
+  })
+
+  merged.nodes = [...nodeById.values()].sort((a, b) => a.node_id - b.node_id)
+  merged.movements = normalizeMovements(merged.movements, merged.nodes)
+
+  const packets = txEvents
+    .map((event, index) => normalizeNodeTxEvent(event, index))
+    .filter((packet) => Number.isFinite(packet.src))
+    .sort((a, b) => a.tx_start_us - b.tx_start_us)
+
+  const packetsByTxKey = new Map(packets.map((packet) => [packet.event_id, packet]))
+  const packetsByPacketId = new Map()
+  for (const packet of packets) {
+    const list = packetsByPacketId.get(packet.packet_id) || []
+    list.push(packet)
+    packetsByPacketId.set(packet.packet_id, list)
+  }
+
+  rxEvents
+    .map((event, index) => normalizeNodeRxEvent(event, index))
+    .filter((receiver) => Number.isFinite(receiver.dst))
+    .sort((a, b) => a.rx_start_us - b.rx_start_us)
+    .forEach((receiver) => {
+      const directPacket = receiver.tx_key ? packetsByTxKey.get(receiver.tx_key) : null
+      const candidatePackets = receiver.packet_id ? (packetsByPacketId.get(receiver.packet_id) || []) : []
+      const matchedPacket = directPacket || candidatePackets
+        .filter((packet) => (!Number.isFinite(receiver.src) || packet.src === receiver.src) && packet.tx_start_us <= receiver.rx_start_us)
+        .sort((a, b) => Math.abs(receiver.rx_start_us - a.tx_start_us) - Math.abs(receiver.rx_start_us - b.tx_start_us))[0]
+        || candidatePackets[0]
+
+      if (!matchedPacket) {
+        merged.parseErrors.push(`${receiver.source_file || 'node-log'}: 未找到 ${receiver.packet_id} 的 TX 事件`)
+        return
+      }
+
+      matchedPacket.receivers.push(receiver)
+    })
+
+  merged.packets.push(...packets.map((packet) => ({
+    ...packet,
+    receivers: packet.receivers.slice().sort((a, b) => a.rx_start_us - b.rx_start_us),
+  })))
+
+  merged.meta = {
+    ...merged.meta,
+    schema: 'uan-vis-merged-node-log/v1',
+    source_schema: merged.meta.schema,
+    log_scope: 'merged-node',
+    node_log_count: parsedLogs.length,
+    sim_end_us: Math.max(
+      normalizeTime(merged.meta.sim_end_us),
+      ...merged.packets.map((packet) => Math.max(
+        normalizeTime(packet.tx_end_us ?? packet.end_us),
+        ...((packet.receivers || []).map((receiver) => normalizeTime(receiver.rx_start_us ?? receiver.start_us) + normalizeTime(receiver.rx_duration_us ?? receiver.duration_us))),
+      )),
+      ...merged.movements.map((movement) => movement.end_us),
+    ),
+  }
+
+  return merged
 }
 
 const enforceMinGap = (nodes) => {
@@ -226,29 +580,22 @@ const distanceMeters = (a, b) => {
 
 const LOG_SOURCES = Object.freeze({
   default: {
-    label: '默认日志（net.log）',
+    label: '默认日志（net.json）',
+    fileName: 'net.json',
     raw: netLogDefaultText,
   },
   multihop: {
-    label: '多跳转发日志（net_multihop.log）',
+    label: '多跳转发日志（net_multihop.json）',
+    fileName: 'net_multihop.json',
     raw: netLogMultiHopText,
   },
   complex: {
-    label: '复杂冲突日志（net_multihop_complex.log）',
+    label: '复杂冲突日志（net_multihop_complex.json）',
+    fileName: 'net_multihop_complex.json',
     raw: netLogMultiHopComplexText,
   },
 })
 
-const THEME_OPTIONS = Object.freeze([
-  { key: 'ocean-sonar', label: '海洋声呐' },
-  { key: 'research-lab', label: '科研仪表盘' },
-  { key: 'tactical-ops', label: '战术态势' },
-  { key: 'industrial-scada', label: '工业监控' },
-  { key: 'cyber-neon', label: '赛博霓虹' },
-  { key: 'light-minimal', label: '极简浅色' },
-  { key: 'gis-map', label: 'GIS地图' },
-  { key: 'timeline-story', label: '时间轴叙事' },
-])
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
   { key: 'extreme', label: 'Beta' },
@@ -260,20 +607,43 @@ const UNDERWATER_DETAIL_OPTIONS = Object.freeze([
 ])
 
 const normalizePacketsFromParsed = (parsed) => (
-  (parsed.packets.length > 0 ? parsed.packets : buildPacketsFromLegacy(parsed.tx, parsed.rx))
+  (
+    parsed.packets.length > 0
+      ? parsed.packets
+      : (parsed.nodeEvents?.length > 0
+        ? mergeParsedNodeLogs([parsed], [uploadedLogName.value || 'node-log']).packets
+        : buildPacketsFromLegacy(parsed.tx, parsed.rx))
+  )
     .map((packet, index) => normalizePacket(packet, index))
 )
 
+const currentTime = ref(0)
 const initialParsed = parseLog(LOG_SOURCES.default.raw)
+const logFileInput = ref(null)
+const nodeLogFileInput = ref(null)
 const logSourceKey = ref('default')
-const selectedTheme = ref('ocean-sonar')
+const uploadedLogName = ref('')
+const uploadedLogText = ref('')
+const uploadedNodeLogNames = ref([])
+const uploadedNodeParsedLog = ref(null)
+const selectedTheme = ref('research-lab')
 const fxLevel = ref('standard')
 const underwaterDetail = ref('standard')
-const isMuted = ref(false)
-const nodesState = ref(enforceMinGap(initialParsed.nodes))
+const baseNodesState = ref(enforceMinGap(initialParsed.nodes))
+const nodeMovementRows = ref(initialParsed.movements)
 const packetRows = ref(normalizePacketsFromParsed(initialParsed))
 const parseErrors = ref(initialParsed.parseErrors)
 const metaState = ref(initialParsed.meta)
+const nodesState = computed(() => resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value))
+const activeLogName = computed(() => {
+  if (logSourceKey.value === 'upload' && uploadedLogName.value) return uploadedLogName.value
+  if (logSourceKey.value === 'node-upload' && uploadedNodeLogNames.value.length) {
+    const names = uploadedNodeLogNames.value
+    if (names.length <= 2) return names.join(' + ')
+    return `${names[0]} + ${names.length - 1} 个节点日志`
+  }
+  return (LOG_SOURCES[logSourceKey.value] || LOG_SOURCES.default).fileName
+})
 
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
 const packetByPacketId = computed(() => {
@@ -319,8 +689,8 @@ const packets = computed(() => {
 })
 
 const packetsMaxEndUs = computed(() => packets.value.reduce((maxEnd, packet) => Math.max(maxEnd, packet.timeEnd), 0))
-const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(metaState.value.sim_end_us), packetsMaxEndUs.value))
-const currentTime = ref(0)
+const movementsMaxEndUs = computed(() => nodeMovementRows.value.reduce((maxEnd, movement) => Math.max(maxEnd, movement.end_us), 0))
+const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(metaState.value.sim_end_us), packetsMaxEndUs.value, movementsMaxEndUs.value))
 const rangeProgressStyle = computed(() => `${((currentTime.value / Math.max(1, cycleEndUs.value)) * 100).toFixed(2)}%`)
 
 const focusedPacketId = ref(null)
@@ -336,23 +706,6 @@ const globalLogListEl = ref(null)
 const lifecycleLogListEl = ref(null)
 let raf = 0
 let lastTs = 0
-let audioCtx = null
-let audioMaster = null
-let schedulerTimer = null
-let bgmStep = 0
-let bgmNextTime = 0
-
-const BGM_PATTERN = Object.freeze([
-  [110, 164.81],
-  [123.47, 185],
-  [130.81, 196],
-  [146.83, 220],
-  [123.47, 185],
-  [110, 164.81],
-  [98, 146.83],
-  [92.5, 138.59],
-])
-
 const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
 
 const packetEntries = computed(() => packets.value.map((packet) => {
@@ -385,9 +738,17 @@ const packetEntries = computed(() => packets.value.map((packet) => {
   const failCount = receivers.length - okCount
   const rxrxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
   const rxtxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
-  const packetKind = failCount === 0 ? 'ok' : (okCount > 0 ? 'mixed' : 'fail')
+  const packetKind = !packet.tx_committed
+    ? 'blocked'
+    : failCount === 0
+      ? 'ok'
+      : (okCount > 0 ? 'mixed' : 'fail')
   const totalDurationUs = Math.max(1, packet.timeEnd - packet.tx_start_us)
   const progressPct = clampRatio((currentTime.value - packet.tx_start_us) / totalDurationUs) * 100
+  const blockedReasonText = packet.tx_committed ? null : blockedReasonLabel(packet.tx_blocked_reason)
+  const outcomeSummary = packet.tx_committed
+    ? `成功 ${okCount} / rx-rx ${rxrxCount} / rx-tx ${rxtxCount}`
+    : `未发出 / 原因 ${blockedReasonText}`
 
   return {
     ...packet,
@@ -403,6 +764,8 @@ const packetEntries = computed(() => packets.value.map((packet) => {
     packetDurationLabel: timeDisplay(totalDurationUs),
     prettyTime: timeDisplay(packet.tx_start_us),
     progressPct,
+    blockedReasonText,
+    outcomeSummary,
     startUs: packet.tx_start_us,
     endUs: packet.timeEnd,
   }
@@ -433,13 +796,19 @@ const lifecycleGroups = computed(() => {
       const failCount = allReceivers.length - okCount
       const rxrxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
       const rxtxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
-      const packetKind = failCount === 0 ? 'ok' : (okCount > 0 ? 'mixed' : 'fail')
+      const blockedCount = sortedSegments.filter((segment) => !segment.tx_committed).length
+      const packetKind = blockedCount > 0
+        ? 'blocked'
+        : failCount === 0
+          ? 'ok'
+          : (okCount > 0 ? 'mixed' : 'fail')
       const totalDurationUs = Math.max(1, group.endUs - group.startUs)
       const progressPct = clampRatio((currentTime.value - group.startUs) / totalDurationUs) * 100
 
       return {
         ...group,
         segments: sortedSegments,
+        blockedCount,
         okCount,
         failCount,
         rxrxCount,
@@ -455,7 +824,7 @@ const lifecycleGroups = computed(() => {
     .sort((a, b) => a.startUs - b.startUs)
 })
 
-const visiblePacketEntries = computed(() => packetEntries.value.slice(-120))
+const visiblePacketEntries = computed(() => packetEntries.value)
 
 const currentPacketIds = computed(() => new Set(
   packetEntries.value
@@ -499,9 +868,11 @@ const lifecycleStages = computed(() => {
     stages.push({
       eventId: `${segment.eventId}-tx`,
       type: 'tx',
-      status: 'ok',
-      title: `${segment.sourceLabel} 发射`,
-      detail: `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`,
+      status: segment.tx_committed ? 'ok' : 'fail',
+      title: segment.tx_committed ? `${segment.sourceLabel} 发射` : `${segment.sourceLabel} 发送被阻塞`,
+      detail: segment.tx_committed
+        ? `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`
+        : `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 未发出（${blockedReasonLabel(segment.tx_blocked_reason)}）`,
       startUs: segment.tx_start_us,
       endUs: segment.tx_end_us,
     })
@@ -556,11 +927,15 @@ const displayPackets = computed(() => {
 })
 
 const summary = computed(() => {
+  let committedPacketCount = 0
+  let blockedPacketCount = 0
   let okReceivers = 0
   let rxrxCollisions = 0
   let rxtxCollisions = 0
 
   for (const packet of packets.value) {
+    if (packet.tx_committed) committedPacketCount += 1
+    else blockedPacketCount += 1
     for (const receiver of packet.receivers) {
       if (receiver.status === 'ok') okReceivers += 1
       if (receiver.reason === 'collision_rx_rx') rxrxCollisions += 1
@@ -570,6 +945,8 @@ const summary = computed(() => {
 
   return {
     packetCount: packets.value.length,
+    committedPacketCount,
+    blockedPacketCount,
     okReceivers,
     rxrxCollisions,
     rxtxCollisions,
@@ -579,6 +956,7 @@ const summary = computed(() => {
 const txEventsByNode = computed(() => {
   const map = new Map()
   for (const packet of packets.value) {
+    if (!packet.tx_committed) continue
     const list = map.get(packet.src) || []
     list.push(packet)
     map.set(packet.src, list)
@@ -782,180 +1160,80 @@ const reset = () => {
   lastTs = 0
 }
 
-const makeVoice = (ctx, destination, frequency, when, duration, options = {}) => {
-  const osc = ctx.createOscillator()
-  const gain = ctx.createGain()
-  const filter = ctx.createBiquadFilter()
-  osc.type = options.type || 'triangle'
-  osc.frequency.setValueAtTime(frequency, when)
-  if (options.detune) osc.detune.setValueAtTime(options.detune, when)
-
-  filter.type = 'lowpass'
-  filter.frequency.setValueAtTime(options.cutoff ?? 900, when)
-  filter.Q.value = 0.6
-
-  const attack = options.attack ?? 0.02
-  const release = options.release ?? 0.22
-  const peak = options.volume ?? 0.08
-  gain.gain.setValueAtTime(0.0001, when)
-  gain.gain.exponentialRampToValueAtTime(peak, when + attack)
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(attack + 0.02, duration - release))
-
-  osc.connect(filter)
-  filter.connect(gain)
-  gain.connect(destination)
-  osc.start(when)
-  osc.stop(when + duration)
-}
-
-const makeTick = (ctx, destination, when, duration = 0.07, volume = 0.02) => {
-  const osc = ctx.createOscillator()
-  const gain = ctx.createGain()
-  const filter = ctx.createBiquadFilter()
-  osc.type = 'square'
-  osc.frequency.setValueAtTime(880, when)
-  filter.type = 'highpass'
-  filter.frequency.setValueAtTime(1300, when)
-  gain.gain.setValueAtTime(0.0001, when)
-  gain.gain.exponentialRampToValueAtTime(volume, when + 0.008)
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + duration)
-  osc.connect(filter)
-  filter.connect(gain)
-  gain.connect(destination)
-  osc.start(when)
-  osc.stop(when + duration)
-}
-
-const playUnlockChime = (ctx, destination, startAt) => {
-  makeVoice(ctx, destination, 392, startAt, 0.18, {
-    type: 'sine',
-    volume: 0.035,
-    cutoff: 2400,
-    attack: 0.01,
-    release: 0.1,
-  })
-  makeVoice(ctx, destination, 523.25, startAt + 0.12, 0.22, {
-    type: 'triangle',
-    volume: 0.042,
-    cutoff: 2600,
-    attack: 0.01,
-    release: 0.14,
-  })
-}
-
-const scheduleBgmTick = () => {
-  if (!audioCtx || !audioMaster || isMuted.value) return
-  const lookAhead = 0.36
-  const stepLen = 0.31
-  while (bgmNextTime < audioCtx.currentTime + lookAhead) {
-    const [bass, pulse] = BGM_PATTERN[bgmStep % BGM_PATTERN.length]
-    makeVoice(audioCtx, audioMaster, bass, bgmNextTime, stepLen * 1.45, {
-      type: 'sawtooth',
-      volume: 0.06,
-      cutoff: 760,
-      attack: 0.025,
-      release: 0.34,
-    })
-
-    makeVoice(audioCtx, audioMaster, pulse, bgmNextTime + 0.03, stepLen * 0.82, {
-      type: 'triangle',
-      volume: 0.048,
-      cutoff: 2100,
-      attack: 0.01,
-      release: 0.18,
-    })
-
-    if (bgmStep % 4 === 3) {
-      makeVoice(audioCtx, audioMaster, pulse * 1.5, bgmNextTime + 0.12, stepLen * 0.5, {
-        type: 'sine',
-        volume: 0.032,
-        cutoff: 2600,
-        attack: 0.01,
-        release: 0.16,
-      })
-    }
-    makeTick(audioCtx, audioMaster, bgmNextTime + 0.015, 0.06, 0.015)
-    if (bgmStep % 2 === 1) {
-      makeTick(audioCtx, audioMaster, bgmNextTime + 0.17, 0.05, 0.012)
-    }
-
-    bgmStep += 1
-    bgmNextTime += stepLen
-  }
-}
-
-const ensureBgm = async () => {
-  if (isMuted.value) return
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
-  if (!AudioContextCtor) return
-
-  if (!audioCtx) {
-    audioCtx = new AudioContextCtor()
-    audioMaster = audioCtx.createGain()
-    audioMaster.gain.value = 0.0001
-    audioMaster.connect(audioCtx.destination)
-    bgmNextTime = audioCtx.currentTime + 0.05
-    schedulerTimer = window.setInterval(scheduleBgmTick, 80)
-  }
-
-  if (audioCtx.state === 'suspended') {
-    try {
-      await audioCtx.resume()
-    } catch {
-      return
-    }
-  }
-
-  audioMaster.gain.cancelScheduledValues(audioCtx.currentTime)
-  audioMaster.gain.setValueAtTime(Math.max(0.0001, audioMaster.gain.value), audioCtx.currentTime)
-  audioMaster.gain.exponentialRampToValueAtTime(0.22, audioCtx.currentTime + 0.2)
-  scheduleBgmTick()
-  if (bgmStep < 2) {
-    playUnlockChime(audioCtx, audioMaster, audioCtx.currentTime + 0.03)
-  }
-}
-
-const setMuteState = async (nextMuted) => {
-  isMuted.value = nextMuted
-  try {
-    localStorage.setItem('aquasim_mute', nextMuted ? '1' : '0')
-  } catch {
-    // ignore persistence errors
-  }
-
-  if (nextMuted) {
-    if (audioCtx && audioMaster) {
-      audioMaster.gain.cancelScheduledValues(audioCtx.currentTime)
-      audioMaster.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15)
-    }
-    return
-  }
-
-  await ensureBgm()
-}
-
-const toggleMute = () => {
-  setMuteState(!isMuted.value)
-}
+const ensureBgm = () => {}
+const toggleMute = () => {}
 
 const onJump = (event) => {
   const next = Number(event.target.value)
   if (Number.isFinite(next)) seekTime(next)
-  ensureBgm()
 }
 
 const onSpeed = (event) => {
   speed.value = Number(event.target.value)
-  ensureBgm()
+}
+
+const applyParsedLog = (parsed) => {
+  baseNodesState.value = enforceMinGap(parsed.nodes)
+  nodeMovementRows.value = parsed.movements
+  packetRows.value = normalizePacketsFromParsed(parsed)
+  parseErrors.value = parsed.parseErrors
+  metaState.value = parsed.meta
+
+  focusedPacketId.value = null
+  selectedLifecyclePacketId.value = ''
+  currentTime.value = 0
+  isPlaying.value = false
+  lastTs = 0
 }
 
 const onLogSourceChange = (event) => {
   logSourceKey.value = event.target.value
 }
 
-const onThemeChange = (event) => {
-  selectedTheme.value = event.target.value
-  ensureBgm()
+const openLogFilePicker = () => {
+  logFileInput.value?.click()
+}
+
+const openNodeLogFilePicker = () => {
+  nodeLogFileInput.value?.click()
+}
+
+const onLogFileChange = async (event) => {
+  const file = event.target?.files?.[0]
+  if (!file) return
+
+  const text = await file.text()
+  uploadedLogName.value = file.name
+  uploadedLogText.value = text
+  logSourceKey.value = 'upload'
+  applyParsedLog(parseLog(text))
+
+  if (event.target) {
+    event.target.value = ''
+  }
+}
+
+const onNodeLogFilesChange = async (event) => {
+  const files = [...(event.target?.files || [])]
+  if (!files.length) return
+
+  const parsedLogs = []
+  const fileNames = []
+  for (const file of files) {
+    const text = await file.text()
+    parsedLogs.push(parseLog(text))
+    fileNames.push(file.name)
+  }
+
+  const mergedParsed = mergeParsedNodeLogs(parsedLogs, fileNames)
+  uploadedNodeLogNames.value = fileNames
+  uploadedNodeParsedLog.value = mergedParsed
+  logSourceKey.value = 'node-upload'
+  applyParsedLog(mergedParsed)
+
+  if (event.target) {
+    event.target.value = ''
+  }
 }
 
 const onFxLevelChange = (event) => {
@@ -968,7 +1246,6 @@ const onUnderwaterDetailChange = (event) => {
 
 const onReplayModeChange = (event) => {
   replayMode.value = event.target.value
-  ensureBgm()
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
     focusedPacketId.value = lifecyclePacket.value.packet_id
     seekTime(lifecyclePacket.value.startUs)
@@ -981,7 +1258,6 @@ const onLifecyclePacketChange = (event) => {
     focusedPacketId.value = lifecyclePacket.value.packet_id
     seekTime(lifecyclePacket.value.startUs)
   }
-  ensureBgm()
 }
 
 const onKeydown = (event) => {
@@ -990,7 +1266,6 @@ const onKeydown = (event) => {
   }
   event.preventDefault()
   togglePlay()
-  ensureBgm()
 }
 
 const onLogSelect = (packet) => {
@@ -1005,13 +1280,11 @@ const onLogSelect = (packet) => {
 
   focusedPacketId.value = packet.eventId
   seekTime(packet.tx_start_us)
-  ensureBgm()
 }
 
 const onLifecycleStageSelect = (stage) => {
   if (!stage) return
   seekTime(stage.startUs)
-  ensureBgm()
 }
 
 const onEventTrackPointerDown = (packet, event) => {
@@ -1035,7 +1308,6 @@ const onEventTrackPointerDown = (packet, event) => {
     width: Math.max(rect.width, 1),
   }
   suppressLogClick.value = packet.eventId
-  ensureBgm()
 }
 
 const onGlobalPointerMove = (event) => {
@@ -1101,32 +1373,31 @@ watch(isPlaying, (next) => {
     lastTs = 0
     return
   }
-  ensureBgm()
   raf = requestAnimationFrame(tick)
 })
 
 watch(logSourceKey, (nextKey) => {
-  const source = LOG_SOURCES[nextKey] || LOG_SOURCES.default
-  const parsed = parseLog(source.raw)
-  nodesState.value = enforceMinGap(parsed.nodes)
-  packetRows.value = normalizePacketsFromParsed(parsed)
-  parseErrors.value = parsed.parseErrors
-  metaState.value = parsed.meta
-
-  focusedPacketId.value = null
-  selectedLifecyclePacketId.value = ''
-  currentTime.value = 0
-  isPlaying.value = false
-  lastTs = 0
-}, { immediate: false })
-
-watch(selectedTheme, (next) => {
-  try {
-    localStorage.setItem('aquasim_theme', next)
-  } catch {
-    // ignore persistence errors
+  if (nextKey === 'upload') {
+    if (!uploadedLogText.value) {
+      logSourceKey.value = 'default'
+      return
+    }
+    applyParsedLog(parseLog(uploadedLogText.value))
+    return
   }
-})
+
+  if (nextKey === 'node-upload') {
+    if (!uploadedNodeParsedLog.value) {
+      logSourceKey.value = 'default'
+      return
+    }
+    applyParsedLog(uploadedNodeParsedLog.value)
+    return
+  }
+
+  const source = LOG_SOURCES[nextKey] || LOG_SOURCES.default
+  applyParsedLog(parseLog(source.raw))
+}, { immediate: false })
 
 watch(fxLevel, (next) => {
   try {
@@ -1170,10 +1441,6 @@ watch(lifecyclePacketOptions, (options) => {
 
 onMounted(() => {
   try {
-    const saved = localStorage.getItem('aquasim_theme')
-    if (saved && THEME_OPTIONS.some((item) => item.key === saved)) {
-      selectedTheme.value = saved
-    }
     const savedFx = localStorage.getItem('aquasim_fx_level')
     if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
       fxLevel.value = savedFx
@@ -1182,7 +1449,6 @@ onMounted(() => {
     if (savedUnderwaterDetail && UNDERWATER_DETAIL_OPTIONS.some((item) => item.key === savedUnderwaterDetail)) {
       underwaterDetail.value = savedUnderwaterDetail
     }
-    isMuted.value = localStorage.getItem('aquasim_mute') === '1'
   } catch {
     // ignore persistence errors
   }
@@ -1191,9 +1457,6 @@ onMounted(() => {
   window.addEventListener('pointermove', onGlobalPointerMove)
   window.addEventListener('pointerup', onGlobalPointerUp)
   window.addEventListener('pointercancel', onGlobalPointerUp)
-  window.addEventListener('pointerdown', ensureBgm, { once: true })
-  window.addEventListener('keydown', ensureBgm, { once: true })
-  window.addEventListener('touchstart', ensureBgm, { once: true, passive: true })
 })
 
 onBeforeUnmount(() => {
@@ -1202,18 +1465,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onGlobalPointerMove)
   window.removeEventListener('pointerup', onGlobalPointerUp)
   window.removeEventListener('pointercancel', onGlobalPointerUp)
-  window.removeEventListener('pointerdown', ensureBgm)
-  window.removeEventListener('keydown', ensureBgm)
-  window.removeEventListener('touchstart', ensureBgm)
-  if (schedulerTimer) {
-    clearInterval(schedulerTimer)
-    schedulerTimer = null
-  }
-  if (audioCtx) {
-    audioCtx.close().catch(() => {})
-    audioCtx = null
-    audioMaster = null
-  }
 })
 </script>
 
@@ -1250,9 +1501,7 @@ onBeforeUnmount(() => {
             :theme-key="selectedTheme"
             :fx-level="fxLevel"
             :underwater-detail="underwaterDetail"
-            :is-muted="isMuted"
             @pause-request="pauseForTool"
-            @toggle-mute="toggleMute"
           />
           <Suspense v-else>
             <template #default>
@@ -1263,8 +1512,6 @@ onBeforeUnmount(() => {
                 :current-time="currentTime"
                 :theme-key="selectedTheme"
                 :fx-level="fxLevel"
-                :is-muted="isMuted"
-                @toggle-mute="toggleMute"
               />
             </template>
             <template #fallback>
@@ -1302,6 +1549,8 @@ onBeforeUnmount(() => {
             <div class="control-btn-row">
               <button class="btn btn-compact primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
               <button class="btn btn-compact" @click="reset">重置</button>
+              <button class="btn btn-compact" @click="openLogFilePicker">选择日志文件</button>
+              <button class="btn btn-compact" @click="openNodeLogFilePicker">选择节点级日志</button>
               <button
                 v-if="replayMode === 'global'"
                 class="btn btn-compact btn-wide"
@@ -1334,6 +1583,10 @@ onBeforeUnmount(() => {
                   >
                     {{ source.label }}
                   </option>
+                  <option value="upload" :disabled="!uploadedLogText">{{ uploadedLogName || '上传日志文件' }}</option>
+                  <option value="node-upload" :disabled="!uploadedNodeParsedLog">
+                    {{ uploadedNodeLogNames.length ? `节点级日志（${uploadedNodeLogNames.length} 个）` : '上传节点级日志' }}
+                  </option>
                 </select>
               </label>
               <label class="field field-compact">
@@ -1341,18 +1594,6 @@ onBeforeUnmount(() => {
                 <select class="select" :value="replayMode" @change="onReplayModeChange">
                   <option value="global">全局模式</option>
                   <option value="lifecycle">生命周期模式</option>
-                </select>
-              </label>
-              <label class="field field-compact">
-                <div class="field-head"><span>主题风格</span></div>
-                <select class="select" :value="selectedTheme" @change="onThemeChange">
-                  <option
-                    v-for="theme in THEME_OPTIONS"
-                    :key="theme.key"
-                    :value="theme.key"
-                  >
-                    {{ theme.label }}
-                  </option>
                 </select>
               </label>
               <label class="field field-compact">
@@ -1392,6 +1633,21 @@ onBeforeUnmount(() => {
                 </select>
               </label>
             </div>
+            <input
+              ref="logFileInput"
+              class="hidden-file-input"
+              type="file"
+              accept=".log,.jsonl,.json,.txt"
+              @change="onLogFileChange"
+            />
+            <input
+              ref="nodeLogFileInput"
+              class="hidden-file-input"
+              type="file"
+              multiple
+              accept=".log,.jsonl,.json,.txt"
+              @change="onNodeLogFilesChange"
+            />
           </div>
         </div>
         <div class="card-title">{{ replayMode === 'lifecycle' ? '包生命周期阶段' : '包级日志（旧在上，新在下）' }}</div>
@@ -1420,7 +1676,7 @@ onBeforeUnmount(() => {
               <div class="log-content">
                 <div class="log-head">
                   <span class="time">{{ timeDisplay(stage.startUs) }}</span>
-                  <span class="tag" :class="stage.type === 'tx' ? 'tag-ok' : (stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' ? 'tag-fail' : 'tag-mixed'))">
+                  <span class="tag" :class="stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' || stage.status === 'fail' ? 'tag-fail' : 'tag-mixed')">
                     {{ stage.type.toUpperCase() }}
                   </span>
                   <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs) }}</span>
@@ -1459,11 +1715,18 @@ onBeforeUnmount(() => {
                 <span class="time">{{ packet.prettyTime }}</span>
                 <span class="tag" :class="packet.packetKindClass">{{ packet.packetKindLabel }}</span>
                 <span class="duration">总历时 {{ packet.packetDurationLabel }}</span>
-                <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} 发射（段 {{ packet.eventId }}）</span>
-                <span class="packet-hint">成功 {{ packet.okCount }} / rx-rx {{ packet.rxrxCount }} / rx-tx {{ packet.rxtxCount }}</span>
+                <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} {{ packet.tx_committed ? '发射' : '尝试发送' }}（段 {{ packet.eventId }}）</span>
+                <span class="packet-hint">{{ packet.outcomeSummary }}</span>
               </div>
 
               <div class="receiver-strip">
+                <span
+                  v-if="!packet.tx_committed"
+                  class="receiver-pill receiver-pill-fail"
+                >
+                  <span class="receiver-name">未发出</span>
+                  <span class="receiver-reason">{{ packet.blockedReasonText }}</span>
+                </span>
                 <span
                   v-for="receiver in packet.receivers"
                   :key="receiver.receiver_id"
@@ -1479,7 +1742,9 @@ onBeforeUnmount(() => {
         </ul>
 
         <div class="stat-grid">
-          <div>广播包数：{{ summary.packetCount }}</div>
+          <div>记录总数：{{ summary.packetCount }}</div>
+          <div>真正发射：{{ summary.committedPacketCount }}</div>
+          <div>发送阻塞：{{ summary.blockedPacketCount }}</div>
           <div>成功接收：{{ summary.okReceivers }}</div>
           <div>rx-rx 冲突：{{ summary.rxrxCollisions }}</div>
           <div>rx-tx 冲突：{{ summary.rxtxCollisions }}</div>
@@ -1488,7 +1753,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="panel legend">
-      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }}</p>
+      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }} | 当前日志：{{ activeLogName }}</p>
       <p>其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
     </section>
   </div>

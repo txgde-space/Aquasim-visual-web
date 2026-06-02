@@ -70,24 +70,6 @@
         <circle cx="12" cy="12" r="3.5" />
       </svg>
     </button>
-    <button
-      class="canvas-audio-toggle"
-      @click="emit('toggle-mute')"
-      :title="props.isMuted ? '取消静音' : '静音'"
-      :aria-label="props.isMuted ? '取消静音' : '静音'"
-    >
-      <svg v-if="props.isMuted" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 10h4l5-4v12l-5-4H4z" />
-        <path d="m19 9-4 6" />
-        <path d="m15 9 4 6" />
-      </svg>
-      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 10h4l5-4v12l-5-4H4z" />
-        <path d="M16 9a4 4 0 0 1 0 6" />
-        <path d="M18.5 6.5a7.5 7.5 0 0 1 0 11" />
-      </svg>
-    </button>
-
     <div
       v-if="hoveredNodePos && hoveredNode && hoveredNodeStats"
       class="node-tooltip"
@@ -95,7 +77,7 @@
     >
       <div class="node-tooltip-head">
         <p class="node-tooltip-title">
-          {{ hoveredNode.name }}（{{ hoveredNode.node_id }}）
+          {{ nodeTitle(hoveredNode) }}
           <span class="node-tooltip-role">{{ hoveredNode.role || 'relay' }}</span>
         </p>
         <span class="node-tooltip-chip">{{ hoveredNodeStats.modeLabel }}</span>
@@ -380,7 +362,7 @@ const toScreen = (x, y) => {
   const base = bounds.value
   return {
     x: padding + ((x - base.minX) * effectiveScale.value) + pan.value.x,
-    y: padding + ((y - base.minY) * effectiveScale.value) + pan.value.y,
+    y: padding + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
   }
 }
 
@@ -389,7 +371,7 @@ const toWorld = (x, y) => {
   const s = Math.max(effectiveScale.value, 1e-6)
   return {
     x: base.minX + ((x - padding - pan.value.x) / s),
-    y: base.minY + ((y - padding - pan.value.y) / s),
+    y: base.maxY - ((y - padding - pan.value.y) / s),
   }
 }
 
@@ -436,6 +418,9 @@ const hoveredNodeVisual = computed(() => {
   if (!hoveredNode.value) return null
   return nodeVisualById.value.get(hoveredNode.value.node_id) || null
 })
+
+const nodeLabel = (node) => `Node ${node.node_id}`
+const nodeTitle = (node) => node.name ? `${nodeLabel(node)} · ${node.name}` : nodeLabel(node)
 
 const fmtDistanceMeters = (meters) => {
   if (!Number.isFinite(meters)) return '无'
@@ -563,13 +548,56 @@ const hoveredTooltipStyle = computed(() => {
 const canUndo = computed(() => measurementHistoryIndex.value > 0)
 const canRedo = computed(() => measurementHistoryIndex.value < (measurementHistory.value.length - 1))
 
-const distanceByWorld = (a, b) => Math.hypot(a.x - b.x, a.y - b.y)
+const cloneMeasurePoint = (point) => ({
+  x: point.x,
+  y: point.y,
+  ...(Number.isFinite(point.z) ? { z: point.z } : {}),
+  ...(point.nodeId !== undefined && point.nodeId !== null ? { nodeId: point.nodeId } : {}),
+})
+
+const resolveMeasurePoint = (point) => {
+  if (!point) return { x: 0, y: 0, z: 0 }
+  if (point.nodeId !== undefined && point.nodeId !== null) {
+    const node = nodeById.value.get(point.nodeId)
+    if (node) {
+      return {
+        x: node.x,
+        y: node.y,
+        z: node.z ?? 0,
+      }
+    }
+  }
+  return {
+    x: point.x,
+    y: point.y,
+    z: point.z ?? 0,
+  }
+}
+
+const createMeasurePoint = (sx, sy) => {
+  const picked = pickNodeAt(sx, sy)
+  if (picked) {
+    return {
+      nodeId: picked.node_id,
+      x: picked.x,
+      y: picked.y,
+      z: picked.z ?? 0,
+    }
+  }
+  return toWorld(sx, sy)
+}
+
+const distanceByMeasurePoints = (a, b) => {
+  const p1 = resolveMeasurePoint(a)
+  const p2 = resolveMeasurePoint(b)
+  return Math.hypot(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z)
+}
 
 const cloneMeasurements = (items) => items.map((item) => ({
   id: item.id,
-  start: { ...item.start },
-  end: { ...item.end },
-  distance: item.distance,
+  start: cloneMeasurePoint(item.start),
+  end: cloneMeasurePoint(item.end),
+  distance: distanceByMeasurePoints(item.start, item.end),
 }))
 
 const applyMeasurementState = (items) => {
@@ -595,8 +623,10 @@ const selectMeasurementAt = (sx, sy) => {
   let bestDist = Number.POSITIVE_INFINITY
 
   for (const item of measurementLines.value) {
-    const a = toScreen(item.start.x, item.start.y)
-    const b = toScreen(item.end.x, item.end.y)
+    const start = resolveMeasurePoint(item.start)
+    const end = resolveMeasurePoint(item.end)
+    const a = toScreen(start.x, start.y)
+    const b = toScreen(end.x, end.y)
     const abx = b.x - a.x
     const aby = b.y - a.y
     const ab2 = (abx * abx) + (aby * aby)
@@ -1086,8 +1116,10 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
 
 const drawMeasurementLines = (ctx) => {
   for (const item of measurementLines.value) {
-    const p1 = toScreen(item.start.x, item.start.y)
-    const p2 = toScreen(item.end.x, item.end.y)
+    const start = resolveMeasurePoint(item.start)
+    const end = resolveMeasurePoint(item.end)
+    const p1 = toScreen(start.x, start.y)
+    const p2 = toScreen(end.x, end.y)
     const dx = p2.x - p1.x
     const dy = p2.y - p1.y
     const angle = Math.atan2(dy, dx)
@@ -1106,7 +1138,7 @@ const drawMeasurementLines = (ctx) => {
     fillCircle(ctx, p1.x, p1.y, isSelected ? 5.5 : 4.5, isSelected ? 'rgba(251, 191, 36, 0.98)' : 'rgba(56, 189, 248, 0.95)')
     fillCircle(ctx, p2.x, p2.y, isSelected ? 5.5 : 4.5, isSelected ? 'rgba(251, 191, 36, 0.98)' : 'rgba(56, 189, 248, 0.95)')
 
-    const labelText = `${item.distance.toFixed(0)} m`
+    const labelText = `${distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`
     const midX = (p1.x + p2.x) / 2
     const midY = (p1.y + p2.y) / 2
     ctx.save()
@@ -1145,7 +1177,8 @@ const drawMeasurementLines = (ctx) => {
   }
 
   if (toolMode.value === TOOL_MODES.MEASURE && pendingMeasurePoint.value) {
-    const p = toScreen(pendingMeasurePoint.value.x, pendingMeasurePoint.value.y)
+    const pendingPoint = resolveMeasurePoint(pendingMeasurePoint.value)
+    const p = toScreen(pendingPoint.x, pendingPoint.y)
     ctx.save()
     ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)'
     ctx.fillStyle = 'rgba(251, 191, 36, 0.95)'
@@ -1659,11 +1692,39 @@ const draw = () => {
   ctx.fillStyle = background
   ctx.fillRect(0, 0, w, h)
 
-  if (fx > 1) {
-    drawUnderwaterBackdrop(ctx, w, h, profile, phase, underwaterDetail, isCrazyFx.value)
+  ctx.save()
+  ctx.strokeStyle = 'rgba(191, 219, 254, 0.12)'
+  ctx.lineWidth = 1
+  const minorSpacing = 56
+  for (let x = padding; x <= w - padding; x += minorSpacing) {
+    ctx.beginPath()
+    ctx.moveTo(x, padding)
+    ctx.lineTo(x, h - padding)
+    ctx.stroke()
   }
+  for (let y = padding; y <= h - padding; y += minorSpacing) {
+    ctx.beginPath()
+    ctx.moveTo(padding, y)
+    ctx.lineTo(w - padding, y)
+    ctx.stroke()
+  }
+  ctx.strokeStyle = 'rgba(191, 219, 254, 0.2)'
+  ctx.lineWidth = 1.2
+  const majorSpacing = minorSpacing * 4
+  for (let x = padding; x <= w - padding; x += majorSpacing) {
+    ctx.beginPath()
+    ctx.moveTo(x, padding)
+    ctx.lineTo(x, h - padding)
+    ctx.stroke()
+  }
+  for (let y = padding; y <= h - padding; y += majorSpacing) {
+    ctx.beginPath()
+    ctx.moveTo(padding, y)
+    ctx.lineTo(w - padding, y)
+    ctx.stroke()
+  }
+  ctx.restore()
 
-  drawThemeAmbient(ctx, w, h, profile, phase, fx)
   drawVisiblePackets(ctx, profile, phase, fx)
 
   for (const node of props.nodes) {
@@ -1677,10 +1738,6 @@ const draw = () => {
       packetId: null,
     }
     drawNode(ctx, node, visual, profile, phase, fx)
-  }
-
-  if (fx > 1) {
-    drawBetaTelemetry(ctx, w, h, profile, phase, isCrazyFx.value)
   }
 
   ctx.save()
@@ -1708,8 +1765,7 @@ const onPointerDown = (event) => {
   if (toolMode.value === TOOL_MODES.MEASURE) {
     event.preventDefault()
     event.stopImmediatePropagation()
-    const picked = pickNodeAt(sx, sy)
-    const point = picked ? { x: picked.x, y: picked.y } : toWorld(sx, sy)
+    const point = createMeasurePoint(sx, sy)
 
     if (!pendingMeasurePoint.value) {
       const pickedMeasurement = selectMeasurementAt(sx, sy)
@@ -1728,7 +1784,7 @@ const onPointerDown = (event) => {
       id: `measure-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
       start: pendingMeasurePoint.value,
       end: point,
-      distance: distanceByWorld(point, pendingMeasurePoint.value),
+      distance: distanceByMeasurePoints(point, pendingMeasurePoint.value),
     }
     commitMeasurementState([...measurementLines.value, nextMeasurement], nextMeasurement.id)
     pendingMeasurePoint.value = null
@@ -1930,7 +1986,8 @@ const onWheel = (event) => {
   const cx = event.clientX - rect.left
   const cy = event.clientY - rect.top
   const beforeZoom = zoom.value
-  const nextZoom = Math.max(0.25, Math.min(4, beforeZoom * (event.deltaY < 0 ? 1.12 : 0.9)))
+  const zoomFactor = Math.exp(-event.deltaY * 0.0015)
+  const nextZoom = Math.max(0.25, Math.min(4, beforeZoom * zoomFactor))
   if (nextZoom === beforeZoom) return
 
   const anchorWorld = toWorld(cx, cy)
@@ -1941,7 +1998,7 @@ const onWheel = (event) => {
     const s = effectiveScale.value
     pan.value = {
       x: cx - ((anchorWorld.x - base.minX) * s) - padding,
-      y: cy - ((anchorWorld.y - base.minY) * s) - padding,
+      y: cy - ((base.maxY - anchorWorld.y) * s) - padding,
     }
     requestAnimationFrame(draw)
   })
@@ -2028,30 +2085,7 @@ onBeforeUnmount(() => {
     0 5px 14px rgba(2, 8, 20, 0.26);
 }
 
-.canvas-audio-toggle {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 56px;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
-  background: color-mix(in srgb, var(--card, #0b1a2d) 86%, #020617 14%);
-  backdrop-filter: blur(6px);
-  color: var(--accent-soft, #dbeafe);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 130ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 160ms ease;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 5px 14px rgba(2, 8, 20, 0.26);
-}
-
-.canvas-reset-view:hover,
-.canvas-audio-toggle:hover {
+.canvas-reset-view:hover {
   border-color: color-mix(in srgb, var(--accent-soft, #93c5fd) 48%, transparent);
   filter: brightness(1.06);
   box-shadow:
@@ -2059,23 +2093,12 @@ onBeforeUnmount(() => {
     0 8px 18px color-mix(in srgb, var(--accent, #38bdf8) 22%, transparent);
 }
 
-.canvas-reset-view:active,
-.canvas-audio-toggle:active {
+.canvas-reset-view:active {
   transform: translateY(1.5px) scale(0.96);
   box-shadow:
     inset 0 3px 9px rgba(2, 8, 20, 0.4),
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
     0 2px 6px rgba(2, 8, 20, 0.22);
-}
-
-.canvas-audio-toggle svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .canvas-reset-view svg {
