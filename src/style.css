@@ -22,7 +22,7 @@
   --page-gap: 1rem;
   --panel-pad: 1rem;
   --card-pad: 0.9rem;
-  --title-size: clamp(1.45rem, 3vw, 2rem);
+  --title-size: clamp(1.7rem, 2.4vw + 0.7rem, 2.55rem);
   --ui-font-size: 16px;
   --ui-line: 1.5;
   --sidebar-min: 380px;
@@ -94,8 +94,10 @@ body {
   margin: 0;
   color: #f8fafc;
   font-size: var(--title-size);
-  letter-spacing: 0.02em;
-  line-height: 1.15;
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  line-height: 1.12;
+  white-space: nowrap;
 }
 
 .eyebrow {
@@ -1027,7 +1029,7 @@ body {
     --page-gap: 0.45rem;
     --panel-pad: 0.5rem;
     --card-pad: 0.5rem;
-    --title-size: 1.12rem;
+    --title-size: 1.5rem;
     --ui-font-size: 13px;
     --ui-line: 1.4;
     --sidebar-min: 280px;
@@ -1124,7 +1126,7 @@ body {
     --page-gap: 0.3rem;
     --panel-pad: 0.38rem;
     --card-pad: 0.38rem;
-    --title-size: 1rem;
+    --title-size: 1.32rem;
     --btn-compact-h: 26px;
     --select-h: 24px;
   }
@@ -1157,6 +1159,10 @@ body {
   .topbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .topbar h1 {
+    white-space: normal;
   }
 
   .control-actions {

@@ -1479,7 +1479,7 @@ onBeforeUnmount(() => {
     <header class="topbar">
       <div>
         <p class="eyebrow">ns-3 Acoustic Replay</p>
-        <h1>节点状态回放</h1>
+        <h1>NS3-Aquasim日志可视化分析工具</h1>
       </div>
       <p class="meta">
         当前：{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }}
