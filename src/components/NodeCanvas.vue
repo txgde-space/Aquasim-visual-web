@@ -128,7 +128,7 @@ const TOOL_MODES = Object.freeze({
   MEASURE: 'measure',
 })
 
-const NODE_RADIUS = 18
+const NODE_RADIUS_BASE = 18
 const THEME_PROFILES = Object.freeze({
   'ocean-sonar': {
     effect: 'sonar',
@@ -316,7 +316,22 @@ const measurementLines = ref([])
 const measurementHistory = ref([[]])
 const measurementHistoryIndex = ref(0)
 const selectedMeasurementId = ref(null)
-const padding = 44
+const viewInsets = computed(() => {
+  const shortest = Math.min(displayWidth.value, displayHeight.value)
+  const compact = shortest < 640
+  const base = compact ? 22 : 44
+  return {
+    left: base + 6,
+    top: compact ? 26 : 40,
+    right: compact ? 42 : 56,
+    bottom: compact ? 62 : 76,
+  }
+})
+const nodeRadius = computed(() => {
+  const shortest = Math.min(displayWidth.value, displayHeight.value)
+  if (shortest >= 640) return NODE_RADIUS_BASE
+  return Math.max(11, Math.round(11 + (((shortest - 280) * (NODE_RADIUS_BASE - 11)) / 360)))
+})
 const emit = defineEmits(['node-select', 'pause-request', 'toggle-mute'])
 let resizeObserver = null
 let activePointerId = null
@@ -344,8 +359,9 @@ const bounds = computed(() => {
 })
 
 const scale = computed(() => {
-  const sx = (displayWidth.value - padding * 2) / bounds.value.spanX
-  const sy = (displayHeight.value - padding * 2) / bounds.value.spanY
+  const inset = viewInsets.value
+  const sx = (displayWidth.value - inset.left - inset.right) / bounds.value.spanX
+  const sy = (displayHeight.value - inset.top - inset.bottom) / bounds.value.spanY
   return Math.min(sx, sy)
 })
 
@@ -360,25 +376,28 @@ const canvasCursorClass = computed(() => {
 
 const toScreen = (x, y) => {
   const base = bounds.value
+  const inset = viewInsets.value
   return {
-    x: padding + ((x - base.minX) * effectiveScale.value) + pan.value.x,
-    y: padding + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
+    x: inset.left + ((x - base.minX) * effectiveScale.value) + pan.value.x,
+    y: inset.top + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
   }
 }
 
 const toWorld = (x, y) => {
   const base = bounds.value
+  const inset = viewInsets.value
   const s = Math.max(effectiveScale.value, 1e-6)
   return {
-    x: base.minX + ((x - padding - pan.value.x) / s),
-    y: base.maxY - ((y - padding - pan.value.y) / s),
+    x: base.minX + ((x - inset.left - pan.value.x) / s),
+    y: base.maxY - ((y - inset.top - pan.value.y) / s),
   }
 }
 
 const pickNodeAt = (sx, sy) => {
   let picked = null
   let bestDist = Number.POSITIVE_INFINITY
-  const thresholdSq = 22 * 22
+  const hit = nodeRadius.value + 4
+  const thresholdSq = hit * hit
 
   for (const node of props.nodes) {
     const p = toScreen(node.x, node.y)
@@ -517,8 +536,9 @@ const hoveredNodeStats = computed(() => {
 
 const hoveredTooltipStyle = computed(() => {
   if (!hoveredNodePos.value) return null
-  const estimatedWidth = 360
-  const estimatedHeight = 286
+  const compact = displayWidth.value < 720 || displayHeight.value < 520
+  const estimatedWidth = compact ? 280 : 360
+  const estimatedHeight = compact ? 240 : 286
   const margin = 8
   const gap = 16
   const cursorX = hoverCursor.value.x
@@ -1021,40 +1041,41 @@ const drawVisiblePackets = (ctx, profile, phase, fx) => {
 
 const drawNode = (ctx, node, visual, profile, phase, fx) => {
   const p = toScreen(node.x, node.y)
-  const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, NODE_RADIUS + 6)
+  const r = nodeRadius.value
+  const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, r + 6)
   idleGradient.addColorStop(0, profile.idleInner)
   idleGradient.addColorStop(1, profile.idleOuter)
 
   const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
-  fillCircle(ctx, p.x, p.y, NODE_RADIUS, idleGradient, 0.92)
-  strokeCircle(ctx, p.x, p.y, NODE_RADIUS, profile.nodeStroke, 1.4, 0.9)
+  fillCircle(ctx, p.x, p.y, r, idleGradient, 0.92)
+  strokeCircle(ctx, p.x, p.y, r, profile.nodeStroke, 1.4, 0.9)
 
   const pulse = 0.5 + (Math.sin((phase * (4.2 + (fx * 0.8))) + (node.node_id * 0.6)) * 0.5)
-  strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 4 + (pulse * 3), profile.ring, 1, 0.35 + (pulse * 0.3))
+  strokeCircle(ctx, p.x, p.y, r + 4 + (pulse * 3), profile.ring, 1, 0.35 + (pulse * 0.3))
   if (fx > 1) {
-    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 10 + (pulse * 6), profile.ring, 1.2, 0.3)
+    strokeCircle(ctx, p.x, p.y, r + 10 + (pulse * 6), profile.ring, 1.2, 0.3)
   }
 
   if (visual.mode === 'tx') {
-    const progressRadius = 3 + ((NODE_RADIUS - 3) * visual.fillProgress)
+    const progressRadius = 3 + ((r - 3) * visual.fillProgress)
     fillCircle(ctx, p.x, p.y, progressRadius, profile.tx, 0.98)
-    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 8 + (pulse * 5), profile.tx, 1.2, 0.35)
+    strokeCircle(ctx, p.x, p.y, r + 8 + (pulse * 5), profile.tx, 1.2, 0.35)
 
     if (visual.overlay?.kind === 'collision_rx_tx') {
-      fillCircle(ctx, p.x, p.y, NODE_RADIUS * 0.8, profile.bad, 0.78)
+      fillCircle(ctx, p.x, p.y, r * 0.8, profile.bad, 0.78)
     }
   } else if (visual.mode === 'rx' || visual.mode === 'rx-done') {
     const progressRadius = visual.mode === 'rx-done'
-      ? NODE_RADIUS
-      : 3 + ((NODE_RADIUS - 3) * visual.fillProgress)
+      ? r
+      : 3 + ((r - 3) * visual.fillProgress)
     fillCircle(ctx, p.x, p.y, progressRadius, profile.rx, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 7 + (pulse * 4), profile.rx, 1, 0.28)
+    strokeCircle(ctx, p.x, p.y, r + 7 + (pulse * 4), profile.rx, 1, 0.28)
   } else if (visual.mode === 'collision' || visual.mode === 'collision-linger') {
-    fillCircle(ctx, p.x, p.y, NODE_RADIUS, profile.bad, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 10 + (pulse * 4), profile.bad, 1.6, 0.5)
+    fillCircle(ctx, p.x, p.y, r, profile.bad, visual.fade ?? 1)
+    strokeCircle(ctx, p.x, p.y, r + 10 + (pulse * 4), profile.bad, 1.6, 0.5)
     if (fx > 1) {
       for (let i = 0; i < 3; i += 1) {
-        const rr = NODE_RADIUS + 13 + (i * 7) + (((phase * 42) + (i * 8)) % 10)
+        const rr = r + 13 + (i * 7) + (((phase * 42) + (i * 8)) % 10)
         strokeCircle(ctx, p.x, p.y, rr, profile.bad, 1.1, 0.22 - (i * 0.05))
       }
     }
@@ -1079,12 +1100,12 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
       ctx.setLineDash([4, 5])
       ctx.lineDashOffset = -((phase * 26) + (node.node_id * 6))
       const haloColor = colorMix(baseColor, '#ffffff', 0.4)
-      strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 16 + (pulse * 8), haloColor, 1.1, 0.44)
-      strokeCircle(ctx, p.x, p.y, NODE_RADIUS + 26 + (pulse * 11), haloColor, 0.9, 0.28)
+      strokeCircle(ctx, p.x, p.y, r + 16 + (pulse * 8), haloColor, 1.1, 0.44)
+      strokeCircle(ctx, p.x, p.y, r + 26 + (pulse * 11), haloColor, 0.9, 0.28)
       ctx.setLineDash([])
       for (let i = 0; i < 3; i += 1) {
         const theta = (phase * (1.6 + (i * 0.3))) + (node.node_id * 0.45) + (i * ((Math.PI * 2) / 3))
-        const orbitR = NODE_RADIUS + 14 + (i * 7)
+        const orbitR = r + 14 + (i * 7)
         const ox = p.x + (Math.cos(theta) * orbitR)
         const oy = p.y + (Math.sin(theta) * orbitR * 0.66)
         fillCircle(ctx, ox, oy, 2.2 + (i * 0.35), haloColor, 0.62 - (i * 0.12))
@@ -1106,7 +1127,7 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
   ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
-  const labelOffset = fx > 1 ? NODE_RADIUS + 14 : NODE_RADIUS + 10
+  const labelOffset = fx > 1 ? r + 14 : r + 10
   ctx.fillText(node.name, p.x + labelOffset, p.y + 2)
   ctx.fillStyle = profile.depth
   ctx.font = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
@@ -1680,6 +1701,7 @@ const draw = () => {
 
   const w = displayWidth.value
   const h = displayHeight.value
+  const inset = viewInsets.value
   const profile = themeProfile.value
   const fx = fxIntensity.value
   const underwaterDetail = underwaterDetailProfile.value
@@ -1696,31 +1718,31 @@ const draw = () => {
   ctx.strokeStyle = 'rgba(191, 219, 254, 0.12)'
   ctx.lineWidth = 1
   const minorSpacing = 56
-  for (let x = padding; x <= w - padding; x += minorSpacing) {
+  for (let x = inset.left; x <= w - inset.right; x += minorSpacing) {
     ctx.beginPath()
-    ctx.moveTo(x, padding)
-    ctx.lineTo(x, h - padding)
+    ctx.moveTo(x, inset.top)
+    ctx.lineTo(x, h - inset.bottom)
     ctx.stroke()
   }
-  for (let y = padding; y <= h - padding; y += minorSpacing) {
+  for (let y = inset.top; y <= h - inset.bottom; y += minorSpacing) {
     ctx.beginPath()
-    ctx.moveTo(padding, y)
-    ctx.lineTo(w - padding, y)
+    ctx.moveTo(inset.left, y)
+    ctx.lineTo(w - inset.right, y)
     ctx.stroke()
   }
   ctx.strokeStyle = 'rgba(191, 219, 254, 0.2)'
   ctx.lineWidth = 1.2
   const majorSpacing = minorSpacing * 4
-  for (let x = padding; x <= w - padding; x += majorSpacing) {
+  for (let x = inset.left; x <= w - inset.right; x += majorSpacing) {
     ctx.beginPath()
-    ctx.moveTo(x, padding)
-    ctx.lineTo(x, h - padding)
+    ctx.moveTo(x, inset.top)
+    ctx.lineTo(x, h - inset.bottom)
     ctx.stroke()
   }
-  for (let y = padding; y <= h - padding; y += majorSpacing) {
+  for (let y = inset.top; y <= h - inset.bottom; y += majorSpacing) {
     ctx.beginPath()
-    ctx.moveTo(padding, y)
-    ctx.lineTo(w - padding, y)
+    ctx.moveTo(inset.left, y)
+    ctx.lineTo(w - inset.right, y)
     ctx.stroke()
   }
   ctx.restore()
@@ -1996,9 +2018,10 @@ const onWheel = (event) => {
   requestAnimationFrame(() => {
     const base = bounds.value
     const s = effectiveScale.value
+    const inset = viewInsets.value
     pan.value = {
-      x: cx - ((anchorWorld.x - base.minX) * s) - padding,
-      y: cy - ((base.maxY - anchorWorld.y) * s) - padding,
+      x: cx - ((anchorWorld.x - base.minX) * s) - inset.left,
+      y: cy - ((base.maxY - anchorWorld.y) * s) - inset.top,
     }
     requestAnimationFrame(draw)
   })
@@ -2007,8 +2030,8 @@ const onWheel = (event) => {
 const updateViewport = () => {
   if (!containerEl.value) return
   const rect = containerEl.value.getBoundingClientRect()
-  displayWidth.value = Math.max(320, rect.width - 2)
-  displayHeight.value = Math.max(320, Math.round((rect.height || 0) - 2))
+  displayWidth.value = Math.max(160, rect.width - 2)
+  displayHeight.value = Math.max(120, Math.round((rect.height || 0) - 2))
   requestAnimationFrame(draw)
 }
 
@@ -2208,7 +2231,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 36%, transparent);
   border-radius: 12px;
   padding: 0.55rem 0.65rem;
-  width: 360px;
+  width: min(360px, calc(100% - 16px));
   max-width: min(360px, calc(100vw - 18px));
   box-shadow:
     0 12px 28px rgba(0, 0, 0, 0.42),
@@ -2383,6 +2406,52 @@ onBeforeUnmount(() => {
   }
   100% {
     background-position: 180% 0;
+  }
+}
+
+@media (max-width: 1680px), (max-height: 980px) {
+  .canvas-toolbar {
+    bottom: 8px;
+    left: 8px;
+    gap: 0.3rem;
+  }
+
+  .toolbar-group {
+    padding: 0.28rem 0.38rem;
+    gap: 0.32rem;
+    border-radius: 10px;
+  }
+
+  .toolbar-btn {
+    padding: 0.22rem 0.5rem;
+    font-size: 0.7rem;
+  }
+
+  .toolbar-btn-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .toolbar-help {
+    font-size: 0.68rem;
+  }
+
+  .canvas-reset-view {
+    top: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .node-tooltip {
+    width: min(280px, calc(100% - 16px));
+    max-width: min(280px, calc(100vw - 16px));
+    padding: 0.4rem 0.5rem;
+  }
+
+  .node-tooltip-grid {
+    margin-top: 0.3rem;
+    gap: 0.22rem 0.32rem;
   }
 }
 </style>

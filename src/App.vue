@@ -1760,7 +1760,7 @@ onBeforeUnmount(() => {
 
     <section class="panel legend">
       <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }} | 当前日志：{{ activeLogName }}</p>
-      <p>其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
+      <p class="legend-note">其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
     </section>
   </div>
 </template>

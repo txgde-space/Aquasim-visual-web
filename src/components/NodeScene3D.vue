@@ -1066,4 +1066,26 @@ onBeforeUnmount(() => {
   color: #cbd5e1;
   font-size: 0.78rem;
 }
+
+@media (max-width: 1680px), (max-height: 980px) {
+  .scene-help {
+    top: 8px;
+    left: 8px;
+    gap: 0.35rem;
+    padding: 0.28rem 0.45rem;
+    font-size: 0.68rem;
+  }
+
+  .scene-axes {
+    top: 8px;
+    right: 8px;
+    width: 64px;
+    height: 64px;
+  }
+
+  .scene-tooltip {
+    min-width: 160px;
+    padding: 0.35rem 0.5rem;
+  }
+}
 </style>
