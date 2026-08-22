@@ -582,27 +582,27 @@ const distanceMeters = (a, b) => {
 
 const LOG_SOURCES = Object.freeze({
   default: {
-    label: '默认日志（net.json）',
+    label: '默认示例',
     fileName: 'net.json',
     raw: netLogDefaultText,
   },
   multihop: {
-    label: '多跳转发日志（net_multihop.json）',
+    label: '多跳转发',
     fileName: 'net_multihop.json',
     raw: netLogMultiHopText,
   },
   complex: {
-    label: '复杂冲突日志（net_multihop_complex.json）',
+    label: '复杂冲突',
     fileName: 'net_multihop_complex.json',
     raw: netLogMultiHopComplexText,
   },
   chainNoConflict: {
-    label: '5 节点链式无冲突日志（net_chain_5_no_conflict.log）',
+    label: '链式无冲突',
     fileName: 'net_chain_5_no_conflict.log',
     raw: netLogChainNoConflictText,
   },
   swarm: {
-    label: '集群日志示例（net-swarm.json）',
+    label: '集群',
     fileName: 'net-swarm.json',
     raw: netLogSwarmText,
   },
@@ -635,9 +635,7 @@ const logFileInput = ref(null)
 const nodeLogFileInput = ref(null)
 const logSourceKey = ref('default')
 const uploadedLogName = ref('')
-const uploadedLogText = ref('')
 const uploadedNodeLogNames = ref([])
-const uploadedNodeParsedLog = ref(null)
 const selectedTheme = ref('research-lab')
 const fxLevel = ref('standard')
 const underwaterDetail = ref('standard')
@@ -647,6 +645,7 @@ const packetRows = ref(normalizePacketsFromParsed(initialParsed))
 const parseErrors = ref(initialParsed.parseErrors)
 const metaState = ref(initialParsed.meta)
 const nodesState = computed(() => resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value))
+const isCustomLog = computed(() => logSourceKey.value === 'upload' || logSourceKey.value === 'node-upload')
 const activeLogName = computed(() => {
   if (logSourceKey.value === 'upload' && uploadedLogName.value) return uploadedLogName.value
   if (logSourceKey.value === 'node-upload' && uploadedNodeLogNames.value.length) {
@@ -655,6 +654,11 @@ const activeLogName = computed(() => {
     return `${names[0]} + ${names.length - 1} 个节点日志`
   }
   return (LOG_SOURCES[logSourceKey.value] || LOG_SOURCES.default).fileName
+})
+const customLogSelectLabel = computed(() => {
+  if (logSourceKey.value === 'upload') return `已导入：${uploadedLogName.value || '自定义日志'}`
+  if (logSourceKey.value === 'node-upload') return `已导入：${activeLogName.value}`
+  return ''
 })
 
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
@@ -1198,8 +1202,16 @@ const applyParsedLog = (parsed) => {
   lastTs = 0
 }
 
-const onLogSourceChange = (event) => {
-  logSourceKey.value = event.target.value
+const loadSampleLog = (key) => {
+  const source = LOG_SOURCES[key] || LOG_SOURCES.default
+  logSourceKey.value = LOG_SOURCES[key] ? key : 'default'
+  applyParsedLog(parseLog(source.raw))
+}
+
+const onSampleLogChange = (event) => {
+  const key = event.target.value
+  if (!LOG_SOURCES[key]) return
+  loadSampleLog(key)
 }
 
 const openLogFilePicker = () => {
@@ -1216,7 +1228,6 @@ const onLogFileChange = async (event) => {
 
   const text = await file.text()
   uploadedLogName.value = file.name
-  uploadedLogText.value = text
   logSourceKey.value = 'upload'
   applyParsedLog(parseLog(text))
 
@@ -1239,7 +1250,6 @@ const onNodeLogFilesChange = async (event) => {
 
   const mergedParsed = mergeParsedNodeLogs(parsedLogs, fileNames)
   uploadedNodeLogNames.value = fileNames
-  uploadedNodeParsedLog.value = mergedParsed
   logSourceKey.value = 'node-upload'
   applyParsedLog(mergedParsed)
 
@@ -1387,29 +1397,6 @@ watch(isPlaying, (next) => {
   }
   raf = requestAnimationFrame(tick)
 })
-
-watch(logSourceKey, (nextKey) => {
-  if (nextKey === 'upload') {
-    if (!uploadedLogText.value) {
-      logSourceKey.value = 'default'
-      return
-    }
-    applyParsedLog(parseLog(uploadedLogText.value))
-    return
-  }
-
-  if (nextKey === 'node-upload') {
-    if (!uploadedNodeParsedLog.value) {
-      logSourceKey.value = 'default'
-      return
-    }
-    applyParsedLog(uploadedNodeParsedLog.value)
-    return
-  }
-
-  const source = LOG_SOURCES[nextKey] || LOG_SOURCES.default
-  applyParsedLog(parseLog(source.raw))
-}, { immediate: false })
 
 watch(fxLevel, (next) => {
   try {
@@ -1561,8 +1548,8 @@ onBeforeUnmount(() => {
             <div class="control-btn-row">
               <button class="btn btn-compact primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
               <button class="btn btn-compact" @click="reset">重置</button>
-              <button class="btn btn-compact" @click="openLogFilePicker">选择日志文件</button>
-              <button class="btn btn-compact" @click="openNodeLogFilePicker">选择节点级日志</button>
+              <button class="btn btn-compact" @click="openLogFilePicker">导入日志</button>
+              <button class="btn btn-compact" @click="openNodeLogFilePicker">导入节点日志</button>
               <button
                 v-if="replayMode === 'global'"
                 class="btn btn-compact btn-wide"
@@ -1586,18 +1573,18 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="field field-compact">
-                <div class="field-head"><span>日志源</span></div>
-                <select class="select" :value="logSourceKey" @change="onLogSourceChange">
+                <div class="field-head">
+                  <span>示例日志</span>
+                  <span v-if="isCustomLog" class="field-chip">已导入</span>
+                </div>
+                <select class="select" :value="logSourceKey" @change="onSampleLogChange">
+                  <option v-if="isCustomLog" :value="logSourceKey" disabled>{{ customLogSelectLabel }}</option>
                   <option
                     v-for="[key, source] in Object.entries(LOG_SOURCES)"
                     :key="key"
                     :value="key"
                   >
                     {{ source.label }}
-                  </option>
-                  <option value="upload" :disabled="!uploadedLogText">{{ uploadedLogName || '上传日志文件' }}</option>
-                  <option value="node-upload" :disabled="!uploadedNodeParsedLog">
-                    {{ uploadedNodeLogNames.length ? `节点级日志（${uploadedNodeLogNames.length} 个）` : '上传节点级日志' }}
                   </option>
                 </select>
               </label>
