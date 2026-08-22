@@ -4,6 +4,7 @@ import netLogDefaultText from './assets/net.json?raw'
 import netLogMultiHopText from './assets/net_multihop.json?raw'
 import netLogMultiHopComplexText from './assets/net_multihop_complex.json?raw'
 import netLogChainNoConflictText from './assets/net_chain_5_no_conflict.log?raw'
+import netLogSwarmText from './assets/net-swarm.json?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
@@ -599,6 +600,11 @@ const LOG_SOURCES = Object.freeze({
     label: '5 节点链式无冲突日志（net_chain_5_no_conflict.log）',
     fileName: 'net_chain_5_no_conflict.log',
     raw: netLogChainNoConflictText,
+  },
+  swarm: {
+    label: '集群日志示例（net-swarm.json）',
+    fileName: 'net-swarm.json',
+    raw: netLogSwarmText,
   },
 })
 
