@@ -1585,7 +1585,7 @@ onBeforeUnmount(() => {
             <div class="control-btn-row">
               <button class="btn btn-compact primary" @click="togglePlay">{{ isPlaying ? '暂停' : '播放' }}</button>
               <button class="btn btn-compact" @click="reset">重置</button>
-              <button class="btn btn-compact" @click="openLogFilePicker">导入日志</button>
+              <button class="btn btn-compact" @click="openLogFilePicker">导入全局日志</button>
               <button class="btn btn-compact" @click="openNodeLogFilePicker">导入节点日志</button>
               <button
                 v-if="replayMode === 'global'"
