@@ -6,6 +6,16 @@ import netLogMultiHopComplexText from './assets/net_multihop_complex.json?raw'
 import netLogChainNoConflictText from './assets/net_chain_5_no_conflict.log?raw'
 import netLogSwarmText from './assets/net-swarm.json?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
+import {
+  MAX_JSONL_LINES,
+  MAX_LOG_FILES,
+  capParsedLog,
+  sanitizeDisplayText,
+  sanitizeFileName,
+  stripUnsafeKeys,
+  validateImportedFile,
+  validateImportedText,
+} from './logSafety.js'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
 
@@ -161,14 +171,24 @@ const createEmptyParsedLog = () => ({
 
 const appendParsedObject = (obj, parsed) => {
   if (!obj || typeof obj !== 'object') return
+  obj = stripUnsafeKeys(obj)
 
   if (obj.type === 'meta') {
-    Object.assign(parsed.meta, obj)
+    const meta = stripUnsafeKeys(obj)
+    parsed.meta = {
+      ...parsed.meta,
+      schema: sanitizeDisplayText(meta.schema || parsed.meta.schema, 80),
+      time_unit: sanitizeDisplayText(meta.time_unit || parsed.meta.time_unit, 16),
+      distance_unit: sanitizeDisplayText(meta.distance_unit || parsed.meta.distance_unit, 16),
+      sim_end_us: Number(meta.sim_end_us ?? parsed.meta.sim_end_us) || 0,
+    }
   } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
     const nodeId = Number(obj.node_id)
     parsed.nodes.push({
       ...obj,
       node_id: nodeId,
+      name: sanitizeDisplayText(obj.name, 80) || `Node-${nodeId}`,
+      role: sanitizeDisplayText(obj.role, 32) || 'node',
       x: Number(obj.x ?? 0),
       y: Number(obj.y ?? 0),
       z: Number(obj.z ?? 0),
@@ -201,7 +221,7 @@ const appendParsedObject = (obj, parsed) => {
   }
 }
 
-const finalizeParsedLog = (parsed) => ({
+const finalizeParsedLog = (parsed) => capParsedLog({
   ...parsed,
   movements: normalizeMovements(parsed.movements, parsed.nodes),
 })
@@ -249,6 +269,7 @@ const parseJsonLinesLog = (raw) => {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+    .slice(0, MAX_JSONL_LINES)
   const nodes = []
   const movements = []
   const packets = []
@@ -268,11 +289,11 @@ const parseJsonLinesLog = (raw) => {
     try {
       appendParsedObject(JSON.parse(line), { nodes, movements, packets, nodeEvents, tx, rx, parseErrors, meta })
     } catch {
-      parseErrors.push(line)
+      parseErrors.push('invalid-json-line')
     }
   }
 
-  return { nodes, movements: normalizeMovements(movements, nodes), packets, nodeEvents, tx, rx, parseErrors, meta }
+  return capParsedLog({ nodes, movements: normalizeMovements(movements, nodes), packets, nodeEvents, tx, rx, parseErrors, meta })
 }
 
 const parseLog = (raw) => {
@@ -294,14 +315,14 @@ const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
 
   return {
     ...receiver,
-    receiver_id: receiver.receiver_id || `${packetId}-rx-${index + 1}`,
+    receiver_id: sanitizeDisplayText(receiver.receiver_id || `${packetId}-rx-${index + 1}`, 80),
     dst: Number(receiver.dst),
     status,
-    reason: status === 'ok' ? null : String(receiver.reason || deriveReasonFromLegacy(receiver.result)),
+    reason: status === 'ok' ? null : sanitizeDisplayText(receiver.reason || deriveReasonFromLegacy(receiver.result), 80),
     with: Array.isArray(receiver.with)
-      ? receiver.with.map(String)
+      ? receiver.with.map((item) => sanitizeDisplayText(item, 80))
       : Array.isArray(receiver.collided_with)
-        ? receiver.collided_with.map(String)
+        ? receiver.collided_with.map((item) => sanitizeDisplayText(item, 80))
         : [],
     rx_start_us: startUs,
     rx_duration_us: durationUs,
@@ -312,8 +333,8 @@ const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
 const normalizeCommitted = (value) => !(value === false || value === 'false')
 
 const normalizePacket = (packet, index) => {
-  const packetId = String(packet.packet_id || packet.tx_id || `pkt-${index + 1}`)
-  const eventId = String(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`)
+  const packetId = sanitizeDisplayText(packet.packet_id || packet.tx_id || `pkt-${index + 1}`, 80)
+  const eventId = sanitizeDisplayText(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`, 100)
   const txStartUs = normalizeTime(packet.tx_start_us ?? packet.start_us)
   const txCommitted = normalizeCommitted(packet.tx_committed)
   const txDurationRawUs = normalizeTime(packet.tx_duration_us ?? packet.duration_us)
@@ -334,7 +355,7 @@ const normalizePacket = (packet, index) => {
     packet_id: packetId,
     src: Number(packet.src),
     tx_committed: txCommitted,
-    tx_blocked_reason: txCommitted ? null : (packet.tx_blocked_reason ? String(packet.tx_blocked_reason) : null),
+    tx_blocked_reason: txCommitted ? null : (packet.tx_blocked_reason ? sanitizeDisplayText(packet.tx_blocked_reason, 80) : null),
     tx_start_us: txStartUs,
     tx_duration_us: txDurationUs,
     tx_end_us: txEndUs,
@@ -539,7 +560,7 @@ const mergeParsedNodeLogs = (parsedLogs, fileNames = []) => {
     ),
   }
 
-  return merged
+  return capParsedLog(merged)
 }
 
 const enforceMinGap = (nodes) => {
@@ -1222,40 +1243,56 @@ const openNodeLogFilePicker = () => {
   nodeLogFileInput.value?.click()
 }
 
+const rejectImportedLog = (message) => {
+  parseErrors.value = [sanitizeDisplayText(message, 120)]
+}
+
+const importLogFile = async (file) => {
+  const fileCheck = validateImportedFile(file)
+  if (!fileCheck.ok) return { ok: false, error: fileCheck.error }
+  const text = await file.text()
+  const textCheck = validateImportedText(text)
+  if (!textCheck.ok) return { ok: false, error: textCheck.error }
+  return { ok: true, text, name: sanitizeFileName(file.name) }
+}
+
 const onLogFileChange = async (event) => {
   const file = event.target?.files?.[0]
+  if (event.target) event.target.value = ''
   if (!file) return
 
-  const text = await file.text()
-  uploadedLogName.value = file.name
-  logSourceKey.value = 'upload'
-  applyParsedLog(parseLog(text))
-
-  if (event.target) {
-    event.target.value = ''
+  const imported = await importLogFile(file)
+  if (!imported.ok) {
+    rejectImportedLog(imported.error)
+    return
   }
+
+  uploadedLogName.value = imported.name
+  logSourceKey.value = 'upload'
+  applyParsedLog(parseLog(imported.text))
 }
 
 const onNodeLogFilesChange = async (event) => {
-  const files = [...(event.target?.files || [])]
+  const files = [...(event.target?.files || [])].slice(0, MAX_LOG_FILES)
+  if (event.target) event.target.value = ''
   if (!files.length) return
 
   const parsedLogs = []
   const fileNames = []
   for (const file of files) {
-    const text = await file.text()
-    parsedLogs.push(parseLog(text))
-    fileNames.push(file.name)
+    const imported = await importLogFile(file)
+    if (!imported.ok) {
+      rejectImportedLog(imported.error)
+      return
+    }
+    parsedLogs.push(parseLog(imported.text))
+    fileNames.push(imported.name)
   }
 
   const mergedParsed = mergeParsedNodeLogs(parsedLogs, fileNames)
   uploadedNodeLogNames.value = fileNames
   logSourceKey.value = 'node-upload'
   applyParsedLog(mergedParsed)
-
-  if (event.target) {
-    event.target.value = ''
-  }
 }
 
 const onFxLevelChange = (event) => {
@@ -1636,7 +1673,7 @@ onBeforeUnmount(() => {
               ref="logFileInput"
               class="hidden-file-input"
               type="file"
-              accept=".log,.jsonl,.json,.txt"
+              accept=".log,.jsonl,.json,.txt,application/json,text/plain"
               @change="onLogFileChange"
             />
             <input
@@ -1644,7 +1681,7 @@ onBeforeUnmount(() => {
               class="hidden-file-input"
               type="file"
               multiple
-              accept=".log,.jsonl,.json,.txt"
+              accept=".log,.jsonl,.json,.txt,application/json,text/plain"
               @change="onNodeLogFilesChange"
             />
           </div>
