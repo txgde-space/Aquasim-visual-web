@@ -6,8 +6,10 @@
   "packageManager": "yarn@1.22.22",
   "scripts": {
     "dev": "vite",
+    "dev:public": "vite --host 0.0.0.0",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:public": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
     "@babylonjs/core": "^9.3.0",

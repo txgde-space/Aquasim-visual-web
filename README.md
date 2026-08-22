@@ -40,6 +40,14 @@ Start the development server:
 yarn dev
 ```
 
+Expose the development server on the LAN / public interface (`0.0.0.0`):
+
+```bash
+yarn dev:public
+```
+
+Vite will print a Network URL. Other devices can open that address; the machine firewall must allow the port (default `5173`).
+
 Build for production:
 
 ```bash
@@ -143,6 +151,14 @@ yarn install
 ```bash
 yarn dev
 ```
+
+在公网 / 局域网网卡上监听（绑定 `0.0.0.0`）：
+
+```bash
+yarn dev:public
+```
+
+启动后终端会打印 Network 地址，其他设备用该地址访问。本机防火墙需要放行对应端口（默认 `5173`）。
 
 构建生产版本：
 
