@@ -1,0 +1,217 @@
+{
+  "meta": {
+    "schema": "uan-vis-packet-log/v2-moving",
+    "time_unit": "us",
+    "distance_unit": "m",
+    "seed": 20260823,
+    "sim_end_us": 20000000,
+    "sound_speed_mps": 1500,
+    "note": "Two AUVs patrol while a sensor reports via a static relay. Propagation delay uses 1500 m/s and node positions at transmit/arrival time. AUV-4 delay shrinks as it approaches the relay; one rx-tx and one rx-rx collision are included."
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "name": "Sink-1",
+      "x": 0,
+      "y": 0,
+      "z": -20,
+      "role": "sink"
+    },
+    {
+      "node_id": 2,
+      "name": "Relay-2",
+      "x": 2000,
+      "y": 0,
+      "z": -25,
+      "role": "relay"
+    },
+    {
+      "node_id": 3,
+      "name": "Sensor-3",
+      "x": 400,
+      "y": 1800,
+      "z": -30,
+      "role": "sensor"
+    },
+    {
+      "node_id": 4,
+      "name": "AUV-4",
+      "x": 3400,
+      "y": 300,
+      "z": -18,
+      "role": "auv",
+      "movements": [
+        {
+          "start_us": 2000000,
+          "end_us": 18000000,
+          "to_x": 1400,
+          "to_y": 300,
+          "to_z": -18
+        }
+      ]
+    },
+    {
+      "node_id": 5,
+      "name": "AUV-5",
+      "x": 2400,
+      "y": 1600,
+      "z": -22,
+      "role": "auv",
+      "movements": [
+        {
+          "start_us": 4000000,
+          "end_us": 16000000,
+          "to_x": 2400,
+          "to_y": 400,
+          "to_z": -22
+        }
+      ]
+    }
+  ],
+  "packets": [
+    {
+      "packet_id": "pkt-s3-h0",
+      "src": 3,
+      "hop": 0,
+      "tx_start_us": 1000000,
+      "tx_duration_us": 180000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 2605549,
+          "rx_duration_us": 180000,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-s3-h1",
+      "src": 2,
+      "hop": 1,
+      "tx_start_us": 2985549,
+      "tx_duration_us": 180000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 4318886,
+          "rx_duration_us": 180000,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-auv4-busy",
+      "src": 4,
+      "hop": 0,
+      "tx_start_us": 2100000,
+      "tx_duration_us": 200000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 3046386,
+          "rx_duration_us": 200000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "with": []
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-auv4-far",
+      "src": 4,
+      "hop": 0,
+      "tx_start_us": 3500000,
+      "tx_duration_us": 200000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 4332721,
+          "rx_duration_us": 200000,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-s3-2",
+      "src": 3,
+      "hop": 0,
+      "tx_start_us": 7237727,
+      "tx_duration_us": 180000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 8843276,
+          "rx_duration_us": 180000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "with": [
+            "pkt-auv5"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-auv5",
+      "src": 5,
+      "hop": 0,
+      "tx_start_us": 8000000,
+      "tx_duration_us": 220000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 8843276,
+          "rx_duration_us": 220000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "with": [
+            "pkt-s3-2"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-auv4-near",
+      "src": 4,
+      "hop": 0,
+      "tx_start_us": 15000000,
+      "tx_duration_us": 200000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 15250044,
+          "rx_duration_us": 200000,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "packet_id": "pkt-relay-bc",
+      "src": 2,
+      "hop": 0,
+      "tx_start_us": 16500000,
+      "tx_duration_us": 180000,
+      "tx_committed": true,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 17833337,
+          "rx_duration_us": 180000,
+          "status": "ok"
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 16863368,
+          "rx_duration_us": 180000,
+          "status": "ok"
+        }
+      ]
+    }
+  ]
+}

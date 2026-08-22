@@ -25,7 +25,7 @@
         {{ selectedNode.name }}（{{ selectedNode.node_id }}）
         <span class="scene-tooltip-role">{{ selectedNode.role }}</span>
       </p>
-      <p class="scene-tooltip-row">x: {{ selectedNode.x.toFixed(1) }}m, y: {{ selectedNode.y.toFixed(1) }}m, z: {{ selectedNode.z ?? 0 }}m</p>
+      <p class="scene-tooltip-row">x: {{ selectedNode.x.toFixed(2) }}m, y: {{ selectedNode.y.toFixed(2) }}m, z: {{ Number(selectedNode.z ?? 0).toFixed(2) }}m</p>
       <p v-if="selectedNodeVisual" class="scene-tooltip-row">状态：{{ selectedNodeVisual.statusText }}</p>
       <p v-if="selectedNodeVisual?.packetId" class="scene-tooltip-row">关联包：{{ selectedNodeVisual.packetId }}</p>
     </div>

@@ -5,6 +5,7 @@ import netLogMultiHopText from './assets/net_multihop.json?raw'
 import netLogMultiHopComplexText from './assets/net_multihop_complex.json?raw'
 import netLogChainNoConflictText from './assets/net_chain_5_no_conflict.log?raw'
 import netLogSwarmText from './assets/net-swarm.json?raw'
+import netLogMovingText from './assets/net_moving.json?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 import {
   MAX_JSONL_LINES,
@@ -16,10 +17,14 @@ import {
   validateImportedFile,
   validateImportedText,
 } from './logSafety.js'
+import {
+  DEFAULT_SOUND_SPEED_MPS,
+  recomputeReceiversFromGeometry,
+} from './acousticSim.js'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
 
-const SOUND_SPEED_MPS = 1500
+const SOUND_SPEED_MPS = DEFAULT_SOUND_SPEED_MPS
 const MIN_NODE_GAP_M = 1000
 const MIN_SIM_TIME_US = 10_000_000
 const RX_OK_HOLD_US = 180_000
@@ -601,6 +606,33 @@ const distanceMeters = (a, b) => {
   return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }
 
+const summarizePackets = (rows) => {
+  let committedPacketCount = 0
+  let blockedPacketCount = 0
+  let okReceivers = 0
+  let rxrxCollisions = 0
+  let rxtxCollisions = 0
+
+  for (const packet of rows || []) {
+    if (packet.tx_committed) committedPacketCount += 1
+    else blockedPacketCount += 1
+    for (const receiver of packet.receivers || []) {
+      if (receiver.status === 'ok') okReceivers += 1
+      if (receiver.reason === 'collision_rx_rx') rxrxCollisions += 1
+      if (receiver.reason === 'collision_rx_tx') rxtxCollisions += 1
+    }
+  }
+
+  return {
+    packetCount: (rows || []).length,
+    committedPacketCount,
+    blockedPacketCount,
+    okReceivers,
+    rxrxCollisions,
+    rxtxCollisions,
+  }
+}
+
 const LOG_SOURCES = Object.freeze({
   default: {
     label: '默认示例',
@@ -626,6 +658,11 @@ const LOG_SOURCES = Object.freeze({
     label: '集群',
     fileName: 'net-swarm.json',
     raw: netLogSwarmText,
+  },
+  moving: {
+    label: '移动节点',
+    fileName: 'net_moving.json',
+    raw: netLogMovingText,
   },
 })
 
@@ -662,10 +699,26 @@ const fxLevel = ref('standard')
 const underwaterDetail = ref('standard')
 const baseNodesState = ref(enforceMinGap(initialParsed.nodes))
 const nodeMovementRows = ref(initialParsed.movements)
-const packetRows = ref(normalizePacketsFromParsed(initialParsed))
+const sourcePacketRows = ref(normalizePacketsFromParsed(initialParsed))
+const simulatedPacketRows = ref(null)
 const parseErrors = ref(initialParsed.parseErrors)
 const metaState = ref(initialParsed.meta)
-const nodesState = computed(() => resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value))
+const interactionMode = ref('replay')
+const editSoundSpeed = ref(DEFAULT_SOUND_SPEED_MPS)
+const editNodes = ref([])
+const originalEditPoseById = ref(new Map())
+const selectedEditNodeId = ref(null)
+const packetRows = computed(() => (
+  interactionMode.value === 'edit' && simulatedPacketRows.value
+    ? simulatedPacketRows.value
+    : sourcePacketRows.value
+))
+const nodesState = computed(() => (
+  interactionMode.value === 'edit'
+    ? editNodes.value
+    : resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value)
+))
+const isEditMode = computed(() => interactionMode.value === 'edit')
 const isCustomLog = computed(() => logSourceKey.value === 'upload' || logSourceKey.value === 'node-upload')
 const activeLogName = computed(() => {
   if (logSourceKey.value === 'upload' && uploadedLogName.value) return uploadedLogName.value
@@ -681,6 +734,34 @@ const customLogSelectLabel = computed(() => {
   if (logSourceKey.value === 'node-upload') return `已导入：${activeLogName.value}`
   return ''
 })
+const originalReceiverMap = computed(() => {
+  const map = new Map()
+  for (const packet of sourcePacketRows.value) {
+    for (const receiver of packet.receivers || []) {
+      map.set(`${packet.eventId}:${receiver.dst}`, receiver)
+    }
+  }
+  return map
+})
+const originalEditPositions = computed(() => [...originalEditPoseById.value.values()])
+const selectedEditNode = computed(() => (
+  editNodes.value.find((node) => node.node_id === selectedEditNodeId.value) || null
+))
+const originalSummary = computed(() => summarizePackets(sourcePacketRows.value))
+const simulatedSummary = computed(() => summarizePackets(packetRows.value))
+
+const earlierArrivalLate = (packet) => {
+  let latestPriorEnd = 0
+  for (const other of packetRows.value) {
+    if (other.packet_id !== packet.packet_id || other.eventId === packet.eventId) continue
+    if (other.tx_start_us >= packet.tx_start_us) continue
+    for (const receiver of other.receivers || []) {
+      if (receiver.status !== 'ok') continue
+      latestPriorEnd = Math.max(latestPriorEnd, receiver.rx_end_us)
+    }
+  }
+  return latestPriorEnd > packet.tx_start_us
+}
 
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
 const packetByPacketId = computed(() => {
@@ -762,12 +843,21 @@ const packetEntries = computed(() => packets.value.map((packet) => {
         : receiver.reason === 'collision_rx_rx'
           ? 'rxrx'
           : 'fail'
+    const original = originalReceiverMap.value.get(`${packet.eventId}:${receiver.dst}`)
+    const originalChanged = Boolean(
+      original
+      && (original.status !== receiver.status || (original.reason || null) !== (receiver.reason || null)),
+    )
 
     return {
       ...receiver,
       dstLabel: dstNode ? dstNode.name : `Node-${receiver.dst}`,
       reasonLabel: reason,
       tone,
+      originalChanged,
+      originalReasonLabel: original
+        ? (original.status === 'ok' ? '成功' : reasonLabel(original.reason))
+        : null,
     }
   })
 
@@ -786,6 +876,7 @@ const packetEntries = computed(() => packets.value.map((packet) => {
   const outcomeSummary = packet.tx_committed
     ? `成功 ${okCount} / rx-rx ${rxrxCount} / rx-tx ${rxtxCount}`
     : `未发出 / 原因 ${blockedReasonText}`
+  const timingWarn = Boolean(packet.simulated) && earlierArrivalLate(packet)
 
   return {
     ...packet,
@@ -805,6 +896,7 @@ const packetEntries = computed(() => packets.value.map((packet) => {
     outcomeSummary,
     startUs: packet.tx_start_us,
     endUs: packet.timeEnd,
+    timingWarn,
   }
 }))
 
@@ -953,6 +1045,7 @@ const globalActiveEventId = computed(() => activePacket.value?.eventId || null)
 const lifecycleActiveEventId = computed(() => activeLifecycleStage.value?.eventId || null)
 
 const displayPackets = computed(() => {
+  if (isEditMode.value && !isPlaying.value) return []
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
     return lifecyclePacket.value.segments
   }
@@ -963,32 +1056,7 @@ const displayPackets = computed(() => {
   return activePacket.value ? [activePacket.value] : []
 })
 
-const summary = computed(() => {
-  let committedPacketCount = 0
-  let blockedPacketCount = 0
-  let okReceivers = 0
-  let rxrxCollisions = 0
-  let rxtxCollisions = 0
-
-  for (const packet of packets.value) {
-    if (packet.tx_committed) committedPacketCount += 1
-    else blockedPacketCount += 1
-    for (const receiver of packet.receivers) {
-      if (receiver.status === 'ok') okReceivers += 1
-      if (receiver.reason === 'collision_rx_rx') rxrxCollisions += 1
-      if (receiver.reason === 'collision_rx_tx') rxtxCollisions += 1
-    }
-  }
-
-  return {
-    packetCount: packets.value.length,
-    committedPacketCount,
-    blockedPacketCount,
-    okReceivers,
-    rxrxCollisions,
-    rxtxCollisions,
-  }
-})
+const summary = computed(() => summarizePackets(packets.value))
 
 const txEventsByNode = computed(() => {
   const map = new Map()
@@ -1210,9 +1278,10 @@ const onSpeed = (event) => {
 }
 
 const applyParsedLog = (parsed) => {
+  exitEditMode()
   baseNodesState.value = enforceMinGap(parsed.nodes)
   nodeMovementRows.value = parsed.movements
-  packetRows.value = normalizePacketsFromParsed(parsed)
+  sourcePacketRows.value = normalizePacketsFromParsed(parsed)
   parseErrors.value = parsed.parseErrors
   metaState.value = parsed.meta
 
@@ -1221,6 +1290,106 @@ const applyParsedLog = (parsed) => {
   currentTime.value = 0
   isPlaying.value = false
   lastTs = 0
+}
+
+const cloneNode = (node) => ({
+  ...node,
+  x: Number(node.x) || 0,
+  y: Number(node.y) || 0,
+  z: Number(node.z) || 0,
+})
+
+const refreshSimulatedPackets = () => {
+  if (interactionMode.value !== 'edit') return
+  simulatedPacketRows.value = recomputeReceiversFromGeometry(
+    sourcePacketRows.value,
+    editNodes.value,
+    editSoundSpeed.value,
+  )
+}
+
+const enterEditMode = () => {
+  const snapshot = resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value).map(cloneNode)
+  const poseMap = new Map(snapshot.map((node) => [node.node_id, cloneNode(node)]))
+  originalEditPoseById.value = poseMap
+  editNodes.value = snapshot.map(cloneNode)
+  selectedEditNodeId.value = snapshot[0]?.node_id ?? null
+  interactionMode.value = 'edit'
+  isPlaying.value = false
+  lastTs = 0
+  focusedPacketId.value = null
+  currentTime.value = 0
+  visualMode.value = '2d'
+  refreshSimulatedPackets()
+}
+
+const exitEditMode = () => {
+  interactionMode.value = 'replay'
+  simulatedPacketRows.value = null
+  editNodes.value = []
+  originalEditPoseById.value = new Map()
+  selectedEditNodeId.value = null
+  isPlaying.value = false
+  lastTs = 0
+  focusedPacketId.value = null
+  currentTime.value = 0
+}
+
+const setInteractionMode = (mode) => {
+  if (mode === interactionMode.value) return
+  if (mode === 'edit') enterEditMode()
+  else exitEditMode()
+}
+
+const onEditNodeMove = (payload) => {
+  if (!payload || !Number.isFinite(Number(payload.node_id))) return
+  pauseForTool()
+  editNodes.value = editNodes.value.map((node) => (
+    node.node_id === payload.node_id
+      ? { ...node, x: Math.round((Number(payload.x) || 0) * 100) / 100, y: Math.round((Number(payload.y) || 0) * 100) / 100 }
+      : node
+  ))
+}
+
+const onEditNodeMoveEnd = () => {
+  refreshSimulatedPackets()
+}
+
+const onEditNodeSelect = (node) => {
+  if (!node) return
+  selectedEditNodeId.value = node.node_id
+}
+
+const restoreSelectedEditNode = () => {
+  const original = originalEditPoseById.value.get(selectedEditNodeId.value)
+  if (!original) return
+  editNodes.value = editNodes.value.map((node) => (
+    node.node_id === original.node_id ? cloneNode(original) : node
+  ))
+  refreshSimulatedPackets()
+}
+
+const restoreAllEditNodes = () => {
+  editNodes.value = [...originalEditPoseById.value.values()].map(cloneNode)
+  refreshSimulatedPackets()
+}
+
+const onEditSoundSpeedChange = (event) => {
+  const next = Number(event.target.value)
+  if (!Number.isFinite(next) || next <= 0) return
+  editSoundSpeed.value = Math.max(200, Math.min(2500, next))
+  refreshSimulatedPackets()
+}
+
+const onEditCoordChange = (axis, event) => {
+  const node = selectedEditNode.value
+  if (!node) return
+  const next = Number(event.target.value)
+  if (!Number.isFinite(next)) return
+  editNodes.value = editNodes.value.map((item) => (
+    item.node_id === node.node_id ? { ...item, [axis]: Math.round(next * 100) / 100 } : item
+  ))
+  refreshSimulatedPackets()
 }
 
 const loadSampleLog = (key) => {
@@ -1518,15 +1687,26 @@ onBeforeUnmount(() => {
     </header>
 
     <section class="panel card-grid">
-      <div class="card visual">
+      <div class="card visual" :class="{ 'visual-workspace': isEditMode }">
         <div class="card-title-row">
-          <div class="card-title">节点状态视图</div>
-          <div class="view-switch" role="tablist" aria-label="视图模式">
-            <span class="view-switch-indicator" :class="{ right: visualMode === '3d' }" aria-hidden="true"></span>
-            <button class="view-switch-btn" :class="{ active: visualMode === '2d' }" @click="visualMode = '2d'">2D</button>
-            <button class="view-switch-btn" :class="{ active: visualMode === '3d' }" @click="visualMode = '3d'">3D</button>
+          <div class="card-title">{{ isEditMode ? '编辑视图' : '节点状态视图' }}</div>
+          <div class="visual-toggles">
+            <div class="view-switch" role="tablist" aria-label="交互模式">
+              <span class="view-switch-indicator" :class="{ right: isEditMode }" aria-hidden="true"></span>
+              <button class="view-switch-btn" :class="{ active: !isEditMode }" @click="setInteractionMode('replay')">回放</button>
+              <button class="view-switch-btn" :class="{ active: isEditMode }" @click="setInteractionMode('edit')">编辑</button>
+            </div>
+            <div class="view-switch" role="tablist" aria-label="视图模式">
+              <span class="view-switch-indicator" :class="{ right: visualMode === '3d' }" aria-hidden="true"></span>
+              <button class="view-switch-btn" :class="{ active: visualMode === '2d' }" @click="visualMode = '2d'">2D</button>
+              <button class="view-switch-btn" :class="{ active: visualMode === '3d' }" @click="visualMode = '3d'">3D</button>
+            </div>
           </div>
         </div>
+        <p v-if="isEditMode" class="edit-banner">
+          <span class="edit-badge">编辑</span>
+          发包时刻保持日志原值，收包与冲突按当前几何和声速重算。节点轨迹已冻结。
+        </p>
         <div class="visual-main">
           <NodeCanvas
             v-if="visualMode === '2d'"
@@ -1537,7 +1717,14 @@ onBeforeUnmount(() => {
             :theme-key="selectedTheme"
             :fx-level="fxLevel"
             :underwater-detail="underwaterDetail"
+            :edit-mode="isEditMode"
+            :original-positions="originalEditPositions"
+            :selected-node-id="selectedEditNodeId"
+            :sound-speed-mps="editSoundSpeed"
             @pause-request="pauseForTool"
+            @node-move="onEditNodeMove"
+            @node-move-end="onEditNodeMoveEnd"
+            @node-select="onEditNodeSelect"
           />
           <Suspense v-else>
             <template #default>
@@ -1562,6 +1749,7 @@ onBeforeUnmount(() => {
               </div>
             </template>
           </Suspense>
+          <div v-if="isEditMode && visualMode === '3d'" class="edit-3d-hint">请切到 2D 视图拖动节点坐标</div>
         </div>
         <div class="visual-timeline">
           <label class="field range-wrap">
@@ -1632,6 +1820,16 @@ onBeforeUnmount(() => {
                   <option value="lifecycle">生命周期模式</option>
                 </select>
               </label>
+              <label v-if="isEditMode" class="field field-compact">
+                <div class="field-head"><span>声速</span></div>
+                <select class="select" :value="String(editSoundSpeed)" @change="onEditSoundSpeedChange">
+                  <option :value="1450">1450 m/s</option>
+                  <option :value="1480">1480 m/s</option>
+                  <option :value="1500">1500 m/s</option>
+                  <option :value="1520">1520 m/s</option>
+                  <option :value="1540">1540 m/s</option>
+                </select>
+              </label>
               <label class="field field-compact">
                 <div class="field-head"><span>可视化质量</span></div>
                 <select class="select" :value="fxLevel" @change="onFxLevelChange">
@@ -1656,6 +1854,27 @@ onBeforeUnmount(() => {
                   </option>
                 </select>
               </label>
+              <div v-if="isEditMode && selectedEditNode" class="field field-compact field-span-2">
+                <div class="field-head"><span>{{ selectedEditNode.name }}（{{ selectedEditNode.node_id }}）</span></div>
+                <div class="coord-grid">
+                  <label class="field field-compact">
+                    <div class="field-head"><span>X (m)</span></div>
+                    <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="onEditCoordChange('x', $event)" />
+                  </label>
+                  <label class="field field-compact">
+                    <div class="field-head"><span>Y (m)</span></div>
+                    <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="onEditCoordChange('y', $event)" />
+                  </label>
+                  <label class="field field-compact">
+                    <div class="field-head"><span>Z (m)</span></div>
+                    <input class="select" type="number" step="0.01" :value="selectedEditNode.z.toFixed(2)" @change="onEditCoordChange('z', $event)" />
+                  </label>
+                </div>
+                <div class="control-btn-row coord-actions">
+                  <button class="btn btn-compact" @click="restoreSelectedEditNode">恢复该点</button>
+                  <button class="btn btn-compact" @click="restoreAllEditNodes">恢复全部</button>
+                </div>
+              </div>
               <label v-if="replayMode === 'lifecycle'" class="field field-compact field-span-2">
                 <span>选择包</span>
                 <select class="select" :value="selectedLifecyclePacketId" @change="onLifecyclePacketChange">
@@ -1686,7 +1905,7 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
-        <div class="card-title">{{ replayMode === 'lifecycle' ? '包生命周期阶段' : '包级日志（旧在上，新在下）' }}</div>
+        <div class="card-title">{{ isEditMode ? '几何推演日志（发包时刻保持原值）' : (replayMode === 'lifecycle' ? '包生命周期阶段' : '包级日志（旧在上，新在下）') }}</div>
 
         <div v-if="replayMode === 'lifecycle'" class="lifecycle-panel">
           <div v-if="lifecyclePacket" class="lifecycle-summary">
@@ -1750,6 +1969,8 @@ onBeforeUnmount(() => {
               <div class="log-head">
                 <span class="time">{{ packet.prettyTime }}</span>
                 <span class="tag" :class="packet.packetKindClass">{{ packet.packetKindLabel }}</span>
+                <span v-if="isEditMode && packet.simulated" class="tag tag-sim">推演</span>
+                <span v-if="packet.timingWarn" class="tag tag-mixed">时序早于到达</span>
                 <span class="duration">总历时 {{ packet.packetDurationLabel }}</span>
                 <span class="packet-title">{{ packet.packet_id }} {{ packet.sourceLabel }} {{ packet.tx_committed ? '发射' : '尝试发送' }}（段 {{ packet.eventId }}）</span>
                 <span class="packet-hint">{{ packet.outcomeSummary }}</span>
@@ -1771,6 +1992,7 @@ onBeforeUnmount(() => {
                 >
                   <span class="receiver-name">{{ receiver.dstLabel }}</span>
                   <span class="receiver-reason">{{ receiver.reasonLabel }}</span>
+                  <span v-if="receiver.originalChanged" class="receiver-reason">原 {{ receiver.originalReasonLabel }}</span>
                 </span>
               </div>
             </div>
@@ -1781,15 +2003,15 @@ onBeforeUnmount(() => {
           <div>记录总数：{{ summary.packetCount }}</div>
           <div>真正发射：{{ summary.committedPacketCount }}</div>
           <div>发送阻塞：{{ summary.blockedPacketCount }}</div>
-          <div>成功接收：{{ summary.okReceivers }}</div>
-          <div>rx-rx 冲突：{{ summary.rxrxCollisions }}</div>
-          <div>rx-tx 冲突：{{ summary.rxtxCollisions }}</div>
+          <div>成功接收：{{ summary.okReceivers }}<span v-if="isEditMode" class="stat-compare"> / 原 {{ originalSummary.okReceivers }}</span></div>
+          <div>rx-rx 冲突：{{ summary.rxrxCollisions }}<span v-if="isEditMode" class="stat-compare"> / 原 {{ originalSummary.rxrxCollisions }}</span></div>
+          <div>rx-tx 冲突：{{ summary.rxtxCollisions }}<span v-if="isEditMode" class="stat-compare"> / 原 {{ originalSummary.rxtxCollisions }}</span></div>
         </div>
       </aside>
     </section>
 
     <section class="panel legend">
-      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }} | 当前日志：{{ activeLogName }}</p>
+      <p><span class="dot idle"></span>蓝色：空闲 <span class="dot tx-state"></span>橙色：发送中 <span class="dot rx-state"></span>绿色：接收中 / 接收成功 <span class="dot bad"></span>红色：接收冲突 | 声速：{{ isEditMode ? editSoundSpeed : SOUND_SPEED_MPS }} m/s | 节点最小间距：{{ formatNodeGap() }} | 当前日志：{{ activeLogName }}<span v-if="isEditMode"> | 青色点线为传播路径，琥珀色长虚线为进入编辑时的原位</span></p>
       <p class="legend-note">其中“橙底红闪”表示 `rx-tx` 冲突：节点仍在发送，但此时到达的包无法被它接收。周期保证：{{ timeDisplay(MIN_SIM_TIME_US) }}（若日志短于该时长，回放界面仍保持完整时间轴）。</p>
     </section>
   </div>

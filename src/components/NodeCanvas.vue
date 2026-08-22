@@ -1,5 +1,5 @@
 <template>
-  <div ref="containerEl" class="canvas-host" @wheel.prevent="onWheel">
+  <div ref="containerEl" class="canvas-host" :class="{ 'canvas-host-edit': editMode }" @wheel.prevent="onWheel">
     <div class="canvas-toolbar" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
       <div class="toolbar-group">
         <button
@@ -10,7 +10,7 @@
           测距工具
         </button>
         <span class="toolbar-help">
-          {{ toolMode === 'measure' ? (pendingMeasurePoint ? '点击第二点' : '先点起点') : '当前为拖拽模式' }}
+          {{ toolMode === 'measure' ? (pendingMeasurePoint ? '点击第二点' : '先点起点') : (editMode ? '拖动节点改坐标 · 空白处平移' : '当前为拖拽模式') }}
         </span>
       </div>
 
@@ -84,7 +84,7 @@
       </div>
 
       <div class="node-tooltip-grid">
-        <p class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(1) }} / y {{ hoveredNode.y.toFixed(1) }} / z {{ hoveredNode.z ?? 0 }} m</strong></p>
+        <p class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(2) }} / y {{ hoveredNode.y.toFixed(2) }} / z {{ Number(hoveredNode.z ?? 0).toFixed(2) }} m</strong></p>
         <p class="node-tooltip-item"><span>仿真时刻</span><strong>{{ (props.currentTime / 1000).toFixed(1) }} ms</strong></p>
         <p class="node-tooltip-item"><span>当前状态</span><strong>{{ hoveredNodeStats.statusText }}</strong></p>
         <p class="node-tooltip-item"><span>状态进度</span><strong>{{ hoveredNodeStats.progressText }}</strong></p>
@@ -105,12 +105,22 @@
         <p class="node-tooltip-item"><span>活跃包列表</span><strong>{{ hoveredNodeStats.packetListText }}</strong></p>
         <p class="node-tooltip-item"><span>冲突成因</span><strong>{{ hoveredNodeStats.reasonText }}</strong></p>
       </div>
+      <div v-if="editMode && hoveredNodeStats.editHints?.length" class="node-tooltip-grid node-tooltip-grid-compact">
+        <p
+          v-for="hint in hoveredNodeStats.editHints"
+          :key="hint.id"
+          class="node-tooltip-item"
+        >
+          <span>{{ hint.label }}</span>
+          <strong>{{ hint.value }}</strong>
+        </p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -121,6 +131,10 @@ const props = defineProps({
   fxLevel: { type: String, default: 'standard' },
   underwaterDetail: { type: String, default: 'standard' },
   isMuted: { type: Boolean, default: false },
+  editMode: { type: Boolean, default: false },
+  originalPositions: { type: Array, default: () => [] },
+  selectedNodeId: { type: [Number, String], default: null },
+  soundSpeedMps: { type: Number, default: 1500 },
 })
 
 const TOOL_MODES = Object.freeze({
@@ -332,11 +346,14 @@ const nodeRadius = computed(() => {
   if (shortest >= 640) return NODE_RADIUS_BASE
   return Math.max(11, Math.round(11 + (((shortest - 280) * (NODE_RADIUS_BASE - 11)) / 360)))
 })
-const emit = defineEmits(['node-select', 'pause-request', 'toggle-mute'])
+const emit = defineEmits(['node-select', 'pause-request', 'toggle-mute', 'node-move', 'node-move-end'])
+const draggingNodeId = ref(null)
+const dragFrozenBounds = ref(null)
+const sessionFrozenBounds = ref(null)
 let resizeObserver = null
 let activePointerId = null
 
-const bounds = computed(() => {
+const liveBounds = computed(() => {
   if (!props.nodes.length) {
     return { minX: 0, maxX: 1, minY: 0, maxY: 1, spanX: 1, spanY: 1 }
   }
@@ -357,6 +374,7 @@ const bounds = computed(() => {
     spanY: Math.max(maxY - minY, 1),
   }
 })
+const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
 
 const scale = computed(() => {
   const inset = viewInsets.value
@@ -368,10 +386,18 @@ const scale = computed(() => {
 const effectiveScale = computed(() => scale.value * zoom.value)
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
+const originalPoseById = computed(() => new Map((props.originalPositions || []).map((item) => [item.node_id, item])))
 
 const canvasCursorClass = computed(() => {
-  if (toolMode.value !== TOOL_MODES.MEASURE) return ''
-  return hoveredMeasureNode.value ? 'canvas-measure-hover' : 'canvas-measure'
+  if (toolMode.value === TOOL_MODES.MEASURE) {
+    return hoveredMeasureNode.value ? 'canvas-measure-hover' : 'canvas-measure'
+  }
+  if (props.editMode) {
+    if (draggingNodeId.value) return 'canvas-edit-dragging'
+    if (hoveredNodeId.value != null) return 'canvas-edit-hover'
+    return 'canvas-edit'
+  }
+  return ''
 })
 
 const toScreen = (x, y) => {
@@ -516,6 +542,38 @@ const hoveredNodeStats = computed(() => {
 
   const packetList = [...packetIds]
   const reasonText = reasonSet.size ? [...reasonSet].join(' / ') : '无'
+  const editHints = []
+  if (props.editMode) {
+    const original = originalPoseById.value.get(node.node_id)
+    if (original) {
+      const dx = node.x - original.x
+      const dy = node.y - original.y
+      const dz = (node.z ?? 0) - (original.z ?? 0)
+      editHints.push({
+        id: 'moved',
+        label: '相对原位',
+        value: `${Math.sqrt((dx * dx) + (dy * dy) + (dz * dz)).toFixed(1)} m`,
+      })
+    }
+    const neighborHints = props.nodes
+      .filter((other) => other.node_id !== node.node_id)
+      .map((other) => {
+        const dx = other.x - node.x
+        const dy = other.y - node.y
+        const dz = (other.z ?? 0) - (node.z ?? 0)
+        const dist = Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        const delayMs = (dist / Math.max(1, props.soundSpeedMps)) * 1000
+        return {
+          id: `n-${other.node_id}`,
+          label: other.name || `Node-${other.node_id}`,
+          value: `${dist.toFixed(0)} m / ${delayMs.toFixed(1)} ms`,
+          dist,
+        }
+      })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 3)
+    editHints.push(...neighborHints)
+  }
   return {
     modeLabel: modeLabelMap[visual?.mode] || 'IDLE',
     statusText: visual?.statusText || '空闲',
@@ -531,6 +589,7 @@ const hoveredNodeStats = computed(() => {
     nearestNeighborText: nearestNeighbor ? `${nearestNeighbor.name} (${fmtDistanceMeters(nearestNeighborDistance)})` : '无',
     packetListText: packetList.length ? packetList.join(', ') : '无',
     reasonText,
+    editHints,
   }
 })
 
@@ -938,12 +997,12 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
   const angle = Math.atan2(dy, dx)
 
   ctx.save()
-  if (profile.effect === 'minimal') ctx.setLineDash([2, 5])
-  else if (profile.effect === 'timeline') ctx.setLineDash([10, 7])
-  else if (profile.effect === 'neon') ctx.setLineDash([4, 4])
-  else ctx.setLineDash([5, 6])
-  ctx.strokeStyle = profile.lane
-  ctx.lineWidth = 1
+  ctx.setLineDash([2, 7])
+  ctx.lineDashOffset = -((phase * 48) + (packet.tx_start_us * 0.000002))
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = profile.ring
+  ctx.globalAlpha = 0.72
+  ctx.lineWidth = 1.8
   ctx.beginPath()
   ctx.moveTo(src.x, src.y)
   ctx.lineTo(dst.x, dst.y)
@@ -1131,7 +1190,7 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
   ctx.fillText(node.name, p.x + labelOffset, p.y + 2)
   ctx.fillStyle = profile.depth
   ctx.font = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillText(`z ${node.z ?? 0}m`, p.x + labelOffset, p.y + 16)
+  ctx.fillText(`z ${Number(node.z ?? 0).toFixed(2)}m`, p.x + labelOffset, p.y + 16)
   ctx.restore()
 }
 
@@ -1682,6 +1741,76 @@ const drawThemeAmbient = (ctx, w, h, profile, phase, fx) => {
   }
 }
 
+const pickWorldGridStep = (pxPerMeter) => {
+  const raw = 56 / Math.max(pxPerMeter, 1e-9)
+  const nice = [5, 10, 20, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000]
+  for (const value of nice) {
+    if (value >= raw * 0.85) return value
+  }
+  return nice[nice.length - 1]
+}
+
+const drawWorldGrid = (ctx, w, h) => {
+  const topLeft = toWorld(0, 0)
+  const topRight = toWorld(w, 0)
+  const bottomLeft = toWorld(0, h)
+  const bottomRight = toWorld(w, h)
+  const minX = Math.min(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x)
+  const maxX = Math.max(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x)
+  const minY = Math.min(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y)
+  const maxY = Math.max(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y)
+  const step = pickWorldGridStep(effectiveScale.value)
+  const majorStep = step * 4
+  const startX = Math.floor(minX / step) * step
+  const startY = Math.floor(minY / step) * step
+  const startMajorX = Math.floor(minX / majorStep) * majorStep
+  const startMajorY = Math.floor(minY / majorStep) * majorStep
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(0, 0, w, h)
+  ctx.clip()
+
+  ctx.strokeStyle = 'rgba(191, 219, 254, 0.12)'
+  ctx.lineWidth = 1
+  for (let x = startX; x <= maxX + (step * 0.01); x += step) {
+    const a = toScreen(x, minY)
+    const b = toScreen(x, maxY)
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+  for (let y = startY; y <= maxY + (step * 0.01); y += step) {
+    const a = toScreen(minX, y)
+    const b = toScreen(maxX, y)
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+
+  ctx.strokeStyle = 'rgba(191, 219, 254, 0.2)'
+  ctx.lineWidth = 1.2
+  for (let x = startMajorX; x <= maxX + (majorStep * 0.01); x += majorStep) {
+    const a = toScreen(x, minY)
+    const b = toScreen(x, maxY)
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+  for (let y = startMajorY; y <= maxY + (majorStep * 0.01); y += majorStep) {
+    const a = toScreen(minX, y)
+    const b = toScreen(maxX, y)
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
 const draw = () => {
   const canvas = canvasEl.value
   if (!canvas) return
@@ -1701,7 +1830,6 @@ const draw = () => {
 
   const w = displayWidth.value
   const h = displayHeight.value
-  const inset = viewInsets.value
   const profile = themeProfile.value
   const fx = fxIntensity.value
   const underwaterDetail = underwaterDetailProfile.value
@@ -1713,41 +1841,33 @@ const draw = () => {
   background.addColorStop(1, profile.bg[2])
   ctx.fillStyle = background
   ctx.fillRect(0, 0, w, h)
-
-  ctx.save()
-  ctx.strokeStyle = 'rgba(191, 219, 254, 0.12)'
-  ctx.lineWidth = 1
-  const minorSpacing = 56
-  for (let x = inset.left; x <= w - inset.right; x += minorSpacing) {
-    ctx.beginPath()
-    ctx.moveTo(x, inset.top)
-    ctx.lineTo(x, h - inset.bottom)
-    ctx.stroke()
-  }
-  for (let y = inset.top; y <= h - inset.bottom; y += minorSpacing) {
-    ctx.beginPath()
-    ctx.moveTo(inset.left, y)
-    ctx.lineTo(w - inset.right, y)
-    ctx.stroke()
-  }
-  ctx.strokeStyle = 'rgba(191, 219, 254, 0.2)'
-  ctx.lineWidth = 1.2
-  const majorSpacing = minorSpacing * 4
-  for (let x = inset.left; x <= w - inset.right; x += majorSpacing) {
-    ctx.beginPath()
-    ctx.moveTo(x, inset.top)
-    ctx.lineTo(x, h - inset.bottom)
-    ctx.stroke()
-  }
-  for (let y = inset.top; y <= h - inset.bottom; y += majorSpacing) {
-    ctx.beginPath()
-    ctx.moveTo(inset.left, y)
-    ctx.lineTo(w - inset.right, y)
-    ctx.stroke()
-  }
-  ctx.restore()
+  drawWorldGrid(ctx, w, h)
 
   drawVisiblePackets(ctx, profile, phase, fx)
+
+  if (props.editMode && props.originalPositions.length) {
+    ctx.save()
+    ctx.lineCap = 'butt'
+    ctx.setLineDash([11, 5])
+    ctx.lineWidth = 1.7
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.78)'
+    for (const original of props.originalPositions) {
+      const current = nodeById.value.get(original.node_id)
+      const from = toScreen(original.x, original.y)
+      ctx.beginPath()
+      ctx.arc(from.x, from.y, 8, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.12)'
+      ctx.fill()
+      ctx.stroke()
+      if (!current) continue
+      const to = toScreen(current.x, current.y)
+      ctx.beginPath()
+      ctx.moveTo(from.x, from.y)
+      ctx.lineTo(to.x, to.y)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
 
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id) || {
@@ -1760,6 +1880,10 @@ const draw = () => {
       packetId: null,
     }
     drawNode(ctx, node, visual, profile, phase, fx)
+    if (props.editMode && props.selectedNodeId === node.node_id) {
+      const p = toScreen(node.x, node.y)
+      strokeCircle(ctx, p.x, p.y, 22, profile.idleInner, 1.6, 0.9)
+    }
   }
 
   ctx.save()
@@ -1814,6 +1938,28 @@ const onPointerDown = (event) => {
     return
   }
 
+  if (props.editMode && toolMode.value !== TOOL_MODES.MEASURE) {
+    const target = pickNodeAt(sx, sy)
+    if (target) {
+      event.preventDefault()
+      draggingNodeId.value = target.node_id
+      dragFrozenBounds.value = { ...liveBounds.value }
+      activePointerId = event.pointerId
+      hasDragged.value = false
+      panStart.value = { x: sx, y: sy }
+      selectedNode.value = target
+      emit('node-select', target)
+      emit('pause-request')
+      try {
+        canvas.setPointerCapture(event.pointerId)
+      } catch {
+        // ignore
+      }
+      requestAnimationFrame(draw)
+      return
+    }
+  }
+
   const pickedMeasurement = selectMeasurementAt(sx, sy)
   if (pickedMeasurement) {
     selectedMeasurementId.value = pickedMeasurement.id
@@ -1840,14 +1986,29 @@ const onPointerDown = (event) => {
 }
 
 const onPointerMove = (event) => {
-  if (!isPanning.value) return
-
   const canvas = canvasEl.value
   if (!canvas) return
 
   const rect = canvas.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
+
+  if (draggingNodeId.value != null) {
+    if ((x - panStart.value.x) ** 2 + (y - panStart.value.y) ** 2 > 16 || hasDragged.value) {
+      hasDragged.value = true
+    }
+    const world = toWorld(x, y)
+    emit('node-move', {
+      node_id: draggingNodeId.value,
+      x: world.x,
+      y: world.y,
+    })
+    requestAnimationFrame(draw)
+    return
+  }
+
+  if (!isPanning.value) return
+
   const dx = x - panStart.value.x
   const dy = y - panStart.value.y
 
@@ -1904,6 +2065,22 @@ const onCanvasPointerLeave = () => {
 }
 
 const onPointerUp = (event) => {
+  if (draggingNodeId.value != null) {
+    emit('node-move-end')
+    draggingNodeId.value = null
+    dragFrozenBounds.value = null
+    if (canvasEl.value && activePointerId !== null) {
+      try {
+        canvasEl.value.releasePointerCapture(activePointerId)
+      } catch {
+        // ignore
+      }
+    }
+    activePointerId = null
+    requestAnimationFrame(draw)
+    return
+  }
+
   if (!isPanning.value) return
 
   if (!hasDragged.value && event) {
@@ -2036,12 +2213,23 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail],
+  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail, props.editMode, props.originalPositions, props.selectedNodeId],
   () => {
     requestAnimationFrame(draw)
   },
   { deep: true, immediate: true },
 )
+
+watch(() => props.editMode, async (next) => {
+  draggingNodeId.value = null
+  dragFrozenBounds.value = null
+  if (!next) {
+    sessionFrozenBounds.value = null
+    return
+  }
+  await nextTick()
+  sessionFrozenBounds.value = { ...liveBounds.value }
+})
 
 onMounted(() => {
   updateViewport()
@@ -2074,6 +2262,10 @@ onBeforeUnmount(() => {
   height: 100%;
   touch-action: none;
   overflow: hidden;
+}
+
+.canvas-host-edit {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.16);
 }
 
 .canvas-toolbar {
@@ -2377,6 +2569,18 @@ onBeforeUnmount(() => {
 
 .canvas-measure {
   cursor: crosshair;
+}
+
+.canvas-edit {
+  cursor: grab;
+}
+
+.canvas-edit-hover {
+  cursor: grab;
+}
+
+.canvas-edit-dragging {
+  cursor: grabbing;
 }
 
 .canvas-measure-hover {

@@ -71,6 +71,7 @@ The app can parse structured JSON and JSON Lines logs. Bundled sample logs are l
 - `net_multihop_complex.json`
 - `net_chain_5_no_conflict.log`
 - `net-swarm.json`
+- `net_moving.json`
 
 Supported records include:
 
@@ -102,7 +103,8 @@ Times are treated as microseconds and distances as meters.
     │   ├── net.json
     │   ├── net_multihop.json
     │   ├── net_multihop_complex.json
-    │   └── net-swarm.json
+    │   ├── net-swarm.json
+    │   └── net_moving.json
     └── components/
         ├── NodeCanvas.vue
         └── NodeScene3D.vue
@@ -185,6 +187,7 @@ yarn preview
 - `net_multihop_complex.json`
 - `net_chain_5_no_conflict.log`
 - `net-swarm.json`
+- `net_moving.json`
 
 支持的记录类型包括：
 
@@ -216,7 +219,8 @@ yarn preview
     │   ├── net.json
     │   ├── net_multihop.json
     │   ├── net_multihop_complex.json
-    │   └── net-swarm.json
+    │   ├── net-swarm.json
+    │   └── net_moving.json
     └── components/
         ├── NodeCanvas.vue
         └── NodeScene3D.vue
