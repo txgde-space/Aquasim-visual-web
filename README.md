@@ -16,7 +16,7 @@ The app includes both a 2D Canvas replay view and a Babylon.js 3D view, so it ca
 - Load bundled demo logs or import custom log files from the browser.
 - Merge node-level logs into a packet-level replay.
 - Use global replay mode or packet lifecycle mode.
-- Adjust playback speed, visual theme, effects level, and underwater detail.
+- Adjust playback speed, visual theme, visualization quality, and environment detail.
 - Measure distances directly in the 2D view.
 
 ## Tech Stack
@@ -130,7 +130,7 @@ Aquasim Visual Web 是一个基于 Vue 3 + Vite 的水下声学网络仿真回�
 - 使用内置示例日志，或在浏览器中导入自定义日志文件。
 - 支持合并节点级日志并生成包级回放数据。
 - 支持全局回放模式和包生命周期模式。
-- 可调整播放倍速、视觉主题、特效等级和水下环境细节。
+- 可调整播放倍速、视觉主题、可视化质量和环境细节。
 - 在 2D 视图中直接使用测距工具。
 
 ## 技术栈

@@ -610,12 +610,12 @@ const LOG_SOURCES = Object.freeze({
 
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
-  { key: 'extreme', label: 'Beta' },
+  { key: 'extreme', label: '增强' },
 ])
 const UNDERWATER_DETAIL_OPTIONS = Object.freeze([
-  { key: 'low', label: '轻量' },
+  { key: 'low', label: '简略' },
   { key: 'standard', label: '标准' },
-  { key: 'cinematic', label: '电影级' },
+  { key: 'cinematic', label: '精细' },
 ])
 
 const normalizePacketsFromParsed = (parsed) => (
@@ -1609,7 +1609,7 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="field field-compact">
-                <div class="field-head"><span>特效等级</span></div>
+                <div class="field-head"><span>可视化质量</span></div>
                 <select class="select" :value="fxLevel" @change="onFxLevelChange">
                   <option
                     v-for="item in FX_LEVEL_OPTIONS"
@@ -1621,7 +1621,7 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <label class="field field-compact" :class="{ 'field-hidden': fxLevel === 'standard' }">
-                <div class="field-head"><span>水下环境</span></div>
+                <div class="field-head"><span>环境细节</span></div>
                 <select class="select" :value="underwaterDetail" @change="onUnderwaterDetailChange">
                   <option
                     v-for="item in UNDERWATER_DETAIL_OPTIONS"
