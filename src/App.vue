@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import netLogDefaultText from './assets/net.json?raw'
 import netLogMultiHopText from './assets/net_multihop.json?raw'
 import netLogMultiHopComplexText from './assets/net_multihop_complex.json?raw'
+import netLogChainNoConflictText from './assets/net_chain_5_no_conflict.log?raw'
 import NodeCanvas from './components/NodeCanvas.vue'
 
 const NodeScene3D = defineAsyncComponent(() => import('./components/NodeScene3D.vue'))
@@ -593,6 +594,11 @@ const LOG_SOURCES = Object.freeze({
     label: '复杂冲突日志（net_multihop_complex.json）',
     fileName: 'net_multihop_complex.json',
     raw: netLogMultiHopComplexText,
+  },
+  chainNoConflict: {
+    label: '5 节点链式无冲突日志（net_chain_5_no_conflict.log）',
+    fileName: 'net_chain_5_no_conflict.log',
+    raw: netLogChainNoConflictText,
   },
 })
 

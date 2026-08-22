@@ -61,6 +61,7 @@ The app can parse structured JSON and JSON Lines logs. Bundled sample logs are l
 - `net.json`
 - `net_multihop.json`
 - `net_multihop_complex.json`
+- `net_chain_5_no_conflict.log`
 
 Supported records include:
 
@@ -164,6 +165,7 @@ yarn preview
 - `net.json`
 - `net_multihop.json`
 - `net_multihop_complex.json`
+- `net_chain_5_no_conflict.log`
 
 支持的记录类型包括：
 
