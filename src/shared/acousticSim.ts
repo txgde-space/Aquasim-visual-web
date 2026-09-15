@@ -1,22 +1,27 @@
-export const DEFAULT_SOUND_SPEED_MPS = 1500
+import { DEFAULT_SOUND_SPEED_MPS } from './constants'
+import type { Point3D, ReplayNode, ReplayPacket, ReplayReceiver } from './types/replay'
 
-export const distanceMeters = (a, b) => {
+export const distanceMeters = (a: Point3D | null | undefined, b: Point3D | null | undefined): number => {
   const dx = (a?.x ?? 0) - (b?.x ?? 0)
   const dy = (a?.y ?? 0) - (b?.y ?? 0)
   const dz = (a?.z ?? 0) - (b?.z ?? 0)
   return Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
 }
 
-export const propagateDelayUs = (src, dst, soundSpeedMps) => {
+export const propagateDelayUs = (src: Point3D, dst: Point3D, soundSpeedMps?: number): number => {
   const speed = Math.max(1, Number(soundSpeedMps) || DEFAULT_SOUND_SPEED_MPS)
   return Math.round((distanceMeters(src, dst) / speed) * 1_000_000)
 }
 
-const intervalsOverlap = (a0, a1, b0, b1) => a0 < b1 && b0 < a1
+const intervalsOverlap = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 && b0 < a1
 
-export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) => {
-  const nodeMap = new Map(nodes.map((node) => [node.node_id, node]))
-  const txWindowsByNode = new Map()
+export const recomputeReceiversFromGeometry = (
+  packets: ReplayPacket[],
+  nodes: ReplayNode[],
+  soundSpeedMps: number,
+): ReplayPacket[] => {
+  const nodeMap = new Map<number, ReplayNode>(nodes.map((node) => [node.node_id, node]))
+  const txWindowsByNode = new Map<number, { start: number; end: number; packet_id: string }[]>()
 
   for (const packet of packets) {
     if (!packet.tx_committed) continue
@@ -29,7 +34,7 @@ export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) =>
     txWindowsByNode.set(packet.src, list)
   }
 
-  const draft = packets.map((packet) => {
+  const draft = packets.map((packet): ReplayPacket => {
     if (!packet.tx_committed) {
       return { ...packet, receivers: [], simulated: true }
     }
@@ -41,7 +46,7 @@ export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) =>
 
     const receivers = (packet.receivers || [])
       .filter((receiver) => Number.isFinite(Number(receiver.dst)) && Number(receiver.dst) !== packet.src)
-      .map((receiver) => {
+      .map((receiver): ReplayReceiver | null => {
         const dstNode = nodeMap.get(Number(receiver.dst))
         if (!dstNode) return null
         const delayUs = propagateDelayUs(srcNode, dstNode, soundSpeedMps)
@@ -60,13 +65,13 @@ export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) =>
           simulated: true,
         }
       })
-      .filter(Boolean)
+      .filter((receiver): receiver is ReplayReceiver => receiver !== null)
       .sort((a, b) => a.rx_start_us - b.rx_start_us)
 
     return { ...packet, receivers, simulated: true }
   })
 
-  const receptionsByDst = new Map()
+  const receptionsByDst = new Map<number, { packet: ReplayPacket; receiver: ReplayReceiver }[]>()
   for (const packet of draft) {
     for (const receiver of packet.receivers) {
       const list = receptionsByDst.get(receiver.dst) || []
@@ -75,8 +80,9 @@ export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) =>
     }
   }
 
-  for (const [dst, list] of receptionsByDst) {
-    const txWindows = txWindowsByNode.get(dst) || []
+  for (const [, list] of receptionsByDst) {
+    const dst = list[0]?.receiver.dst
+    const txWindows = (dst !== undefined ? txWindowsByNode.get(dst) : undefined) || []
     for (const item of list) {
       const hit = txWindows.find((window) => (
         intervalsOverlap(item.receiver.rx_start_us, item.receiver.rx_end_us, window.start, window.end)
@@ -89,7 +95,7 @@ export const recomputeReceiversFromGeometry = (packets, nodes, soundSpeedMps) =>
 
     for (let i = 0; i < list.length; i += 1) {
       if (list[i].receiver.reason === 'collision_rx_tx') continue
-      const overlapped = []
+      const overlapped: string[] = []
       for (let j = 0; j < list.length; j += 1) {
         if (i === j) continue
         if (!intervalsOverlap(

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
-import { session } from '../sessionStore.js'
+import { session } from '../shared/sessionStore'
 import {
   buildExperimentSpec,
   createDefaultExperimentForm,

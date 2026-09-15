@@ -7,7 +7,7 @@ import netLogChainNoConflictText from '../assets/net_chain_5_no_conflict.log?raw
 import netLogSwarmText from '../assets/net-swarm.json?raw'
 import netLogMovingText from '../assets/net_moving.json?raw'
 import NodeCanvas from '../components/NodeCanvas.vue'
-import { session } from '../sessionStore.js'
+import { session } from '../shared/sessionStore'
 import {
   MAX_JSONL_LINES,
   MAX_LOG_FILES,
@@ -17,17 +17,23 @@ import {
   stripUnsafeKeys,
   validateImportedFile,
   validateImportedText,
-} from '../logSafety.js'
+} from '../shared/logSafety'
+import {
+  distanceMeters,
+  recomputeReceiversFromGeometry,
+} from '../shared/acousticSim'
 import {
   DEFAULT_SOUND_SPEED_MPS,
-  recomputeReceiversFromGeometry,
-} from '../acousticSim.js'
+  LOCAL_STORAGE_KEYS,
+  MIN_NODE_GAP_M,
+  MIN_SIM_TIME_US,
+  SOUND_SPEED_OPTIONS_MPS,
+  SPEED_OPTIONS,
+} from '../shared/constants'
 
 const NodeScene3D = defineAsyncComponent(() => import('../components/NodeScene3D.vue'))
 
 const SOUND_SPEED_MPS = DEFAULT_SOUND_SPEED_MPS
-const MIN_NODE_GAP_M = 1000
-const MIN_SIM_TIME_US = 10_000_000
 const RX_OK_HOLD_US = 180_000
 const RX_FAIL_HOLD_US = 220_000
 
@@ -598,13 +604,6 @@ const enforceMinGap = (nodes) => {
     x: cx + (node.x - cx) * scale,
     y: cy + (node.y - cy) * scale,
   }))
-}
-
-const distanceMeters = (a, b) => {
-  const dx = a.x - b.x
-  const dy = a.y - b.y
-  const dz = (a.z ?? 0) - (b.z ?? 0)
-  return Math.sqrt(dx * dx + dy * dy + dz * dz)
 }
 
 const summarizePackets = (rows) => {
@@ -1598,7 +1597,7 @@ watch(isPlaying, (next) => {
 
 watch(fxLevel, (next) => {
   try {
-    localStorage.setItem('aquasim_fx_level', next)
+    localStorage.setItem(LOCAL_STORAGE_KEYS.fxLevel, next)
   } catch {
     // ignore persistence errors
   }
@@ -1648,7 +1647,7 @@ onMounted(() => {
     session.replayNodes = baseNodesState.value.map(cloneNode)
   }
   try {
-    const savedFx = localStorage.getItem('aquasim_fx_level')
+    const savedFx = localStorage.getItem(LOCAL_STORAGE_KEYS.fxLevel)
     if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
       fxLevel.value = savedFx
     }
@@ -1773,13 +1772,7 @@ onBeforeUnmount(() => {
               <label class="field field-compact">
                 <div class="field-head"><span>倍速</span></div>
                 <select class="select" :value="speed" @change="onSpeed">
-                  <option :value="0.05">0.05x</option>
-                  <option :value="0.1">0.1x</option>
-                  <option :value="0.25">0.25x</option>
-                  <option :value="0.5">0.5x</option>
-                  <option :value="1">1x</option>
-                  <option :value="2">2x</option>
-                  <option :value="4">4x</option>
+                  <option v-for="option in SPEED_OPTIONS" :key="option" :value="option">{{ option }}x</option>
                 </select>
               </label>
               <label class="field field-compact">
@@ -1808,11 +1801,7 @@ onBeforeUnmount(() => {
               <label v-if="isEditMode" class="field field-compact">
                 <div class="field-head"><span>声速</span></div>
                 <select class="select" :value="String(editSoundSpeed)" @change="onEditSoundSpeedChange">
-                  <option :value="1450">1450 m/s</option>
-                  <option :value="1480">1480 m/s</option>
-                  <option :value="1500">1500 m/s</option>
-                  <option :value="1520">1520 m/s</option>
-                  <option :value="1540">1540 m/s</option>
+                  <option v-for="option in SOUND_SPEED_OPTIONS_MPS" :key="option" :value="option">{{ option }} m/s</option>
                 </select>
               </label>
               <label class="field field-compact">
