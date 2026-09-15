@@ -1,5 +1,3 @@
-import type { Movement, ReplayNode, ReplayPacket } from './replay'
-
 export interface LogMeta {
   [key: string]: unknown
   type: 'meta'
@@ -12,16 +10,25 @@ export interface LogMeta {
 /** Raw record as read from a structured log / JSONL line, before normalization. */
 export type RawLogRecord = Record<string, unknown>
 
-export interface ParsedNodeRecord extends ReplayNode {
+export interface ParsedNodeRecord {
+  [key: string]: unknown
   type: 'node'
+  node_id: number
+  name: string
+  role: string
+  x: number
+  y: number
+  z: number
   movements?: RawLogRecord[]
 }
 
-export interface ParsedMovementRecord extends Movement {
+export interface ParsedMovementRecord {
   [key: string]: unknown
+  node_id?: number
 }
 
-export interface ParsedPacketRecord extends ReplayPacket {
+export interface ParsedPacketRecord {
+  [key: string]: unknown
   type: 'packet'
 }
 

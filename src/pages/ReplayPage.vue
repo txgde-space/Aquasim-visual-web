@@ -1,686 +1,59 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import netLogDefaultText from '../assets/net.json?raw'
-import netLogMultiHopText from '../assets/net_multihop.json?raw'
-import netLogMultiHopComplexText from '../assets/net_multihop_complex.json?raw'
-import netLogChainNoConflictText from '../assets/net_chain_5_no_conflict.log?raw'
-import netLogSwarmText from '../assets/net-swarm.json?raw'
-import netLogMovingText from '../assets/net_moving.json?raw'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import { session } from '../shared/sessionStore'
 import {
-  MAX_JSONL_LINES,
   MAX_LOG_FILES,
-  capParsedLog,
   sanitizeDisplayText,
   sanitizeFileName,
-  stripUnsafeKeys,
   validateImportedFile,
   validateImportedText,
 } from '../shared/logSafety'
 import {
-  distanceMeters,
   recomputeReceiversFromGeometry,
 } from '../shared/acousticSim'
 import {
   DEFAULT_SOUND_SPEED_MPS,
   LOCAL_STORAGE_KEYS,
-  MIN_NODE_GAP_M,
   MIN_SIM_TIME_US,
   SOUND_SPEED_OPTIONS_MPS,
   SPEED_OPTIONS,
 } from '../shared/constants'
+import { LOG_SOURCES } from '../features/replay/lib/sources'
+import {
+  blockedReasonLabel,
+  clampRatio,
+  normalizeTime,
+  timeDisplay,
+} from '../features/replay/lib/format'
+import {
+  resolveMovingNodes,
+} from '../features/replay/lib/logNormalize'
+import {
+  mergeParsedNodeLogs,
+  normalizePacketsFromParsed,
+} from '../features/replay/lib/logMerge'
+import { parseLog } from '../features/replay/lib/logParser'
+import {
+  enforceMinGap,
+  summarizePackets,
+} from '../features/replay/lib/geometry'
+import {
+  buildLifecycleGroups,
+  buildLifecycleStages,
+  buildPacketEntries,
+  receiverPillClass,
+} from '../features/replay/lib/packetEntries'
 
 const NodeScene3D = defineAsyncComponent(() => import('../components/NodeScene3D.vue'))
 
-const SOUND_SPEED_MPS = DEFAULT_SOUND_SPEED_MPS
 const RX_OK_HOLD_US = 180_000
 const RX_FAIL_HOLD_US = 220_000
-
-const normalizeTime = (value) => {
-  const num = Number(value)
-  return Number.isFinite(num) ? num : 0
-}
-
-const clampRatio = (value) => Math.max(0, Math.min(1, Number(value) || 0))
-
-const timeDisplay = (us) => {
-  if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)} s`
-  return `${(us / 1000).toFixed(2)} ms`
-}
-
-const reasonLabel = (reason) => {
-  if (reason === 'collision_rx_rx') return 'rx-rx 冲突'
-  if (reason === 'collision_rx_tx') return 'rx-tx 冲突'
-  if (reason === 'below_rx_thresh') return '门限不足（信号低于接收阈值）'
-  return '接收失败'
-}
-
-const blockedReasonLabel = (reason) => {
-  if (reason === 'busy') return 'PHY busy'
-  return reason ? String(reason) : '未知原因'
-}
-
-const packetTagLabel = (kind) => {
-  if (kind === 'blocked') return '发送阻塞'
-  if (kind === 'ok') return '全成功'
-  if (kind === 'mixed') return '混合结果'
-  return '全失败'
-}
-
-const packetTagClass = (kind) => {
-  if (kind === 'blocked') return 'tag-fail'
-  if (kind === 'ok') return 'tag-ok'
-  if (kind === 'mixed') return 'tag-mixed'
-  return 'tag-fail'
-}
-
-const receiverPillClass = (receiver) => {
-  if (receiver.status === 'ok') return 'receiver-pill-ok'
-  if (receiver.reason === 'collision_rx_tx') return 'receiver-pill-rxtx'
-  if (receiver.reason === 'collision_rx_rx') return 'receiver-pill-rxrx'
-  return 'receiver-pill-fail'
-}
-
-const deriveReasonFromLegacy = (result) => {
-  if (result === 'collision') return 'collision_rx_rx'
-  if (result === 'half_duplex_busy') return 'collision_rx_tx'
-  if (result === 'below_snr' || result === 'out_of_range') return 'below_rx_thresh'
-  return 'decode_error'
-}
-
-const finiteOrNull = (value) => {
-  const num = Number(value)
-  return Number.isFinite(num) ? num : null
-}
-
-const resolveNodePoint = (rawPoint, fallbackPoint = null) => ({
-  x: finiteOrNull(rawPoint.x) ?? fallbackPoint?.x ?? 0,
-  y: finiteOrNull(rawPoint.y) ?? fallbackPoint?.y ?? 0,
-  z: finiteOrNull(rawPoint.z) ?? fallbackPoint?.z ?? 0,
-})
-
-const interpolateNodePoint = (start, end, ratio) => ({
-  x: start.x + ((end.x - start.x) * ratio),
-  y: start.y + ((end.y - start.y) * ratio),
-  z: start.z + ((end.z - start.z) * ratio),
-})
-
-const normalizeMovements = (movementRows, nodes) => {
-  const nodeDefaults = new Map(nodes.map((node) => [node.node_id, { x: node.x, y: node.y, z: node.z ?? 0 }]))
-  const lastNodePoint = new Map(nodeDefaults)
-
-  return movementRows
-    .filter((item) => Number.isFinite(Number(item.node_id)))
-    .map((item, index) => ({ ...item, node_id: Number(item.node_id), __index: index }))
-    .sort((a, b) => normalizeTime(a.start_us) - normalizeTime(b.start_us) || a.__index - b.__index)
-    .map((item) => {
-      const previousPoint = lastNodePoint.get(item.node_id) || nodeDefaults.get(item.node_id) || { x: 0, y: 0, z: 0 }
-      const start = resolveNodePoint({
-        x: item.from_x ?? item.start_x ?? item.start?.x ?? item.x,
-        y: item.from_y ?? item.start_y ?? item.start?.y ?? item.y,
-        z: item.from_z ?? item.start_z ?? item.start?.z ?? item.z,
-      }, previousPoint)
-      const end = resolveNodePoint({
-        x: item.to_x ?? item.end_x ?? item.target_x ?? item.end?.x,
-        y: item.to_y ?? item.end_y ?? item.target_y ?? item.end?.y,
-        z: item.to_z ?? item.end_z ?? item.target_z ?? item.end?.z,
-      }, start)
-      const startUs = normalizeTime(item.start_us)
-      const endUs = Math.max(startUs, normalizeTime(item.end_us ?? item.stop_us))
-      const durationUs = Math.max(1, endUs - startUs)
-
-      lastNodePoint.set(item.node_id, end)
-
-      return {
-        ...item,
-        type: 'movement',
-        node_id: item.node_id,
-        start,
-        end,
-        start_us: startUs,
-        end_us: endUs,
-        duration_us: durationUs,
-      }
-    })
-}
-
-const resolveMovingNodes = (nodes, movements, timeUs) => {
-  const nodeMap = new Map(nodes.map((node) => [node.node_id, { ...node }]))
-
-  for (const movement of movements) {
-    const node = nodeMap.get(movement.node_id)
-    if (!node || timeUs < movement.start_us) continue
-
-    if (timeUs >= movement.end_us) {
-      Object.assign(node, movement.end)
-      continue
-    }
-
-    const ratio = clampRatio((timeUs - movement.start_us) / Math.max(1, movement.duration_us))
-    Object.assign(node, interpolateNodePoint(movement.start, movement.end, ratio))
-  }
-
-  return [...nodeMap.values()]
-}
-
-const createEmptyParsedLog = () => ({
-  nodes: [],
-  movements: [],
-  packets: [],
-  nodeEvents: [],
-  tx: [],
-  rx: [],
-  parseErrors: [],
-  meta: {
-    type: 'meta',
-    schema: 'uan-vis-packet-log/v1',
-    time_unit: 'us',
-    distance_unit: 'm',
-    sim_end_us: 0,
-  },
-})
-
-const appendParsedObject = (obj, parsed) => {
-  if (!obj || typeof obj !== 'object') return
-  obj = stripUnsafeKeys(obj)
-
-  if (obj.type === 'meta') {
-    const meta = stripUnsafeKeys(obj)
-    parsed.meta = {
-      ...parsed.meta,
-      schema: sanitizeDisplayText(meta.schema || parsed.meta.schema, 80),
-      time_unit: sanitizeDisplayText(meta.time_unit || parsed.meta.time_unit, 16),
-      distance_unit: sanitizeDisplayText(meta.distance_unit || parsed.meta.distance_unit, 16),
-      sim_end_us: Number(meta.sim_end_us ?? parsed.meta.sim_end_us) || 0,
-    }
-  } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
-    const nodeId = Number(obj.node_id)
-    parsed.nodes.push({
-      ...obj,
-      node_id: nodeId,
-      name: sanitizeDisplayText(obj.name, 80) || `Node-${nodeId}`,
-      role: sanitizeDisplayText(obj.role, 32) || 'node',
-      x: Number(obj.x ?? 0),
-      y: Number(obj.y ?? 0),
-      z: Number(obj.z ?? 0),
-    })
-    if (Array.isArray(obj.movements)) {
-      for (const movement of obj.movements) {
-        parsed.movements.push({
-          ...movement,
-          node_id: nodeId,
-        })
-      }
-    }
-  } else if (obj.type === 'movement') {
-    parsed.movements.push({ ...obj })
-  } else if (obj.type === 'packet' && Number.isFinite(Number(obj.src))) {
-    parsed.packets.push({ ...obj })
-  } else if (
-    obj.type === 'tx_blocked'
-    || obj.type === 'tx_start'
-    || obj.type === 'rx_success'
-    || obj.type === 'rx_drop'
-    || obj.type === 'drop'
-    || obj.type === 'node_event'
-  ) {
-    parsed.nodeEvents.push({ ...obj })
-  } else if (obj.type === 'tx') {
-    parsed.tx.push({ ...obj })
-  } else if (obj.type === 'rx') {
-    parsed.rx.push({ ...obj })
-  }
-}
-
-const finalizeParsedLog = (parsed) => capParsedLog({
-  ...parsed,
-  movements: normalizeMovements(parsed.movements, parsed.nodes),
-})
-
-const parseStructuredLog = (raw) => {
-  const parsed = createEmptyParsedLog()
-  const data = JSON.parse(raw)
-
-  if (Array.isArray(data)) {
-    for (const entry of data) appendParsedObject(entry, parsed)
-    return finalizeParsedLog(parsed)
-  }
-
-  if (!data || typeof data !== 'object') {
-    throw new Error('invalid structured log')
-  }
-
-  if (data.meta && typeof data.meta === 'object') {
-    appendParsedObject({ ...data.meta, type: 'meta' }, parsed)
-  }
-  if (Array.isArray(data.nodes)) {
-    for (const entry of data.nodes) appendParsedObject({ ...entry, type: 'node' }, parsed)
-  }
-  if (Array.isArray(data.movements)) {
-    for (const entry of data.movements) appendParsedObject({ ...entry, type: 'movement' }, parsed)
-  }
-  if (Array.isArray(data.packets)) {
-    for (const entry of data.packets) appendParsedObject({ ...entry, type: 'packet' }, parsed)
-  }
-  if (Array.isArray(data.events)) {
-    for (const entry of data.events) parsed.nodeEvents.push({ ...entry })
-  }
-  if (Array.isArray(data.tx)) {
-    for (const entry of data.tx) appendParsedObject({ ...entry, type: 'tx' }, parsed)
-  }
-  if (Array.isArray(data.rx)) {
-    for (const entry of data.rx) appendParsedObject({ ...entry, type: 'rx' }, parsed)
-  }
-
-  return finalizeParsedLog(parsed)
-}
-
-const parseJsonLinesLog = (raw) => {
-  const lines = String(raw ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, MAX_JSONL_LINES)
-  const nodes = []
-  const movements = []
-  const packets = []
-  const nodeEvents = []
-  const tx = []
-  const rx = []
-  const parseErrors = []
-  const meta = {
-    type: 'meta',
-    schema: 'uan-vis-packet-log/v1',
-    time_unit: 'us',
-    distance_unit: 'm',
-    sim_end_us: 0,
-  }
-
-  for (const line of lines) {
-    try {
-      appendParsedObject(JSON.parse(line), { nodes, movements, packets, nodeEvents, tx, rx, parseErrors, meta })
-    } catch {
-      parseErrors.push('invalid-json-line')
-    }
-  }
-
-  return capParsedLog({ nodes, movements: normalizeMovements(movements, nodes), packets, nodeEvents, tx, rx, parseErrors, meta })
-}
-
-const parseLog = (raw) => {
-  const text = String(raw ?? '').trim()
-  if (!text) return createEmptyParsedLog()
-
-  try {
-    return parseStructuredLog(text)
-  } catch {
-    return parseJsonLinesLog(text)
-  }
-}
-
-const normalizeReceiver = (packetId, receiver, index, fallbackDurationUs) => {
-  const startUs = normalizeTime(receiver.rx_start_us ?? receiver.start_us)
-  const durationUs = Math.max(1, normalizeTime(receiver.rx_duration_us ?? receiver.duration_us ?? fallbackDurationUs))
-  const rawStatus = receiver.status
-  const status = rawStatus === 'ok' || receiver.result === 'ok' ? 'ok' : 'fail'
-
-  return {
-    ...receiver,
-    receiver_id: sanitizeDisplayText(receiver.receiver_id || `${packetId}-rx-${index + 1}`, 80),
-    dst: Number(receiver.dst),
-    status,
-    reason: status === 'ok' ? null : sanitizeDisplayText(receiver.reason || deriveReasonFromLegacy(receiver.result), 80),
-    with: Array.isArray(receiver.with)
-      ? receiver.with.map((item) => sanitizeDisplayText(item, 80))
-      : Array.isArray(receiver.collided_with)
-        ? receiver.collided_with.map((item) => sanitizeDisplayText(item, 80))
-        : [],
-    rx_start_us: startUs,
-    rx_duration_us: durationUs,
-    rx_end_us: startUs + durationUs,
-  }
-}
-
-const normalizeCommitted = (value) => !(value === false || value === 'false')
-
-const normalizePacket = (packet, index) => {
-  const packetId = sanitizeDisplayText(packet.packet_id || packet.tx_id || `pkt-${index + 1}`, 80)
-  const eventId = sanitizeDisplayText(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`, 100)
-  const txStartUs = normalizeTime(packet.tx_start_us ?? packet.start_us)
-  const txCommitted = normalizeCommitted(packet.tx_committed)
-  const txDurationRawUs = normalizeTime(packet.tx_duration_us ?? packet.duration_us)
-  const txDurationUs = txCommitted ? Math.max(1, txDurationRawUs) : Math.max(0, txDurationRawUs)
-  const txEndUs = normalizeTime(packet.tx_end_us ?? packet.end_us ?? (txStartUs + txDurationUs))
-  const receivers = Array.isArray(packet.receivers)
-    ? packet.receivers
-      .map((receiver, receiverIndex) => normalizeReceiver(packetId, receiver, receiverIndex, txDurationUs))
-      .filter((receiver) => Number.isFinite(receiver.dst))
-      .sort((a, b) => a.rx_start_us - b.rx_start_us)
-    : []
-
-  const packetEndUs = Math.max(txEndUs, ...receivers.map((receiver) => receiver.rx_end_us))
-  return {
-    ...packet,
-    type: 'packet',
-    eventId,
-    packet_id: packetId,
-    src: Number(packet.src),
-    tx_committed: txCommitted,
-    tx_blocked_reason: txCommitted ? null : (packet.tx_blocked_reason ? sanitizeDisplayText(packet.tx_blocked_reason, 80) : null),
-    tx_start_us: txStartUs,
-    tx_duration_us: txDurationUs,
-    tx_end_us: txEndUs,
-    timeStart: txStartUs,
-    timeEnd: packetEndUs,
-    receivers,
-  }
-}
-
-const buildPacketsFromLegacy = (txRows, rxRows) => {
-  const rxByTx = new Map()
-  for (const item of rxRows) {
-    const list = rxByTx.get(item.tx_id) || []
-    list.push(item)
-    rxByTx.set(item.tx_id, list)
-  }
-
-  return txRows.map((txItem, index) => ({
-    type: 'packet',
-    event_id: String(txItem.tx_id || `tx-${index + 1}`),
-    tx_id: String(txItem.tx_id || `tx-${index + 1}`),
-    packet_id: String(txItem.packet_uid || txItem.tx_id || `pkt-${index + 1}`),
-    src: Number(txItem.src),
-    tx_start_us: normalizeTime(txItem.start_us),
-    tx_duration_us: Math.max(1, normalizeTime(txItem.duration_us)),
-    receivers: (rxByTx.get(txItem.tx_id) || []).map((rxItem) => ({
-      receiver_id: String(rxItem.rx_id || `${txItem.tx_id || `tx-${index + 1}`}-rx-${rxItem.dst || 'x'}`),
-      dst: Number(rxItem.dst),
-      rx_start_us: normalizeTime(rxItem.start_us),
-      rx_duration_us: Math.max(1, normalizeTime(rxItem.duration_us || txItem.duration_us)),
-      status: rxItem.result === 'ok' ? 'ok' : 'fail',
-      reason: rxItem.result === 'ok' ? null : deriveReasonFromLegacy(rxItem.result),
-      with: Array.isArray(rxItem.collided_with) ? rxItem.collided_with.map(String) : [],
-    })),
-  }))
-}
-
-const eventTimeUs = (event) => normalizeTime(
-  event.time_us
-  ?? event.tx_start_us
-  ?? event.rx_start_us
-  ?? event.start_us
-  ?? event.local_time_us
-  ?? event.utc_us,
-)
-
-const nodeEventPacketId = (event, fallbackIndex) => String(
-  event.packet_id
-  || event.packet_uid
-  || event.tx_id
-  || event.seq
-  || event.sequence
-  || `node-event-${fallbackIndex + 1}`,
-)
-
-const nodeEventTxKey = (event, fallbackIndex) => String(
-  event.event_id
-  || event.tx_id
-  || `${nodeEventPacketId(event, fallbackIndex)}-src-${event.src ?? event.node_id ?? 'x'}-t-${eventTimeUs(event)}`,
-)
-
-const normalizeNodeTxEvent = (event, index) => {
-  const packetId = nodeEventPacketId(event, index)
-  const txStartUs = normalizeTime(event.tx_start_us ?? event.start_us ?? event.time_us ?? event.utc_us)
-  const txDurationUs = Math.max(0, normalizeTime(event.tx_duration_us ?? event.duration_us))
-  const txCommitted = event.type !== 'tx_blocked' && normalizeCommitted(event.tx_committed)
-
-  return {
-    ...event,
-    type: 'packet',
-    event_id: nodeEventTxKey(event, index),
-    packet_id: packetId,
-    src: Number(event.src ?? event.node_id),
-    tx_start_us: txStartUs,
-    tx_duration_us: txCommitted ? Math.max(1, txDurationUs) : txDurationUs,
-    tx_end_us: normalizeTime(event.tx_end_us ?? event.end_us ?? (txStartUs + txDurationUs)),
-    tx_committed: txCommitted,
-    tx_blocked_reason: txCommitted ? null : String(event.tx_blocked_reason || event.reason || 'busy'),
-    receivers: [],
-  }
-}
-
-const normalizeNodeRxEvent = (event, index) => {
-  const packetId = nodeEventPacketId(event, index)
-  const rxStartUs = normalizeTime(event.rx_start_us ?? event.start_us ?? event.time_us ?? event.utc_us)
-  const rxDurationUs = Math.max(1, normalizeTime(event.rx_duration_us ?? event.duration_us))
-  const status = event.status === 'ok' || event.result === 'ok' ? 'ok' : 'fail'
-
-  return {
-    ...event,
-    packet_id: packetId,
-    tx_key: event.event_id || event.tx_id || null,
-    src: Number(event.src),
-    receiver_id: String(event.receiver_id || event.rx_id || `${packetId}-node-rx-${index + 1}`),
-    dst: Number(event.dst ?? event.node_id),
-    rx_start_us: rxStartUs,
-    rx_duration_us: rxDurationUs,
-    status,
-    reason: status === 'ok' ? null : String(event.reason || deriveReasonFromLegacy(event.result)),
-    with: Array.isArray(event.with)
-      ? event.with.map(String)
-      : Array.isArray(event.collided_with)
-        ? event.collided_with.map(String)
-        : [],
-  }
-}
-
-const mergeParsedNodeLogs = (parsedLogs, fileNames = []) => {
-  const merged = createEmptyParsedLog()
-  const nodeById = new Map()
-  const txEvents = []
-  const rxEvents = []
-
-  parsedLogs.forEach((parsed, fileIndex) => {
-    Object.assign(merged.meta, parsed.meta || {})
-    for (const node of parsed.nodes || []) {
-      if (!Number.isFinite(Number(node.node_id))) continue
-      const nodeId = Number(node.node_id)
-      const existing = nodeById.get(nodeId)
-      nodeById.set(nodeId, {
-        ...(existing || {}),
-        ...node,
-        node_id: nodeId,
-        movements: [
-          ...((existing && Array.isArray(existing.movements)) ? existing.movements : []),
-          ...(Array.isArray(node.movements) ? node.movements : []),
-        ],
-      })
-    }
-    for (const movement of parsed.movements || []) merged.movements.push({ ...movement })
-
-    const sourceLabel = fileNames[fileIndex] || `node-log-${fileIndex + 1}`
-    for (const event of parsed.nodeEvents || []) {
-      const eventType = String(event.type === 'node_event' ? event.event : (event.type || event.event || '')).toLowerCase()
-      const taggedEvent = { ...event, type: eventType, source_file: sourceLabel }
-      if (eventType === 'tx' || eventType === 'tx_start' || eventType === 'tx_blocked') {
-        txEvents.push(taggedEvent)
-      } else if (eventType === 'rx' || eventType === 'rx_success' || eventType === 'drop' || eventType === 'rx_drop') {
-        rxEvents.push(taggedEvent)
-      }
-    }
-    for (const tx of parsed.tx || []) txEvents.push({ ...tx, type: 'tx', source_file: sourceLabel })
-    for (const rx of parsed.rx || []) rxEvents.push({ ...rx, type: 'rx', source_file: sourceLabel })
-    for (const packet of parsed.packets || []) merged.packets.push({ ...packet })
-    for (const error of parsed.parseErrors || []) merged.parseErrors.push(`${sourceLabel}: ${error}`)
-  })
-
-  merged.nodes = [...nodeById.values()].sort((a, b) => a.node_id - b.node_id)
-  merged.movements = normalizeMovements(merged.movements, merged.nodes)
-
-  const packets = txEvents
-    .map((event, index) => normalizeNodeTxEvent(event, index))
-    .filter((packet) => Number.isFinite(packet.src))
-    .sort((a, b) => a.tx_start_us - b.tx_start_us)
-
-  const packetsByTxKey = new Map(packets.map((packet) => [packet.event_id, packet]))
-  const packetsByPacketId = new Map()
-  for (const packet of packets) {
-    const list = packetsByPacketId.get(packet.packet_id) || []
-    list.push(packet)
-    packetsByPacketId.set(packet.packet_id, list)
-  }
-
-  rxEvents
-    .map((event, index) => normalizeNodeRxEvent(event, index))
-    .filter((receiver) => Number.isFinite(receiver.dst))
-    .sort((a, b) => a.rx_start_us - b.rx_start_us)
-    .forEach((receiver) => {
-      const directPacket = receiver.tx_key ? packetsByTxKey.get(receiver.tx_key) : null
-      const candidatePackets = receiver.packet_id ? (packetsByPacketId.get(receiver.packet_id) || []) : []
-      const matchedPacket = directPacket || candidatePackets
-        .filter((packet) => (!Number.isFinite(receiver.src) || packet.src === receiver.src) && packet.tx_start_us <= receiver.rx_start_us)
-        .sort((a, b) => Math.abs(receiver.rx_start_us - a.tx_start_us) - Math.abs(receiver.rx_start_us - b.tx_start_us))[0]
-        || candidatePackets[0]
-
-      if (!matchedPacket) {
-        merged.parseErrors.push(`${receiver.source_file || 'node-log'}: 未找到 ${receiver.packet_id} 的 TX 事件`)
-        return
-      }
-
-      matchedPacket.receivers.push(receiver)
-    })
-
-  merged.packets.push(...packets.map((packet) => ({
-    ...packet,
-    receivers: packet.receivers.slice().sort((a, b) => a.rx_start_us - b.rx_start_us),
-  })))
-
-  merged.meta = {
-    ...merged.meta,
-    schema: 'uan-vis-merged-node-log/v1',
-    source_schema: merged.meta.schema,
-    log_scope: 'merged-node',
-    node_log_count: parsedLogs.length,
-    sim_end_us: Math.max(
-      normalizeTime(merged.meta.sim_end_us),
-      ...merged.packets.map((packet) => Math.max(
-        normalizeTime(packet.tx_end_us ?? packet.end_us),
-        ...((packet.receivers || []).map((receiver) => normalizeTime(receiver.rx_start_us ?? receiver.start_us) + normalizeTime(receiver.rx_duration_us ?? receiver.duration_us))),
-      )),
-      ...merged.movements.map((movement) => movement.end_us),
-    ),
-  }
-
-  return capParsedLog(merged)
-}
-
-const enforceMinGap = (nodes) => {
-  if (nodes.length < 2) return nodes.map((node) => ({ ...node }))
-
-  let minGap = Infinity
-  for (let i = 0; i < nodes.length; i += 1) {
-    for (let j = i + 1; j < nodes.length; j += 1) {
-      const a = nodes[i]
-      const b = nodes[j]
-      const dx = a.x - b.x
-      const dy = a.y - b.y
-      const dz = (a.z ?? 0) - (b.z ?? 0)
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      if (d > 0 && d < minGap) minGap = d
-    }
-  }
-
-  if (!Number.isFinite(minGap) || minGap >= MIN_NODE_GAP_M || minGap <= 0) {
-    return nodes.map((node) => ({ ...node }))
-  }
-
-  const cx = nodes.reduce((sum, node) => sum + node.x, 0) / nodes.length
-  const cy = nodes.reduce((sum, node) => sum + node.y, 0) / nodes.length
-  const scale = MIN_NODE_GAP_M / minGap
-
-  return nodes.map((node) => ({
-    ...node,
-    x: cx + (node.x - cx) * scale,
-    y: cy + (node.y - cy) * scale,
-  }))
-}
-
-const summarizePackets = (rows) => {
-  let committedPacketCount = 0
-  let blockedPacketCount = 0
-  let okReceivers = 0
-  let rxrxCollisions = 0
-  let rxtxCollisions = 0
-
-  for (const packet of rows || []) {
-    if (packet.tx_committed) committedPacketCount += 1
-    else blockedPacketCount += 1
-    for (const receiver of packet.receivers || []) {
-      if (receiver.status === 'ok') okReceivers += 1
-      if (receiver.reason === 'collision_rx_rx') rxrxCollisions += 1
-      if (receiver.reason === 'collision_rx_tx') rxtxCollisions += 1
-    }
-  }
-
-  return {
-    packetCount: (rows || []).length,
-    committedPacketCount,
-    blockedPacketCount,
-    okReceivers,
-    rxrxCollisions,
-    rxtxCollisions,
-  }
-}
-
-const LOG_SOURCES = Object.freeze({
-  default: {
-    label: '默认示例',
-    fileName: 'net.json',
-    raw: netLogDefaultText,
-  },
-  multihop: {
-    label: '多跳转发',
-    fileName: 'net_multihop.json',
-    raw: netLogMultiHopText,
-  },
-  complex: {
-    label: '复杂冲突',
-    fileName: 'net_multihop_complex.json',
-    raw: netLogMultiHopComplexText,
-  },
-  chainNoConflict: {
-    label: '链式无冲突',
-    fileName: 'net_chain_5_no_conflict.log',
-    raw: netLogChainNoConflictText,
-  },
-  swarm: {
-    label: '集群',
-    fileName: 'net-swarm.json',
-    raw: netLogSwarmText,
-  },
-  moving: {
-    label: '移动节点',
-    fileName: 'net_moving.json',
-    raw: netLogMovingText,
-  },
-})
 
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
   { key: 'extreme', label: '增强' },
 ])
-
-const normalizePacketsFromParsed = (parsed) => (
-  (
-    parsed.packets.length > 0
-      ? parsed.packets
-      : (parsed.nodeEvents?.length > 0
-        ? mergeParsedNodeLogs([parsed], [uploadedLogName.value || 'node-log']).packets
-        : buildPacketsFromLegacy(parsed.tx, parsed.rx))
-  )
-    .map((packet, index) => normalizePacket(packet, index))
-)
 
 const currentTime = ref(0)
 const initialParsed = parseLog(LOG_SOURCES.default.raw)
@@ -693,7 +66,7 @@ const selectedTheme = ref('research-lab')
 const fxLevel = ref('standard')
 const baseNodesState = ref(enforceMinGap(initialParsed.nodes))
 const nodeMovementRows = ref(initialParsed.movements)
-const sourcePacketRows = ref(normalizePacketsFromParsed(initialParsed))
+const sourcePacketRows = ref(normalizePacketsFromParsed(initialParsed, uploadedLogName.value || 'node-log'))
 const simulatedPacketRows = ref(null)
 const parseErrors = ref(initialParsed.parseErrors)
 const metaState = ref(initialParsed.meta)
@@ -743,19 +116,6 @@ const selectedEditNode = computed(() => (
 ))
 const originalSummary = computed(() => summarizePackets(sourcePacketRows.value))
 const simulatedSummary = computed(() => summarizePackets(packetRows.value))
-
-const earlierArrivalLate = (packet) => {
-  let latestPriorEnd = 0
-  for (const other of packetRows.value) {
-    if (other.packet_id !== packet.packet_id || other.eventId === packet.eventId) continue
-    if (other.tx_start_us >= packet.tx_start_us) continue
-    for (const receiver of other.receivers || []) {
-      if (receiver.status !== 'ok') continue
-      latestPriorEnd = Math.max(latestPriorEnd, receiver.rx_end_us)
-    }
-  }
-  return latestPriorEnd > packet.tx_start_us
-}
 
 const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
 const packetByPacketId = computed(() => {
@@ -821,132 +181,15 @@ let raf = 0
 let lastTs = 0
 const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
 
-const packetEntries = computed(() => packets.value.map((packet) => {
-  const sourceNode = nodeById.value.get(packet.src)
-  const receivers = packet.receivers.map((receiver) => {
-    const dstNode = nodeById.value.get(receiver.dst)
-    const overlapHint = receiver.status !== 'ok'
-      && Array.isArray(receiver.with)
-      && receiver.with.length > 0
-      ? `（与 ${receiver.with.join(', ')} 重叠）`
-      : ''
-    const reason = receiver.status === 'ok' ? '成功' : `${reasonLabel(receiver.reason)}${overlapHint}`
-    const tone = receiver.status === 'ok'
-      ? 'ok'
-      : receiver.reason === 'collision_rx_tx'
-        ? 'rxtx'
-        : receiver.reason === 'collision_rx_rx'
-          ? 'rxrx'
-          : 'fail'
-    const original = originalReceiverMap.value.get(`${packet.eventId}:${receiver.dst}`)
-    const originalChanged = Boolean(
-      original
-      && (original.status !== receiver.status || (original.reason || null) !== (receiver.reason || null)),
-    )
-
-    return {
-      ...receiver,
-      dstLabel: dstNode ? dstNode.name : `Node-${receiver.dst}`,
-      reasonLabel: reason,
-      tone,
-      originalChanged,
-      originalReasonLabel: original
-        ? (original.status === 'ok' ? '成功' : reasonLabel(original.reason))
-        : null,
-    }
-  })
-
-  const okCount = receivers.filter((receiver) => receiver.status === 'ok').length
-  const failCount = receivers.length - okCount
-  const rxrxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
-  const rxtxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
-  const packetKind = !packet.tx_committed
-    ? 'blocked'
-    : failCount === 0
-      ? 'ok'
-      : (okCount > 0 ? 'mixed' : 'fail')
-  const totalDurationUs = Math.max(1, packet.timeEnd - packet.tx_start_us)
-  const progressPct = clampRatio((currentTime.value - packet.tx_start_us) / totalDurationUs) * 100
-  const blockedReasonText = packet.tx_committed ? null : blockedReasonLabel(packet.tx_blocked_reason)
-  const outcomeSummary = packet.tx_committed
-    ? `成功 ${okCount} / rx-rx ${rxrxCount} / rx-tx ${rxtxCount}`
-    : `未发出 / 原因 ${blockedReasonText}`
-  const timingWarn = Boolean(packet.simulated) && earlierArrivalLate(packet)
-
-  return {
-    ...packet,
-    sourceLabel: sourceNode ? sourceNode.name : `Node-${packet.src}`,
-    receivers,
-    okCount,
-    failCount,
-    rxrxCount,
-    rxtxCount,
-    packetKind,
-    packetKindLabel: packetTagLabel(packetKind),
-    packetKindClass: packetTagClass(packetKind),
-    packetDurationLabel: timeDisplay(totalDurationUs),
-    prettyTime: timeDisplay(packet.tx_start_us),
-    progressPct,
-    blockedReasonText,
-    outcomeSummary,
-    startUs: packet.tx_start_us,
-    endUs: packet.timeEnd,
-    timingWarn,
-  }
+const packetEntries = computed(() => buildPacketEntries(packets.value, {
+  nodeById: nodeById.value,
+  packetMap: packetByPacketId.value,
+  currentTimeUs: currentTime.value,
+  originalReceiverMap: originalReceiverMap.value,
+  packetRows: packetRows.value,
 }))
 
-const lifecycleGroups = computed(() => {
-  const groups = new Map()
-  for (const entry of packetEntries.value) {
-    const key = entry.packet_id
-    const existing = groups.get(key) || {
-      packet_id: key,
-      sourceLabel: entry.sourceLabel,
-      startUs: Number.POSITIVE_INFINITY,
-      endUs: 0,
-      segments: [],
-    }
-    existing.startUs = Math.min(existing.startUs, entry.startUs)
-    existing.endUs = Math.max(existing.endUs, entry.endUs)
-    existing.segments.push(entry)
-    groups.set(key, existing)
-  }
-
-  return [...groups.values()]
-    .map((group) => {
-      const sortedSegments = group.segments.slice().sort((a, b) => a.startUs - b.startUs)
-      const allReceivers = sortedSegments.flatMap((segment) => segment.receivers)
-      const okCount = allReceivers.filter((receiver) => receiver.status === 'ok').length
-      const failCount = allReceivers.length - okCount
-      const rxrxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
-      const rxtxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
-      const blockedCount = sortedSegments.filter((segment) => !segment.tx_committed).length
-      const packetKind = blockedCount > 0
-        ? 'blocked'
-        : failCount === 0
-          ? 'ok'
-          : (okCount > 0 ? 'mixed' : 'fail')
-      const totalDurationUs = Math.max(1, group.endUs - group.startUs)
-      const progressPct = clampRatio((currentTime.value - group.startUs) / totalDurationUs) * 100
-
-      return {
-        ...group,
-        segments: sortedSegments,
-        blockedCount,
-        okCount,
-        failCount,
-        rxrxCount,
-        rxtxCount,
-        packetKind,
-        packetKindLabel: packetTagLabel(packetKind),
-        packetKindClass: packetTagClass(packetKind),
-        packetDurationLabel: timeDisplay(totalDurationUs),
-        prettyTime: timeDisplay(group.startUs),
-        progressPct,
-      }
-    })
-    .sort((a, b) => a.startUs - b.startUs)
-})
+const lifecycleGroups = computed(() => buildLifecycleGroups(packetEntries.value, currentTime.value))
 
 const visiblePacketEntries = computed(() => packetEntries.value)
 
@@ -984,56 +227,7 @@ const lifecyclePacket = computed(() => {
   return lifecycleGroups.value.find((packet) => packet.packet_id === targetId) || lifecycleGroups.value[0] || null
 })
 
-const lifecycleStages = computed(() => {
-  if (!lifecyclePacket.value) return []
-
-  const stages = []
-  for (const segment of lifecyclePacket.value.segments) {
-    stages.push({
-      eventId: `${segment.eventId}-tx`,
-      type: 'tx',
-      status: segment.tx_committed ? 'ok' : 'fail',
-      title: segment.tx_committed ? `${segment.sourceLabel} 发射` : `${segment.sourceLabel} 发送被阻塞`,
-      detail: segment.tx_committed
-        ? `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`
-        : `${lifecyclePacket.value.packet_id} · 段 ${segment.eventId} · 未发出（${blockedReasonLabel(segment.tx_blocked_reason)}）`,
-      startUs: segment.tx_start_us,
-      endUs: segment.tx_end_us,
-    })
-
-    for (const receiver of segment.receivers) {
-      const status = receiver.status === 'ok'
-        ? 'ok'
-        : receiver.reason === 'collision_rx_tx'
-          ? 'rxtx'
-          : receiver.reason === 'collision_rx_rx'
-            ? 'rxrx'
-            : 'fail'
-
-      stages.push({
-        eventId: receiver.receiver_id,
-        type: 'rx',
-        status,
-        title: `${receiver.dstLabel} 接收`,
-        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us)}`,
-        startUs: receiver.rx_start_us,
-        endUs: receiver.rx_end_us,
-      })
-    }
-  }
-
-  return stages
-    .sort((a, b) => a.startUs - b.startUs)
-    .map((stage) => {
-      const totalUs = Math.max(1, stage.endUs - stage.startUs)
-      const progressPct = clampRatio((currentTime.value - stage.startUs) / totalUs) * 100
-      return {
-        ...stage,
-        progressPct,
-        active: currentTime.value >= stage.startUs && currentTime.value <= stage.endUs,
-      }
-    })
-})
+const lifecycleStages = computed(() => buildLifecycleStages(lifecyclePacket.value, currentTime.value))
 
 const activeLifecycleStage = computed(() => lifecycleStages.value.find((stage) => stage.active) || null)
 const globalActiveEventId = computed(() => activePacket.value?.eventId || null)
@@ -1221,19 +415,6 @@ const nodeVisuals = computed(() => {
   })
 })
 
-const formatNodeGap = () => {
-  if (nodesState.value.length < 2) return '1.00 km'
-
-  let minGap = Infinity
-  for (let i = 0; i < nodesState.value.length; i += 1) {
-    for (let j = i + 1; j < nodesState.value.length; j += 1) {
-      minGap = Math.min(minGap, distanceMeters(nodesState.value[i], nodesState.value[j]))
-    }
-  }
-
-  return `${(minGap / 1000).toFixed(2)} km`
-}
-
 const togglePlay = () => {
   if (!isPlaying.value && currentTime.value >= cycleEndUs.value) {
     currentTime.value = 0
@@ -1273,7 +454,7 @@ const applyParsedLog = (parsed) => {
   exitEditMode()
   baseNodesState.value = enforceMinGap(parsed.nodes)
   nodeMovementRows.value = parsed.movements
-  sourcePacketRows.value = normalizePacketsFromParsed(parsed)
+  sourcePacketRows.value = normalizePacketsFromParsed(parsed, uploadedLogName.value || 'node-log')
   parseErrors.value = parsed.parseErrors
   metaState.value = parsed.meta
 
