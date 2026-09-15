@@ -1,5 +1,12 @@
 <template>
-  <div ref="containerEl" class="canvas-host" :class="{ 'canvas-host-edit': editMode }" @wheel.prevent="onWheel">
+  <div
+    ref="containerEl"
+    class="canvas-host"
+    :class="{ 'canvas-host-edit': editMode }"
+    @wheel.prevent="onWheel"
+    @dragover.prevent="onDragOver"
+    @drop.prevent="onDrop"
+  >
     <div class="canvas-toolbar" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
       <div class="toolbar-group">
         <button
@@ -9,9 +16,16 @@
         >
           测距工具
         </button>
-        <span class="toolbar-help">
-          {{ toolMode === 'measure' ? (pendingMeasurePoint ? '点击第二点' : '先点起点') : (editMode ? '拖动节点改坐标 · 空白处平移' : '当前为拖拽模式') }}
-        </span>
+        <button
+          v-if="allowPlaceNode"
+          class="toolbar-btn"
+          :class="{ active: toolMode === 'place' }"
+          @click="activatePlaceTool"
+        >
+          添加
+        </button>
+
+
       </div>
 
       <div class="toolbar-group toolbar-group-history">
@@ -54,6 +68,7 @@
       :aria-label="`acoustic-node-canvas-${Math.round(displayWidth)}x${Math.round(displayHeight)}`"
       @pointerdown="onPointerDown"
       @pointermove="onCanvasPointerMove"
+      @pointerup="onPointerUp"
       @pointerleave="onCanvasPointerLeave"
     />
 
@@ -86,8 +101,6 @@
       <div class="node-tooltip-grid">
         <p class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(2) }} / y {{ hoveredNode.y.toFixed(2) }} / z {{ Number(hoveredNode.z ?? 0).toFixed(2) }} m</strong></p>
         <p class="node-tooltip-item"><span>仿真时刻</span><strong>{{ (props.currentTime / 1000).toFixed(1) }} ms</strong></p>
-        <p class="node-tooltip-item"><span>当前状态</span><strong>{{ hoveredNodeStats.statusText }}</strong></p>
-        <p class="node-tooltip-item"><span>状态进度</span><strong>{{ hoveredNodeStats.progressText }}</strong></p>
         <p class="node-tooltip-item"><span>最近关联包</span><strong>{{ hoveredNodeStats.packetText }}</strong></p>
         <p class="node-tooltip-item"><span>活跃方向</span><strong>TX {{ hoveredNodeStats.txLinks }} / RX {{ hoveredNodeStats.rxLinks }}</strong></p>
       </div>
@@ -100,20 +113,8 @@
       </div>
 
       <div class="node-tooltip-grid node-tooltip-grid-compact">
-        <p class="node-tooltip-item"><span>与 Sink 距离</span><strong>{{ hoveredNodeStats.distanceToSinkText }}</strong></p>
-        <p class="node-tooltip-item"><span>最近邻居</span><strong>{{ hoveredNodeStats.nearestNeighborText }}</strong></p>
         <p class="node-tooltip-item"><span>活跃包列表</span><strong>{{ hoveredNodeStats.packetListText }}</strong></p>
         <p class="node-tooltip-item"><span>冲突成因</span><strong>{{ hoveredNodeStats.reasonText }}</strong></p>
-      </div>
-      <div v-if="editMode && hoveredNodeStats.editHints?.length" class="node-tooltip-grid node-tooltip-grid-compact">
-        <p
-          v-for="hint in hoveredNodeStats.editHints"
-          :key="hint.id"
-          class="node-tooltip-item"
-        >
-          <span>{{ hint.label }}</span>
-          <strong>{{ hint.value }}</strong>
-        </p>
       </div>
     </div>
   </div>
@@ -132,15 +133,21 @@ const props = defineProps({
   underwaterDetail: { type: String, default: 'standard' },
   isMuted: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
+  allowPlaceNode: { type: Boolean, default: false },
+  boxSelect: { type: Boolean, default: false },
   originalPositions: { type: Array, default: () => [] },
   selectedNodeId: { type: [Number, String], default: null },
+  selectedNodeIds: { type: Array, default: () => [] },
   soundSpeedMps: { type: Number, default: 1500 },
 })
 
 const TOOL_MODES = Object.freeze({
   PAN: 'pan',
   MEASURE: 'measure',
+  PLACE: 'place',
+  SELECT: 'select',
 })
+
 
 const NODE_RADIUS_BASE = 18
 const THEME_PROFILES = Object.freeze({
@@ -346,8 +353,21 @@ const nodeRadius = computed(() => {
   if (shortest >= 640) return NODE_RADIUS_BASE
   return Math.max(11, Math.round(11 + (((shortest - 280) * (NODE_RADIUS_BASE - 11)) / 360)))
 })
-const emit = defineEmits(['node-select', 'pause-request', 'toggle-mute', 'node-move', 'node-move-end'])
+const emit = defineEmits([
+  'node-select',
+  'pause-request',
+  'toggle-mute',
+  'node-move',
+  'node-move-end',
+  'node-place',
+  'selection-change',
+  'nodes-move',
+  'protocol-drop',
+])
 const draggingNodeId = ref(null)
+const dragGroup = ref(null)
+const marquee = ref(null)
+const spaceHeld = ref(false)
 const dragFrozenBounds = ref(null)
 const sessionFrozenBounds = ref(null)
 let resizeObserver = null
@@ -378,22 +398,54 @@ const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.valu
 
 const scale = computed(() => {
   const inset = viewInsets.value
-  const sx = (displayWidth.value - inset.left - inset.right) / bounds.value.spanX
-  const sy = (displayHeight.value - inset.top - inset.bottom) / bounds.value.spanY
-  return Math.min(sx, sy)
+  const availW = Math.max(1, displayWidth.value - inset.left - inset.right)
+  const availH = Math.max(1, displayHeight.value - inset.top - inset.bottom)
+  const sx = availW / bounds.value.spanX
+  const sy = availH / bounds.value.spanY
+  return Math.min(sx, sy) * 0.86
 })
 
 const effectiveScale = computed(() => scale.value * zoom.value)
+
+const contentOrigin = computed(() => {
+  const inset = viewInsets.value
+  const s = scale.value
+  const contentW = bounds.value.spanX * s
+  const contentH = bounds.value.spanY * s
+  const availW = displayWidth.value - inset.left - inset.right
+  const availH = displayHeight.value - inset.top - inset.bottom
+  return {
+    x: inset.left + (availW - contentW) / 2,
+    y: inset.top + (availH - contentH) / 2,
+  }
+})
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const originalPoseById = computed(() => new Map((props.originalPositions || []).map((item) => [item.node_id, item])))
+
+const toolbarHelp = computed(() => {
+  if (toolMode.value === TOOL_MODES.MEASURE) {
+    return pendingMeasurePoint.value ? '点击第二点' : '先点起点'
+  }
+  if (toolMode.value === TOOL_MODES.PLACE) {
+    return '点击空白处放置节点 · 点到节点可拖动'
+  }
+  if (props.editMode) return '拖动节点改坐标 · 空白处平移'
+  return '当前为拖拽模式'
+})
+
+const selectedIdSet = computed(() => new Set((props.selectedNodeIds || []).map((id) => Number(id))))
 
 const canvasCursorClass = computed(() => {
   if (toolMode.value === TOOL_MODES.MEASURE) {
     return hoveredMeasureNode.value ? 'canvas-measure-hover' : 'canvas-measure'
   }
+  if (toolMode.value === TOOL_MODES.PLACE) {
+    return hoveredNodeId.value != null ? 'canvas-edit-hover' : 'canvas-place'
+  }
+  if (marquee.value) return 'canvas-marquee'
   if (props.editMode) {
-    if (draggingNodeId.value) return 'canvas-edit-dragging'
+    if (draggingNodeId.value || dragGroup.value) return 'canvas-edit-dragging'
     if (hoveredNodeId.value != null) return 'canvas-edit-hover'
     return 'canvas-edit'
   }
@@ -402,20 +454,20 @@ const canvasCursorClass = computed(() => {
 
 const toScreen = (x, y) => {
   const base = bounds.value
-  const inset = viewInsets.value
+  const origin = contentOrigin.value
   return {
-    x: inset.left + ((x - base.minX) * effectiveScale.value) + pan.value.x,
-    y: inset.top + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
+    x: origin.x + ((x - base.minX) * effectiveScale.value) + pan.value.x,
+    y: origin.y + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
   }
 }
 
 const toWorld = (x, y) => {
   const base = bounds.value
-  const inset = viewInsets.value
+  const origin = contentOrigin.value
   const s = Math.max(effectiveScale.value, 1e-6)
   return {
-    x: base.minX + ((x - inset.left - pan.value.x) / s),
-    y: base.maxY - ((y - inset.top - pan.value.y) / s),
+    x: base.minX + ((x - origin.x - pan.value.x) / s),
+    y: base.maxY - ((y - origin.y - pan.value.y) / s),
   }
 }
 
@@ -467,12 +519,6 @@ const hoveredNodeVisual = computed(() => {
 const nodeLabel = (node) => `Node ${node.node_id}`
 const nodeTitle = (node) => node.name ? `${nodeLabel(node)} · ${node.name}` : nodeLabel(node)
 
-const fmtDistanceMeters = (meters) => {
-  if (!Number.isFinite(meters)) return '无'
-  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`
-  return `${meters.toFixed(1)} m`
-}
-
 const hoveredNodeStats = computed(() => {
   const node = hoveredNode.value
   if (!node) return null
@@ -506,31 +552,6 @@ const hoveredNodeStats = computed(() => {
     }
   }
 
-  const sinks = props.nodes.filter((item) => item.role === 'sink' || /sink/i.test(String(item.name || '')))
-  let nearestSinkDistance = Number.POSITIVE_INFINITY
-  for (const sink of sinks) {
-    if (sink.node_id === node.node_id) continue
-    const dx = sink.x - node.x
-    const dy = sink.y - node.y
-    const dz = (sink.z ?? 0) - (node.z ?? 0)
-    const d = Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
-    nearestSinkDistance = Math.min(nearestSinkDistance, d)
-  }
-
-  let nearestNeighbor = null
-  let nearestNeighborDistance = Number.POSITIVE_INFINITY
-  for (const other of props.nodes) {
-    if (other.node_id === node.node_id) continue
-    const dx = other.x - node.x
-    const dy = other.y - node.y
-    const dz = (other.z ?? 0) - (node.z ?? 0)
-    const d = Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
-    if (d < nearestNeighborDistance) {
-      nearestNeighborDistance = d
-      nearestNeighbor = other
-    }
-  }
-
   const modeLabelMap = {
     idle: 'IDLE',
     tx: 'TX',
@@ -542,42 +563,8 @@ const hoveredNodeStats = computed(() => {
 
   const packetList = [...packetIds]
   const reasonText = reasonSet.size ? [...reasonSet].join(' / ') : '无'
-  const editHints = []
-  if (props.editMode) {
-    const original = originalPoseById.value.get(node.node_id)
-    if (original) {
-      const dx = node.x - original.x
-      const dy = node.y - original.y
-      const dz = (node.z ?? 0) - (original.z ?? 0)
-      editHints.push({
-        id: 'moved',
-        label: '相对原位',
-        value: `${Math.sqrt((dx * dx) + (dy * dy) + (dz * dz)).toFixed(1)} m`,
-      })
-    }
-    const neighborHints = props.nodes
-      .filter((other) => other.node_id !== node.node_id)
-      .map((other) => {
-        const dx = other.x - node.x
-        const dy = other.y - node.y
-        const dz = (other.z ?? 0) - (node.z ?? 0)
-        const dist = Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
-        const delayMs = (dist / Math.max(1, props.soundSpeedMps)) * 1000
-        return {
-          id: `n-${other.node_id}`,
-          label: other.name || `Node-${other.node_id}`,
-          value: `${dist.toFixed(0)} m / ${delayMs.toFixed(1)} ms`,
-          dist,
-        }
-      })
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, 3)
-    editHints.push(...neighborHints)
-  }
   return {
     modeLabel: modeLabelMap[visual?.mode] || 'IDLE',
-    statusText: visual?.statusText || '空闲',
-    progressText: `${Math.round((visual?.fillProgress ?? 0) * 100)}%`,
     packetText: visual?.packetId || '无',
     txLinks,
     rxLinks,
@@ -585,11 +572,8 @@ const hoveredNodeStats = computed(() => {
     collisionRxRxCount,
     collisionRxTxCount,
     failCount,
-    distanceToSinkText: node.role === 'sink' ? '本节点即 Sink' : fmtDistanceMeters(nearestSinkDistance),
-    nearestNeighborText: nearestNeighbor ? `${nearestNeighbor.name} (${fmtDistanceMeters(nearestNeighborDistance)})` : '无',
     packetListText: packetList.length ? packetList.join(', ') : '无',
     reasonText,
-    editHints,
   }
 })
 
@@ -597,7 +581,7 @@ const hoveredTooltipStyle = computed(() => {
   if (!hoveredNodePos.value) return null
   const compact = displayWidth.value < 720 || displayHeight.value < 520
   const estimatedWidth = compact ? 280 : 360
-  const estimatedHeight = compact ? 240 : 286
+  const estimatedHeight = compact ? 180 : 210
   const margin = 8
   const gap = 16
   const cursorX = hoverCursor.value.x
@@ -1880,10 +1864,26 @@ const draw = () => {
       packetId: null,
     }
     drawNode(ctx, node, visual, profile, phase, fx)
-    if (props.editMode && props.selectedNodeId === node.node_id) {
+    const selected = selectedIdSet.value.has(Number(node.node_id)) || props.selectedNodeId === node.node_id
+    if (props.editMode && selected) {
       const p = toScreen(node.x, node.y)
-      strokeCircle(ctx, p.x, p.y, 22, profile.idleInner, 1.6, 0.9)
+      strokeCircle(ctx, p.x, p.y, 22, profile.idleInner, 2.1, 0.95)
     }
+  }
+
+  if (marquee.value) {
+    const x = Math.min(marquee.value.x0, marquee.value.x1)
+    const y = Math.min(marquee.value.y0, marquee.value.y1)
+    const wBox = Math.abs(marquee.value.x1 - marquee.value.x0)
+    const hBox = Math.abs(marquee.value.y1 - marquee.value.y0)
+    ctx.save()
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.12)'
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.9)'
+    ctx.lineWidth = 1.2
+    ctx.setLineDash([5, 4])
+    ctx.fillRect(x, y, wBox, hBox)
+    ctx.strokeRect(x, y, wBox, hBox)
+    ctx.restore()
   }
 
   ctx.save()
@@ -1899,14 +1899,40 @@ const draw = () => {
   drawMeasurementLines(ctx)
 }
 
+const nodesInMarquee = (box) => {
+  const left = Math.min(box.x0, box.x1)
+  const right = Math.max(box.x0, box.x1)
+  const top = Math.min(box.y0, box.y1)
+  const bottom = Math.max(box.y0, box.y1)
+  return props.nodes.filter((node) => {
+    const p = toScreen(node.x, node.y)
+    return p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
+  })
+}
+
 const onPointerDown = (event) => {
-  if (event.button !== undefined && event.button !== 0) return
+  if (event.button !== undefined && event.button !== 0 && event.button !== 1) return
 
   const canvas = canvasEl.value
   if (!canvas) return
   const rect = canvas.getBoundingClientRect()
   const sx = event.clientX - rect.left
   const sy = event.clientY - rect.top
+
+  if (event.button === 1 || (spaceHeld.value && toolMode.value !== TOOL_MODES.MEASURE && toolMode.value !== TOOL_MODES.PLACE)) {
+    activePointerId = event.pointerId
+    isPanning.value = true
+    hoveredNodeId.value = null
+    panStart.value = { x: sx, y: sy }
+    panOffsetStart.value = { ...pan.value }
+    hasDragged.value = false
+    try {
+      canvas.setPointerCapture(event.pointerId)
+    } catch {
+      // ignore
+    }
+    return
+  }
 
   if (toolMode.value === TOOL_MODES.MEASURE) {
     event.preventDefault()
@@ -1938,7 +1964,7 @@ const onPointerDown = (event) => {
     return
   }
 
-  if (props.editMode && toolMode.value !== TOOL_MODES.MEASURE) {
+  if (props.editMode && toolMode.value === TOOL_MODES.PLACE) {
     const target = pickNodeAt(sx, sy)
     if (target) {
       event.preventDefault()
@@ -1949,6 +1975,79 @@ const onPointerDown = (event) => {
       panStart.value = { x: sx, y: sy }
       selectedNode.value = target
       emit('node-select', target)
+      emit('pause-request')
+      try {
+        canvas.setPointerCapture(event.pointerId)
+      } catch {
+        // ignore
+      }
+      requestAnimationFrame(draw)
+      return
+    }
+    const world = toWorld(sx, sy)
+    emit('node-place', { x: world.x, y: world.y })
+    emit('pause-request')
+    return
+  }
+
+  const forcePan = spaceHeld.value || event.button === 1 || (props.boxSelect && toolMode.value === TOOL_MODES.PAN)
+
+  if (props.editMode && toolMode.value !== TOOL_MODES.MEASURE && !forcePan) {
+    const target = pickNodeAt(sx, sy)
+    if (target) {
+      event.preventDefault()
+      const clickedId = Number(target.node_id)
+      const currentIds = [...selectedIdSet.value]
+      let nextIds
+      if (event.shiftKey || event.ctrlKey || event.metaKey) {
+        nextIds = currentIds.includes(clickedId)
+          ? currentIds.filter((id) => id !== clickedId)
+          : [...currentIds, clickedId]
+      } else if (currentIds.includes(clickedId)) {
+        nextIds = currentIds
+      } else {
+        nextIds = [clickedId]
+      }
+      emit('selection-change', nextIds)
+      emit('node-select', target)
+      const origins = new Map()
+      for (const node of props.nodes) {
+        if (nextIds.includes(Number(node.node_id))) {
+          origins.set(Number(node.node_id), { x: node.x, y: node.y })
+        }
+      }
+      dragGroup.value = {
+        ids: nextIds,
+        start: toWorld(sx, sy),
+        origins,
+      }
+      draggingNodeId.value = target.node_id
+      dragFrozenBounds.value = { ...liveBounds.value }
+      activePointerId = event.pointerId
+      hasDragged.value = false
+      panStart.value = { x: sx, y: sy }
+      selectedNode.value = target
+      emit('pause-request')
+      try {
+        canvas.setPointerCapture(event.pointerId)
+      } catch {
+        // ignore
+      }
+      requestAnimationFrame(draw)
+      return
+    }
+
+    if (props.boxSelect && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      marquee.value = {
+        x0: sx,
+        y0: sy,
+        x1: sx,
+        y1: sy,
+        additive: event.shiftKey && (event.ctrlKey || event.metaKey),
+      }
+      activePointerId = event.pointerId
+      hasDragged.value = false
       emit('pause-request')
       try {
         canvas.setPointerCapture(event.pointerId)
@@ -1992,6 +2091,33 @@ const onPointerMove = (event) => {
   const rect = canvas.getBoundingClientRect()
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
+
+  if (marquee.value) {
+    if ((x - marquee.value.x0) ** 2 + (y - marquee.value.y0) ** 2 > 16) hasDragged.value = true
+    marquee.value = { ...marquee.value, x1: x, y1: y }
+    requestAnimationFrame(draw)
+    return
+  }
+
+  if (dragGroup.value) {
+    if ((x - panStart.value.x) ** 2 + (y - panStart.value.y) ** 2 > 16 || hasDragged.value) {
+      hasDragged.value = true
+    }
+    const world = toWorld(x, y)
+    const dx = world.x - dragGroup.value.start.x
+    const dy = world.y - dragGroup.value.start.y
+    const moves = [...dragGroup.value.origins.entries()].map(([nodeId, origin]) => ({
+      node_id: nodeId,
+      x: origin.x + dx,
+      y: origin.y + dy,
+    }))
+    emit('nodes-move', moves)
+    if (moves.length === 1) {
+      emit('node-move', moves[0])
+    }
+    requestAnimationFrame(draw)
+    return
+  }
 
   if (draggingNodeId.value != null) {
     if ((x - panStart.value.x) ** 2 + (y - panStart.value.y) ** 2 > 16 || hasDragged.value) {
@@ -2044,6 +2170,11 @@ const onCanvasPointerMove = (event) => {
   const canvas = canvasEl.value
   if (!canvas) return
 
+  if (marquee.value || dragGroup.value || draggingNodeId.value != null) {
+    onPointerMove(event)
+    return
+  }
+
   const rect = canvas.getBoundingClientRect()
   const sx = event.clientX - rect.left
   const sy = event.clientY - rect.top
@@ -2065,8 +2196,38 @@ const onCanvasPointerLeave = () => {
 }
 
 const onPointerUp = (event) => {
-  if (draggingNodeId.value != null) {
+  if (marquee.value) {
+    const box = marquee.value
+    const picked = nodesInMarquee(box).map((node) => Number(node.node_id))
+    let nextIds
+    if (!hasDragged.value) {
+      nextIds = []
+    } else if (box.additive) {
+      nextIds = [...new Set([...selectedIdSet.value, ...picked])]
+    } else {
+      nextIds = picked
+    }
+    emit('selection-change', nextIds)
+    if (nextIds.length === 1) {
+      const node = props.nodes.find((item) => Number(item.node_id) === nextIds[0])
+      if (node) emit('node-select', node)
+    }
+    marquee.value = null
+    if (canvasEl.value && activePointerId !== null) {
+      try {
+        canvasEl.value.releasePointerCapture(activePointerId)
+      } catch {
+        // ignore
+      }
+    }
+    activePointerId = null
+    requestAnimationFrame(draw)
+    return
+  }
+
+  if (dragGroup.value || draggingNodeId.value != null) {
     emit('node-move-end')
+    dragGroup.value = null
     draggingNodeId.value = null
     dragFrozenBounds.value = null
     if (canvasEl.value && activePointerId !== null) {
@@ -2112,6 +2273,51 @@ const onPointerUp = (event) => {
     }
   }
   activePointerId = null
+}
+
+const activatePanTool = () => {
+  toolMode.value = toolMode.value === TOOL_MODES.PAN ? TOOL_MODES.SELECT : TOOL_MODES.PAN
+  requestAnimationFrame(draw)
+}
+
+const onDragOver = (event) => {
+  if (!props.boxSelect && !props.editMode) return
+  event.dataTransfer.dropEffect = 'copy'
+}
+
+const onDrop = (event) => {
+  const raw = event.dataTransfer?.getData('application/x-aqua-item')
+    || event.dataTransfer?.getData('application/x-aqua-mac')
+    || event.dataTransfer?.getData('text/plain')
+  if (!raw) return
+  let payload = raw
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    payload = { layer: 'mac', id: raw, typeId: raw, field: 'macId', scope: 'node' }
+  }
+  const canvas = canvasEl.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const sx = event.clientX - rect.left
+  const sy = event.clientY - rect.top
+  const target = pickNodeAt(sx, sy)
+  emit('protocol-drop', {
+    ...payload,
+    macId: payload.id || payload.macId,
+    nodeId: target ? Number(target.node_id) : null,
+  })
+}
+
+const activatePlaceTool = () => {
+  if (toolMode.value === TOOL_MODES.PLACE) {
+    toolMode.value = TOOL_MODES.PAN
+    requestAnimationFrame(draw)
+    return
+  }
+  toolMode.value = TOOL_MODES.PLACE
+  pendingMeasurePoint.value = null
+  requestAnimationFrame(draw)
 }
 
 const activateMeasureTool = () => {
@@ -2195,10 +2401,10 @@ const onWheel = (event) => {
   requestAnimationFrame(() => {
     const base = bounds.value
     const s = effectiveScale.value
-    const inset = viewInsets.value
+    const origin = contentOrigin.value
     pan.value = {
-      x: cx - ((anchorWorld.x - base.minX) * s) - inset.left,
-      y: cy - ((base.maxY - anchorWorld.y) * s) - inset.top,
+      x: cx - ((anchorWorld.x - base.minX) * s) - origin.x,
+      y: cy - ((base.maxY - anchorWorld.y) * s) - origin.y,
     }
     requestAnimationFrame(draw)
   })
@@ -2213,12 +2419,29 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail, props.editMode, props.originalPositions, props.selectedNodeId],
+  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail, props.editMode, props.originalPositions, props.selectedNodeId, props.selectedNodeIds],
   () => {
     requestAnimationFrame(draw)
   },
   { deep: true, immediate: true },
 )
+
+watch(() => [props.editMode, props.allowPlaceNode], ([editable, allowPlace]) => {
+  if (!editable || !allowPlace) {
+    if (toolMode.value === TOOL_MODES.PLACE) {
+      toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
+    }
+  }
+})
+
+watch(() => props.boxSelect, (enabled) => {
+  if (enabled && (toolMode.value === TOOL_MODES.PAN || !toolMode.value)) {
+    toolMode.value = TOOL_MODES.SELECT
+  }
+  if (!enabled && toolMode.value === TOOL_MODES.SELECT) {
+    toolMode.value = TOOL_MODES.PAN
+  }
+}, { immediate: true })
 
 watch(() => props.editMode, async (next) => {
   draggingNodeId.value = null
@@ -2231,7 +2454,20 @@ watch(() => props.editMode, async (next) => {
   sessionFrozenBounds.value = { ...liveBounds.value }
 })
 
+const onKeyDown = (event) => {
+  if (event.code !== 'Space') return
+  if (event.target && /^(INPUT|TEXTAREA|SELECT)$/i.test(event.target.tagName)) return
+  event.preventDefault()
+  spaceHeld.value = true
+}
+
+const onKeyUp = (event) => {
+  if (event.code === 'Space') spaceHeld.value = false
+}
+
 onMounted(() => {
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
   updateViewport()
   resizeObserver = new ResizeObserver(() => {
     updateViewport()
@@ -2247,6 +2483,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
@@ -2265,7 +2503,7 @@ onBeforeUnmount(() => {
 }
 
 .canvas-host-edit {
-  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.16);
+  box-shadow: none;
 }
 
 .canvas-toolbar {
@@ -2573,6 +2811,18 @@ onBeforeUnmount(() => {
 
 .canvas-edit {
   cursor: grab;
+}
+
+.canvas-place {
+  cursor: copy;
+}
+
+.canvas-select {
+  cursor: crosshair;
+}
+
+.canvas-marquee {
+  cursor: crosshair;
 }
 
 .canvas-edit-hover {

@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
+import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
+import { ns3RunPlugin } from './server/ns3RunPlugin.js'
 
 const securityHeaders = {
   'X-Content-Type-Options': 'nosniff',
@@ -42,8 +44,14 @@ const devSecurityHeaders = {
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   plugins: [
     vue(),
+    ns3RunPlugin(),
     {
       name: 'production-csp-meta',
       transformIndexHtml: {
