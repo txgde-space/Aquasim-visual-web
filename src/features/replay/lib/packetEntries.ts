@@ -1,8 +1,18 @@
-import type { ReceiverStatus, ReplayNode, ReplayPacket, ReplayReceiver } from '@/shared/types/replay'
+import type {
+  DisplayReceiver,
+  LifecycleGroup,
+  LifecycleStage,
+  PacketEntry,
+  PacketTone,
+  ReceiverStatus,
+  ReplayNode,
+  ReplayPacket,
+  ReplayReceiver,
+} from '@/shared/types/replay'
 import { blockedReasonLabel, clampRatio, reasonLabel, timeDisplay } from './format'
 import { earlierArrivalLate } from './geometry'
 
-export type PacketTone = 'ok' | 'rxtx' | 'rxrx' | 'fail'
+export type { PacketTone }
 
 /** Single source of truth for the receiver tone mapping (was duplicated 3 times). */
 export const statusTone = (status: ReceiverStatus, reason: string | null | undefined): PacketTone => {
@@ -42,9 +52,9 @@ export interface PacketEntryContext {
   packetRows: ReplayPacket[]
 }
 
-export const buildPacketEntries = (packets: ReplayPacket[], ctx: PacketEntryContext): Array<Record<string, unknown>> => packets.map((packet) => {
+export const buildPacketEntries = (packets: ReplayPacket[], ctx: PacketEntryContext): PacketEntry[] => packets.map((packet): PacketEntry => {
   const sourceNode = ctx.nodeById.get(packet.src)
-  const receivers = packet.receivers.map((receiver) => {
+  const receivers = packet.receivers.map((receiver): DisplayReceiver => {
     const dstNode = ctx.nodeById.get(receiver.dst)
     const overlapHint = receiver.status !== 'ok'
       && Array.isArray(receiver.with)
@@ -110,8 +120,8 @@ export const buildPacketEntries = (packets: ReplayPacket[], ctx: PacketEntryCont
   }
 })
 
-export const buildLifecycleGroups = (packetEntries: Array<Record<string, unknown>>, currentTimeUs: number): Array<Record<string, unknown>> => {
-  const groups = new Map<string, Record<string, unknown>>()
+export const buildLifecycleGroups = (packetEntries: PacketEntry[], currentTimeUs: number): LifecycleGroup[] => {
+  const groups = new Map<string, LifecycleGroup>()
   for (const entry of packetEntries) {
     const key = String(entry.packet_id)
     const existing = groups.get(key) || {
@@ -119,18 +129,29 @@ export const buildLifecycleGroups = (packetEntries: Array<Record<string, unknown
       sourceLabel: entry.sourceLabel,
       startUs: Number.POSITIVE_INFINITY,
       endUs: 0,
-      segments: [] as Array<Record<string, unknown>>,
+      segments: [] as PacketEntry[],
+      blockedCount: 0,
+      okCount: 0,
+      failCount: 0,
+      rxrxCount: 0,
+      rxtxCount: 0,
+      packetKind: '',
+      packetKindLabel: '',
+      packetKindClass: '',
+      packetDurationLabel: '',
+      prettyTime: '',
+      progressPct: 0,
     }
-    existing.startUs = Math.min(existing.startUs as number, entry.startUs as number)
-    existing.endUs = Math.max(existing.endUs as number, entry.endUs as number)
-    ;(existing.segments as Array<Record<string, unknown>>).push(entry)
+    existing.startUs = Math.min(existing.startUs, entry.startUs)
+    existing.endUs = Math.max(existing.endUs, entry.endUs)
+    existing.segments.push(entry)
     groups.set(key, existing)
   }
 
   return [...groups.values()]
-    .map((group): Record<string, unknown> => {
-      const sortedSegments = (group.segments as Array<Record<string, unknown>>).slice().sort((a, b) => (a.startUs as number) - (b.startUs as number))
-      const allReceivers = sortedSegments.flatMap((segment) => segment.receivers as Array<Record<string, unknown>>)
+    .map((group): LifecycleGroup => {
+      const sortedSegments = group.segments.slice().sort((a, b) => a.startUs - b.startUs)
+      const allReceivers = sortedSegments.flatMap((segment) => segment.receivers)
       const okCount = allReceivers.filter((receiver) => receiver.status === 'ok').length
       const failCount = allReceivers.length - okCount
       const rxrxCount = allReceivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
@@ -141,8 +162,8 @@ export const buildLifecycleGroups = (packetEntries: Array<Record<string, unknown
         : failCount === 0
           ? 'ok'
           : (okCount > 0 ? 'mixed' : 'fail')
-      const totalDurationUs = Math.max(1, (group.endUs as number) - (group.startUs as number))
-      const progressPct = clampRatio((currentTimeUs - (group.startUs as number)) / totalDurationUs) * 100
+      const totalDurationUs = Math.max(1, group.endUs - group.startUs)
+      const progressPct = clampRatio((currentTimeUs - group.startUs) / totalDurationUs) * 100
 
       return {
         ...group,
@@ -156,52 +177,56 @@ export const buildLifecycleGroups = (packetEntries: Array<Record<string, unknown
         packetKindLabel: packetTagLabel(packetKind),
         packetKindClass: packetTagClass(packetKind),
         packetDurationLabel: timeDisplay(totalDurationUs),
-        prettyTime: timeDisplay(group.startUs as number),
+        prettyTime: timeDisplay(group.startUs),
         progressPct,
       }
     })
-    .sort((a, b) => (a.startUs as number) - (b.startUs as number))
+    .sort((a, b) => a.startUs - b.startUs)
 }
 
-export const buildLifecycleStages = (lifecyclePacket: Record<string, unknown> | null, currentTimeUs: number): Array<Record<string, unknown>> => {
+export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, currentTimeUs: number): LifecycleStage[] => {
   if (!lifecyclePacket) return []
 
-  const stages: Array<Record<string, unknown>> = []
-  for (const segment of lifecyclePacket.segments as Array<Record<string, unknown>>) {
+  const stages: LifecycleStage[] = []
+  for (const segment of lifecyclePacket.segments) {
     stages.push({
       eventId: `${segment.eventId}-tx`,
       type: 'tx',
       status: segment.tx_committed ? 'ok' : 'fail',
       title: segment.tx_committed ? `${segment.sourceLabel} 发射` : `${segment.sourceLabel} 发送被阻塞`,
       detail: segment.tx_committed
-        ? `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us as number)}`
-        : `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 未发出（${blockedReasonLabel(segment.tx_blocked_reason as string | null)}）`,
+        ? `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`
+        : `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 未发出（${blockedReasonLabel(segment.tx_blocked_reason)}）`,
       startUs: segment.tx_start_us,
       endUs: segment.tx_end_us,
+      progressPct: 0,
+      active: false,
     })
 
-    for (const receiver of segment.receivers as Array<Record<string, unknown>>) {
+    for (const receiver of segment.receivers) {
       stages.push({
         eventId: receiver.receiver_id,
         type: 'rx',
-        status: statusTone(receiver.status as ReceiverStatus, receiver.reason as string | null),
+        status: statusTone(receiver.status, receiver.reason),
         title: `${receiver.dstLabel} 接收`,
-        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us as number)}`,
+        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us)}`,
         startUs: receiver.rx_start_us,
         endUs: receiver.rx_end_us,
+        progressPct: 0,
+        active: false,
       })
     }
   }
 
   return stages
-    .sort((a, b) => (a.startUs as number) - (b.startUs as number))
-    .map((stage) => {
-      const totalUs = Math.max(1, (stage.endUs as number) - (stage.startUs as number))
-      const progressPct = clampRatio((currentTimeUs - (stage.startUs as number)) / totalUs) * 100
+    .sort((a, b) => a.startUs - b.startUs)
+    .map((stage): LifecycleStage => {
+      const totalUs = Math.max(1, stage.endUs - stage.startUs)
+      const progressPct = clampRatio((currentTimeUs - stage.startUs) / totalUs) * 100
       return {
         ...stage,
         progressPct,
-        active: currentTimeUs >= (stage.startUs as number) && currentTimeUs <= (stage.endUs as number),
+        active: currentTimeUs >= stage.startUs && currentTimeUs <= stage.endUs,
       }
     })
 }

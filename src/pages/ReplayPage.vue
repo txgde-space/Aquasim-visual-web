@@ -1,812 +1,135 @@
-<script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+<script setup lang="ts">
+import { defineAsyncComponent, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import { session } from '../shared/sessionStore'
 import {
-  MAX_LOG_FILES,
-  sanitizeDisplayText,
-  sanitizeFileName,
-  validateImportedFile,
-  validateImportedText,
-} from '../shared/logSafety'
-import {
-  recomputeReceiversFromGeometry,
-} from '../shared/acousticSim'
-import {
-  DEFAULT_SOUND_SPEED_MPS,
   LOCAL_STORAGE_KEYS,
   MIN_SIM_TIME_US,
   SOUND_SPEED_OPTIONS_MPS,
   SPEED_OPTIONS,
 } from '../shared/constants'
-import { LOG_SOURCES } from '../features/replay/lib/sources'
-import {
-  blockedReasonLabel,
-  clampRatio,
-  normalizeTime,
-  timeDisplay,
-} from '../features/replay/lib/format'
-import {
-  resolveMovingNodes,
-} from '../features/replay/lib/logNormalize'
-import {
-  mergeParsedNodeLogs,
-  normalizePacketsFromParsed,
-} from '../features/replay/lib/logMerge'
-import { parseLog } from '../features/replay/lib/logParser'
-import {
-  enforceMinGap,
-  summarizePackets,
-} from '../features/replay/lib/geometry'
-import {
-  buildLifecycleGroups,
-  buildLifecycleStages,
-  buildPacketEntries,
-  receiverPillClass,
-} from '../features/replay/lib/packetEntries'
+import { LOG_SOURCES } from '@/features/replay/lib/sources'
+import { timeDisplay } from '@/features/replay/lib/format'
+import { receiverPillClass } from '@/features/replay/lib/packetEntries'
+import { parseLog } from '@/features/replay/lib/logParser'
+import { usePlaybackEngine } from '@/features/replay/composables/usePlaybackEngine'
+import { useReplayState } from '@/features/replay/composables/useReplayState'
+import { useLogPanel } from '@/features/replay/composables/useLogPanel'
+import { cloneNode, useEditMode } from '@/features/replay/composables/useEditMode'
+import { useLogImport } from '@/features/replay/composables/useLogImport'
 
 const NodeScene3D = defineAsyncComponent(() => import('../components/NodeScene3D.vue'))
-
-const RX_OK_HOLD_US = 180_000
-const RX_FAIL_HOLD_US = 220_000
 
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
   { key: 'extreme', label: '增强' },
 ])
 
-const currentTime = ref(0)
-const initialParsed = parseLog(LOG_SOURCES.default.raw)
-const logFileInput = ref(null)
-const nodeLogFileInput = ref(null)
-const logSourceKey = ref('default')
-const uploadedLogName = ref('')
-const uploadedNodeLogNames = ref([])
-const selectedTheme = ref('research-lab')
-const fxLevel = ref('standard')
-const baseNodesState = ref(enforceMinGap(initialParsed.nodes))
-const nodeMovementRows = ref(initialParsed.movements)
-const sourcePacketRows = ref(normalizePacketsFromParsed(initialParsed, uploadedLogName.value || 'node-log'))
-const simulatedPacketRows = ref(null)
-const parseErrors = ref(initialParsed.parseErrors)
-const metaState = ref(initialParsed.meta)
-const interactionMode = ref('replay')
-const editSoundSpeed = ref(DEFAULT_SOUND_SPEED_MPS)
-const editNodes = ref([])
-const originalEditPoseById = ref(new Map())
-const selectedEditNodeId = ref(null)
-const packetRows = computed(() => (
-  isEditMode.value && simulatedPacketRows.value
-    ? simulatedPacketRows.value
-    : sourcePacketRows.value
-))
-const nodesState = computed(() => (
-  isEditMode.value
-    ? editNodes.value
-    : resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value)
-))
-const isEditMode = computed(() => interactionMode.value === 'edit')
-const isCustomLog = computed(() => logSourceKey.value === 'upload' || logSourceKey.value === 'node-upload')
-const activeLogName = computed(() => {
-  if (logSourceKey.value === 'upload' && uploadedLogName.value) return uploadedLogName.value
-  if (logSourceKey.value === 'node-upload' && uploadedNodeLogNames.value.length) {
-    const names = uploadedNodeLogNames.value
-    if (names.length <= 2) return names.join(' + ')
-    return `${names[0]} + ${names.length - 1} 个节点日志`
-  }
-  return (LOG_SOURCES[logSourceKey.value] || LOG_SOURCES.default).fileName
-})
-const customLogSelectLabel = computed(() => {
-  if (logSourceKey.value === 'upload') return `已导入：${uploadedLogName.value || '自定义日志'}`
-  if (logSourceKey.value === 'node-upload') return `已导入：${activeLogName.value}`
-  return ''
-})
-const originalReceiverMap = computed(() => {
-  const map = new Map()
-  for (const packet of sourcePacketRows.value) {
-    for (const receiver of packet.receivers || []) {
-      map.set(`${packet.eventId}:${receiver.dst}`, receiver)
-    }
-  }
-  return map
-})
-const originalEditPositions = computed(() => [...originalEditPoseById.value.values()])
-const selectedEditNode = computed(() => (
-  editNodes.value.find((node) => node.node_id === selectedEditNodeId.value) || null
-))
-const originalSummary = computed(() => summarizePackets(sourcePacketRows.value))
-const simulatedSummary = computed(() => summarizePackets(packetRows.value))
+let getCycleEndUs = () => MIN_SIM_TIME_US
+const playback = usePlaybackEngine({ getCycleEndUs })
+const state = useReplayState({ playback })
+getCycleEndUs = () => state.cycleEndUs.value
 
-const nodeById = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
-const packetByPacketId = computed(() => {
-  const map = new Map()
-  for (const packet of packetRows.value) {
-    const prev = map.get(packet.packet_id)
-    if (!prev || normalizeTime(packet.tx_start_us) < normalizeTime(prev.tx_start_us)) {
-      map.set(packet.packet_id, packet)
-    }
-  }
-  return map
+const logFileInput = useTemplateRef<HTMLInputElement>('logFileInput')
+const nodeLogFileInput = useTemplateRef<HTMLInputElement>('nodeLogFileInput')
+const globalLogListEl = useTemplateRef<HTMLElement>('globalLogListEl')
+const lifecycleLogListEl = useTemplateRef<HTMLElement>('lifecycleLogListEl')
+
+const panel = useLogPanel({ state, playback, globalLogListEl, lifecycleLogListEl })
+const editMode = useEditMode({
+  state,
+  playback,
+  onEnterEdit: () => {
+    panel.visualMode.value = '2d'
+  },
+})
+const logImport = useLogImport({
+  state,
+  applyParsedLog: (parsed) => state.applyParsedLog(parsed, editMode.exitEditMode),
+  logFileInput,
+  nodeLogFileInput,
 })
 
-const packets = computed(() => {
-  const packetMap = packetByPacketId.value
+const {
+  currentTime,
+  isPlaying,
+  speed,
+  focusedPacketId,
+  rangeProgressStyle,
+  togglePlay,
+  pauseForTool,
+  reset,
+  onJump,
+  onSpeed,
+} = playback
 
-  return packetRows.value
-    .map((packet) => {
-      const receivers = packet.receivers.map((receiver) => {
-        let collisionStartUs = receiver.rx_start_us
-        if (receiver.reason === 'collision_rx_rx' && receiver.with.length) {
-          for (const packetId of receiver.with) {
-            const otherPacket = packetMap.get(packetId)
-            const otherReceiver = otherPacket?.receivers.find((item) => item.dst === receiver.dst)
-            if (!otherReceiver) continue
-            collisionStartUs = Math.max(collisionStartUs, Math.max(receiver.rx_start_us, otherReceiver.rx_start_us))
-          }
-        }
+const {
+  logSourceKey,
+  uploadedLogName,
+  selectedTheme,
+  fxLevel,
+  replayMode,
+  selectedLifecyclePacketId,
+  showAllActivePackets,
+  editSoundSpeed,
+  baseNodesState,
+  nodeMovementRows,
+  parseErrors,
+  cycleEndUs,
+  nodesState,
+  nodeVisuals,
+  displayPackets,
+  isEditMode,
+  isCustomLog,
+  customLogSelectLabel,
+  selectedEditNode,
+  originalEditPositions,
+  selectedEditNodeId,
+  lifecyclePacketOptions,
+  lifecyclePacket,
+  lifecycleStages,
+  activeLifecycleStage,
+  visiblePacketEntries,
+  currentPacketIds,
+  summary,
+  originalSummary,
+} = state
 
-        return {
-          ...receiver,
-          collision_start_us: collisionStartUs,
-        }
-      })
+const {
+  logPanelOpen,
+  visualMode,
+  onReplayModeChange,
+  onLifecyclePacketChange,
+  onKeydown,
+  onLogSelect,
+  onLifecycleStageSelect,
+  onEventTrackPointerDown,
+  onGlobalPointerMove,
+  onGlobalPointerUp,
+} = panel
 
-      return {
-        ...packet,
-        receivers,
-      }
-    })
-    .slice()
-    .sort((a, b) => a.tx_start_us - b.tx_start_us)
-})
+const {
+  openLogFilePicker,
+  openNodeLogFilePicker,
+  onSampleLogChange,
+  onLogFileChange,
+  onNodeLogFilesChange,
+} = logImport
 
-const packetsMaxEndUs = computed(() => packets.value.reduce((maxEnd, packet) => Math.max(maxEnd, packet.timeEnd), 0))
-const movementsMaxEndUs = computed(() => nodeMovementRows.value.reduce((maxEnd, movement) => Math.max(maxEnd, movement.end_us), 0))
-const cycleEndUs = computed(() => Math.max(MIN_SIM_TIME_US, normalizeTime(metaState.value.sim_end_us), packetsMaxEndUs.value, movementsMaxEndUs.value))
-const rangeProgressStyle = computed(() => `${((currentTime.value / Math.max(1, cycleEndUs.value)) * 100).toFixed(2)}%`)
+const {
+  setInteractionMode,
+  onEditNodeMove,
+  onEditNodeMoveEnd,
+  onEditNodeSelect,
+  restoreSelectedEditNode,
+  restoreAllEditNodes,
+  onEditSoundSpeedChange,
+  onEditCoordChange,
+} = editMode
 
-const focusedPacketId = ref(null)
-const replayMode = ref('global')
-const selectedLifecyclePacketId = ref('')
-const isPlaying = ref(false)
-const speed = ref(1)
-const showAllActivePackets = ref(true)
-const visualMode = ref('2d')
-const logPanelOpen = ref(false)
-const activeDragEvent = ref(null)
-const suppressLogClick = ref(null)
-const globalLogListEl = ref(null)
-const lifecycleLogListEl = ref(null)
-let raf = 0
-let lastTs = 0
-const clampTime = (us) => Math.max(0, Math.min(cycleEndUs.value, normalizeTime(us)))
-
-const packetEntries = computed(() => buildPacketEntries(packets.value, {
-  nodeById: nodeById.value,
-  packetMap: packetByPacketId.value,
-  currentTimeUs: currentTime.value,
-  originalReceiverMap: originalReceiverMap.value,
-  packetRows: packetRows.value,
-}))
-
-const lifecycleGroups = computed(() => buildLifecycleGroups(packetEntries.value, currentTime.value))
-
-const visiblePacketEntries = computed(() => packetEntries.value)
-
-const currentPacketIds = computed(() => new Set(
-  packetEntries.value
-    .filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
-    .map((packet) => packet.eventId),
-))
-
-const activePacket = computed(() => {
-  for (let i = packetEntries.value.length - 1; i >= 0; i -= 1) {
-    const packet = packetEntries.value[i]
-    if (currentTime.value >= packet.startUs && currentTime.value <= packet.endUs) {
-      return packet
-    }
-  }
-  return null
-})
-
-const focusedPacket = computed(() => (
-  focusedPacketId.value
-    ? packetEntries.value.find((packet) => packet.eventId === focusedPacketId.value || packet.packet_id === focusedPacketId.value) || null
-    : null
-))
-
-const lifecyclePacketOptions = computed(() => lifecycleGroups.value.map((packet) => ({
-  id: packet.packet_id,
-  label: `${packet.packet_id} · ${packet.sourceLabel} · ${packet.segments.length}段`,
-  startUs: packet.startUs,
-})))
-
-const lifecyclePacket = computed(() => {
-  if (!lifecyclePacketOptions.value.length) return null
-  const targetId = selectedLifecyclePacketId.value || lifecyclePacketOptions.value[0].id
-  return lifecycleGroups.value.find((packet) => packet.packet_id === targetId) || lifecycleGroups.value[0] || null
-})
-
-const lifecycleStages = computed(() => buildLifecycleStages(lifecyclePacket.value, currentTime.value))
-
-const activeLifecycleStage = computed(() => lifecycleStages.value.find((stage) => stage.active) || null)
-const globalActiveEventId = computed(() => activePacket.value?.eventId || null)
-const lifecycleActiveEventId = computed(() => activeLifecycleStage.value?.eventId || null)
-
-const displayPackets = computed(() => {
-  if (isEditMode.value && !isPlaying.value) return []
-  if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
-    return lifecyclePacket.value.segments
-  }
-
-  const activePackets = packetEntries.value.filter((packet) => currentTime.value >= packet.startUs && currentTime.value <= packet.endUs)
-  if (showAllActivePackets.value) return activePackets
-  if (focusedPacket.value) return [focusedPacket.value]
-  return activePacket.value ? [activePacket.value] : []
-})
-
-const summary = computed(() => summarizePackets(packets.value))
-
-const txEventsByNode = computed(() => {
-  const map = new Map()
-  for (const packet of packets.value) {
-    if (!packet.tx_committed) continue
-    const list = map.get(packet.src) || []
-    list.push(packet)
-    map.set(packet.src, list)
-  }
-  return map
-})
-
-const rxEventsByNode = computed(() => {
-  const map = new Map()
-  for (const packet of packets.value) {
-    for (const receiver of packet.receivers) {
-      const list = map.get(receiver.dst) || []
-      list.push({
-        ...receiver,
-        packet_id: packet.packet_id,
-        src: packet.src,
-      })
-      map.set(receiver.dst, list)
-    }
-  }
-  return map
-})
-
-const nodeVisuals = computed(() => {
-  const time = currentTime.value
-
-  return nodesState.value.map((node) => {
-    const txEvents = txEventsByNode.value.get(node.node_id) || []
-    const rxEvents = rxEventsByNode.value.get(node.node_id) || []
-
-    const activeTx = txEvents
-      .filter((packet) => time >= packet.tx_start_us && time <= packet.tx_end_us)
-      .sort((a, b) => a.tx_start_us - b.tx_start_us)
-      .at(-1) || null
-
-    const activeReceivers = rxEvents
-      .filter((receiver) => time >= receiver.rx_start_us && time <= receiver.rx_end_us)
-      .sort((a, b) => a.rx_start_us - b.rx_start_us)
-
-    const activeRxTxConflict = activeReceivers
-      .filter((receiver) => receiver.reason === 'collision_rx_tx')
-      .at(-1) || null
-
-    const activeRxRxConflict = activeReceivers
-      .filter((receiver) => receiver.reason === 'collision_rx_rx' && time >= receiver.collision_start_us)
-      .at(-1) || null
-
-    const preCollisionReceive = activeReceivers
-      .filter((receiver) => receiver.reason === 'collision_rx_rx' && time < receiver.collision_start_us)
-      .at(-1) || null
-
-    const activeReceive = activeReceivers
-      .filter((receiver) => receiver.status === 'ok')
-      .at(-1) || null
-
-    const recentSuccess = rxEvents
-      .filter((receiver) => receiver.status === 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_OK_HOLD_US)
-      .sort((a, b) => a.rx_end_us - b.rx_end_us)
-      .at(-1) || null
-
-    const recentFailure = rxEvents
-      .filter((receiver) => receiver.status !== 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_FAIL_HOLD_US)
-      .sort((a, b) => a.rx_end_us - b.rx_end_us)
-      .at(-1) || null
-
-    if (activeTx) {
-      const txProgress = clampRatio((time - activeTx.tx_start_us) / Math.max(activeTx.tx_duration_us, 1))
-      return {
-        ...node,
-        mode: 'tx',
-        fillProgress: txProgress,
-        fade: 1,
-        statusText: activeRxTxConflict ? '发送中 / rx-tx 冲突' : '发送中',
-        packetId: activeTx.packet_id,
-        overlay: activeRxTxConflict
-          ? {
-            kind: 'collision_rx_tx',
-            strength: 1,
-            packetId: activeRxTxConflict.packet_id,
-          }
-          : null,
-      }
-    }
-
-    if (activeRxRxConflict) {
-      return {
-        ...node,
-        mode: 'collision',
-        fillProgress: 1,
-        fade: 1,
-        statusText: '接收冲突',
-        packetId: activeRxRxConflict.packet_id,
-        overlay: {
-          kind: 'collision_rx_rx',
-          strength: 1,
-          packetId: activeRxRxConflict.packet_id,
-        },
-      }
-    }
-
-    if (activeReceive) {
-      return {
-        ...node,
-        mode: 'rx',
-        fillProgress: clampRatio((time - activeReceive.rx_start_us) / Math.max(activeReceive.rx_duration_us, 1)),
-        fade: 1,
-        statusText: '接收中',
-        packetId: activeReceive.packet_id,
-        overlay: null,
-      }
-    }
-
-    if (preCollisionReceive) {
-      return {
-        ...node,
-        mode: 'rx',
-        fillProgress: clampRatio((time - preCollisionReceive.rx_start_us) / Math.max(preCollisionReceive.rx_duration_us, 1)),
-        fade: 1,
-        statusText: '接收中',
-        packetId: preCollisionReceive.packet_id,
-        overlay: null,
-      }
-    }
-
-    if (recentFailure) {
-      return {
-        ...node,
-        mode: 'collision-linger',
-        fillProgress: 1,
-        fade: clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US)),
-        statusText: reasonLabel(recentFailure.reason),
-        packetId: recentFailure.packet_id,
-        overlay: {
-          kind: recentFailure.reason,
-          strength: clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US)),
-          packetId: recentFailure.packet_id,
-        },
-      }
-    }
-
-    if (recentSuccess) {
-      return {
-        ...node,
-        mode: 'rx-done',
-        fillProgress: 1,
-        fade: clampRatio(1 - ((time - recentSuccess.rx_end_us) / RX_OK_HOLD_US)),
-        statusText: '接收成功',
-        packetId: recentSuccess.packet_id,
-        overlay: null,
-      }
-    }
-
-    return {
-      ...node,
-      mode: 'idle',
-      fillProgress: 0,
-      fade: 1,
-      statusText: '空闲',
-      packetId: null,
-      overlay: null,
-    }
-  })
-})
-
-const togglePlay = () => {
-  if (!isPlaying.value && currentTime.value >= cycleEndUs.value) {
-    currentTime.value = 0
-    focusedPacketId.value = null
-  }
-  if (!isPlaying.value) lastTs = 0
-  isPlaying.value = !isPlaying.value
+const onFxLevelChange = (event: Event) => {
+  fxLevel.value = (event.target as HTMLSelectElement).value
 }
-
-const pauseForTool = () => {
-  isPlaying.value = false
-  lastTs = 0
-}
-
-const seekTime = (us) => {
-  currentTime.value = clampTime(us)
-  lastTs = 0
-}
-
-const reset = () => {
-  isPlaying.value = false
-  focusedPacketId.value = null
-  currentTime.value = 0
-  lastTs = 0
-}
-
-const onJump = (event) => {
-  const next = Number(event.target.value)
-  if (Number.isFinite(next)) seekTime(next)
-}
-
-const onSpeed = (event) => {
-  speed.value = Number(event.target.value)
-}
-
-const applyParsedLog = (parsed) => {
-  exitEditMode()
-  baseNodesState.value = enforceMinGap(parsed.nodes)
-  nodeMovementRows.value = parsed.movements
-  sourcePacketRows.value = normalizePacketsFromParsed(parsed, uploadedLogName.value || 'node-log')
-  parseErrors.value = parsed.parseErrors
-  metaState.value = parsed.meta
-
-  focusedPacketId.value = null
-  selectedLifecyclePacketId.value = ''
-  currentTime.value = 0
-  isPlaying.value = false
-  lastTs = 0
-}
-
-const cloneNode = (node) => ({
-  ...node,
-  x: Number(node.x) || 0,
-  y: Number(node.y) || 0,
-  z: Number(node.z) || 0,
-})
-
-const refreshSimulatedPackets = () => {
-  if (!isEditMode.value) return
-  simulatedPacketRows.value = recomputeReceiversFromGeometry(
-    sourcePacketRows.value,
-    editNodes.value,
-    editSoundSpeed.value,
-  )
-}
-
-const snapshotReplayNodes = () => {
-  const snapshot = resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, currentTime.value).map(cloneNode)
-  originalEditPoseById.value = new Map(snapshot.map((node) => [node.node_id, cloneNode(node)]))
-  editNodes.value = snapshot.map(cloneNode)
-  selectedEditNodeId.value = snapshot[0]?.node_id ?? null
-}
-
-const enterEditMode = () => {
-  snapshotReplayNodes()
-  interactionMode.value = 'edit'
-  isPlaying.value = false
-  lastTs = 0
-  focusedPacketId.value = null
-  currentTime.value = 0
-  visualMode.value = '2d'
-  refreshSimulatedPackets()
-}
-
-const exitEditMode = () => {
-  interactionMode.value = 'replay'
-  simulatedPacketRows.value = null
-  editNodes.value = []
-  originalEditPoseById.value = new Map()
-  selectedEditNodeId.value = null
-  isPlaying.value = false
-  lastTs = 0
-  focusedPacketId.value = null
-  currentTime.value = 0
-}
-
-const setInteractionMode = (mode) => {
-  if (mode === interactionMode.value) return
-  if (mode === 'edit') enterEditMode()
-  else exitEditMode()
-}
-
-const onEditNodeMove = (payload) => {
-  if (!payload || !Number.isFinite(Number(payload.node_id))) return
-  pauseForTool()
-  editNodes.value = editNodes.value.map((node) => (
-    node.node_id === payload.node_id
-      ? { ...node, x: Math.round((Number(payload.x) || 0) * 100) / 100, y: Math.round((Number(payload.y) || 0) * 100) / 100 }
-      : node
-  ))
-}
-
-const onEditNodeMoveEnd = () => {
-  refreshSimulatedPackets()
-}
-
-const onEditNodeSelect = (node) => {
-  if (!node) return
-  selectedEditNodeId.value = node.node_id
-}
-
-const restoreSelectedEditNode = () => {
-  const original = originalEditPoseById.value.get(selectedEditNodeId.value)
-  if (!original) return
-  editNodes.value = editNodes.value.map((node) => (
-    node.node_id === original.node_id ? cloneNode(original) : node
-  ))
-  refreshSimulatedPackets()
-}
-
-const restoreAllEditNodes = () => {
-  editNodes.value = [...originalEditPoseById.value.values()].map(cloneNode)
-  refreshSimulatedPackets()
-}
-
-const onEditSoundSpeedChange = (event) => {
-  const next = Number(event.target.value)
-  if (!Number.isFinite(next) || next <= 0) return
-  editSoundSpeed.value = Math.max(200, Math.min(2500, next))
-  refreshSimulatedPackets()
-}
-
-const onEditCoordChange = (axis, event) => {
-  const node = selectedEditNode.value
-  if (!node) return
-  const next = Number(event.target.value)
-  if (!Number.isFinite(next)) return
-  editNodes.value = editNodes.value.map((item) => (
-    item.node_id === node.node_id ? { ...item, [axis]: Math.round(next * 100) / 100 } : item
-  ))
-  refreshSimulatedPackets()
-}
-
-const loadSampleLog = (key) => {
-  const source = LOG_SOURCES[key] || LOG_SOURCES.default
-  logSourceKey.value = LOG_SOURCES[key] ? key : 'default'
-  applyParsedLog(parseLog(source.raw))
-}
-
-const onSampleLogChange = (event) => {
-  const key = event.target.value
-  if (!LOG_SOURCES[key]) return
-  loadSampleLog(key)
-}
-
-const openLogFilePicker = () => {
-  logFileInput.value?.click()
-}
-
-const openNodeLogFilePicker = () => {
-  nodeLogFileInput.value?.click()
-}
-
-const rejectImportedLog = (message) => {
-  parseErrors.value = [sanitizeDisplayText(message, 120)]
-}
-
-const importLogFile = async (file) => {
-  const fileCheck = validateImportedFile(file)
-  if (!fileCheck.ok) return { ok: false, error: fileCheck.error }
-  const text = await file.text()
-  const textCheck = validateImportedText(text)
-  if (!textCheck.ok) return { ok: false, error: textCheck.error }
-  return { ok: true, text, name: sanitizeFileName(file.name) }
-}
-
-const onLogFileChange = async (event) => {
-  const file = event.target?.files?.[0]
-  if (event.target) event.target.value = ''
-  if (!file) return
-
-  const imported = await importLogFile(file)
-  if (!imported.ok) {
-    rejectImportedLog(imported.error)
-    return
-  }
-
-  uploadedLogName.value = imported.name
-  logSourceKey.value = 'upload'
-  applyParsedLog(parseLog(imported.text))
-}
-
-const onNodeLogFilesChange = async (event) => {
-  const files = [...(event.target?.files || [])].slice(0, MAX_LOG_FILES)
-  if (event.target) event.target.value = ''
-  if (!files.length) return
-
-  const parsedLogs = []
-  const fileNames = []
-  for (const file of files) {
-    const imported = await importLogFile(file)
-    if (!imported.ok) {
-      rejectImportedLog(imported.error)
-      return
-    }
-    parsedLogs.push(parseLog(imported.text))
-    fileNames.push(imported.name)
-  }
-
-  const mergedParsed = mergeParsedNodeLogs(parsedLogs, fileNames)
-  uploadedNodeLogNames.value = fileNames
-  logSourceKey.value = 'node-upload'
-  applyParsedLog(mergedParsed)
-}
-
-const onFxLevelChange = (event) => {
-  fxLevel.value = event.target.value
-}
-
-const onReplayModeChange = (event) => {
-  replayMode.value = event.target.value
-  if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
-    focusedPacketId.value = lifecyclePacket.value.packet_id
-    seekTime(lifecyclePacket.value.startUs)
-  }
-}
-
-const onLifecyclePacketChange = (event) => {
-  selectedLifecyclePacketId.value = event.target.value
-  if (lifecyclePacket.value) {
-    focusedPacketId.value = lifecyclePacket.value.packet_id
-    seekTime(lifecyclePacket.value.startUs)
-  }
-}
-
-const onKeydown = (event) => {
-  if (event.code !== 'Space' || (event.target && /^(INPUT|TEXTAREA|SELECT|BUTTON|OPTION)$/i.test(event.target.tagName))) {
-    return
-  }
-  event.preventDefault()
-  togglePlay()
-}
-
-const onLogSelect = (packet) => {
-  if (suppressLogClick.value === packet.eventId) {
-    suppressLogClick.value = null
-    return
-  }
-
-  if (activeDragEvent.value && activeDragEvent.value.eventId === packet.eventId) {
-    return
-  }
-
-  focusedPacketId.value = packet.eventId
-  seekTime(packet.tx_start_us)
-}
-
-const onLifecycleStageSelect = (stage) => {
-  if (!stage) return
-  seekTime(stage.startUs)
-}
-
-const onEventTrackPointerDown = (packet, event) => {
-  event.preventDefault()
-  event.stopPropagation()
-  event.stopImmediatePropagation()
-
-  focusedPacketId.value = packet.eventId
-
-  const startUs = Number(packet.startUs)
-  const durationUs = Math.max(1, Number(packet.endUs - packet.startUs))
-  const rect = event.currentTarget.getBoundingClientRect()
-  const ratio = clampRatio((event.clientX - rect.left) / Math.max(rect.width, 1))
-  seekTime(startUs + (durationUs * ratio))
-
-  activeDragEvent.value = {
-    eventId: packet.eventId,
-    minUs: startUs,
-    maxUs: startUs + durationUs,
-    left: rect.left,
-    width: Math.max(rect.width, 1),
-  }
-  suppressLogClick.value = packet.eventId
-}
-
-const onGlobalPointerMove = (event) => {
-  if (!activeDragEvent.value) return
-
-  const durationUs = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
-  const ratio = clampRatio((event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width)
-  seekTime(activeDragEvent.value.minUs + (durationUs * ratio))
-}
-
-const onGlobalPointerUp = () => {
-  if (activeDragEvent.value) {
-    const eventId = activeDragEvent.value.eventId
-    requestAnimationFrame(() => {
-      if (suppressLogClick.value === eventId) suppressLogClick.value = null
-    })
-  }
-  activeDragEvent.value = null
-}
-
-const scrollLogItemIntoView = (listEl, eventId) => {
-  if (!listEl || !eventId) return
-  const target = [...listEl.querySelectorAll('.log-item')].find((item) => item.dataset.eventId === eventId)
-  if (!target) return
-
-  const listRect = listEl.getBoundingClientRect()
-  const targetRect = target.getBoundingClientRect()
-  const outOfViewTop = targetRect.top < listRect.top
-  const outOfViewBottom = targetRect.bottom > listRect.bottom
-  if (!outOfViewTop && !outOfViewBottom) return
-
-  target.scrollIntoView({
-    block: 'nearest',
-    inline: 'nearest',
-    behavior: isPlaying.value ? 'smooth' : 'auto',
-  })
-}
-
-const tick = (timestamp) => {
-  if (!isPlaying.value) {
-    lastTs = 0
-    return
-  }
-
-  if (!lastTs) lastTs = timestamp
-  const diff = timestamp - lastTs
-  lastTs = timestamp
-
-  const next = currentTime.value + (diff * 1000 * speed.value)
-  if (next >= cycleEndUs.value) {
-    currentTime.value = cycleEndUs.value
-    isPlaying.value = false
-    return
-  }
-
-  currentTime.value = next
-  raf = requestAnimationFrame(tick)
-}
-
-watch(isPlaying, (next) => {
-  if (!next) {
-    if (raf) cancelAnimationFrame(raf)
-    lastTs = 0
-    return
-  }
-  raf = requestAnimationFrame(tick)
-})
-
-watch(fxLevel, (next) => {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.fxLevel, next)
-  } catch {
-    // ignore persistence errors
-  }
-})
-
-watch([replayMode, globalActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-  if (mode !== 'global' || !eventId) return
-  if (mode === prevMode && eventId === prevEventId) return
-  await nextTick()
-  scrollLogItemIntoView(globalLogListEl.value, eventId)
-})
-
-watch([replayMode, lifecycleActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-  if (mode !== 'lifecycle' || !eventId) return
-  if (mode === prevMode && eventId === prevEventId) return
-  await nextTick()
-  scrollLogItemIntoView(lifecycleLogListEl.value, eventId)
-})
-
-watch(lifecyclePacketOptions, (options) => {
-  if (!options.length) {
-    selectedLifecyclePacketId.value = ''
-    return
-  }
-  if (!options.some((option) => option.id === selectedLifecyclePacketId.value)) {
-    selectedLifecyclePacketId.value = options[0].id
-  }
-}, { immediate: true })
 
 watch(nodesState, (nodes) => {
   if (isEditMode.value) return
@@ -817,7 +140,7 @@ onMounted(() => {
   if (typeof session.pendingReplayLog === 'string' && session.pendingReplayLog.length) {
     logSourceKey.value = 'upload'
     uploadedLogName.value = session.pendingReplayName || 'ns3.log'
-    applyParsedLog(parseLog(session.pendingReplayLog))
+    state.applyParsedLog(parseLog(session.pendingReplayLog), editMode.exitEditMode)
     session.pendingReplayLog = null
     session.pendingReplayName = ''
   }
@@ -843,7 +166,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (raf) cancelAnimationFrame(raf)
+  playback.dispose()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('pointermove', onGlobalPointerMove)
   window.removeEventListener('pointerup', onGlobalPointerUp)
@@ -885,7 +208,7 @@ onBeforeUnmount(() => {
             :fx-level="fxLevel"
             :edit-mode="isEditMode"
             :original-positions="originalEditPositions"
-            :selected-node-id="selectedEditNodeId"
+            :selected-node-id="selectedEditNodeId ?? undefined"
             :sound-speed-mps="editSoundSpeed"
             @pause-request="pauseForTool"
             @node-move="onEditNodeMove"
@@ -1010,7 +333,7 @@ onBeforeUnmount(() => {
                   </label>
                   <label class="field field-compact">
                     <div class="field-head"><span>Z (m)</span></div>
-                    <input class="select" type="number" step="0.01" :value="selectedEditNode.z.toFixed(2)" @change="onEditCoordChange('z', $event)" />
+                    <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="onEditCoordChange('z', $event)" />
                   </label>
                 </div>
                 <div class="control-btn-row coord-actions">

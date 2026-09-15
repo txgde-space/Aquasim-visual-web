@@ -70,3 +70,68 @@ export interface NodeVisual {
   statusText: string
   packetId: string | null
 }
+
+export type PacketTone = 'ok' | 'rxtx' | 'rxrx' | 'fail'
+
+/** Receiver row enriched for display in the log list. */
+export interface DisplayReceiver extends ReplayReceiver {
+  dstLabel: string
+  reasonLabel: string
+  tone: PacketTone
+  originalChanged: boolean
+  originalReasonLabel: string | null
+}
+
+/** Packet row enriched for display in the global log list. */
+export interface PacketEntry extends ReplayPacket {
+  sourceLabel: string
+  receivers: DisplayReceiver[]
+  okCount: number
+  failCount: number
+  rxrxCount: number
+  rxtxCount: number
+  packetKind: string
+  packetKindLabel: string
+  packetKindClass: string
+  packetDurationLabel: string
+  prettyTime: string
+  progressPct: number
+  blockedReasonText: string | null
+  outcomeSummary: string
+  startUs: number
+  endUs: number
+  timingWarn: boolean
+}
+
+/** Packet lifecycle aggregate shown in lifecycle replay mode. */
+export interface LifecycleGroup {
+  packet_id: string
+  sourceLabel: string
+  startUs: number
+  endUs: number
+  segments: PacketEntry[]
+  blockedCount: number
+  okCount: number
+  failCount: number
+  rxrxCount: number
+  rxtxCount: number
+  packetKind: string
+  packetKindLabel: string
+  packetKindClass: string
+  packetDurationLabel: string
+  prettyTime: string
+  progressPct: number
+}
+
+/** One tx/rx stage of a lifecycle group. */
+export interface LifecycleStage {
+  eventId: string
+  type: string
+  status: string
+  title: string
+  detail: string
+  startUs: number
+  endUs: number
+  progressPct: number
+  active: boolean
+}

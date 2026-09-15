@@ -23,7 +23,6 @@ const copyHint = ref('')
 const activeCatalogId = ref('mac:swarm')
 const inspectOpen = ref(true)
 const consoleOpen = ref(false)
-const stackOpen = ref(false)
 const runStatus = ref('idle')
 const runLog = ref('')
 
@@ -312,11 +311,10 @@ const copyJson = async () => {
           <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
           <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除</button>
           <button class="btn btn-compact" @click="inspectOpen = !inspectOpen">{{ inspectOpen ? '收起属性' : '属性' }}</button>
-          <button class="wb-stack-brief" type="button" @click="stackOpen = !stackOpen">{{ stackBrief }}</button>
+          <span class="wb-stack-brief">{{ stackBrief }}</span>
         </div>
         <div class="wb-chrome-right">
           <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
-          <span class="wb-run-hint">运行时生成 scratch/aqua-visual.cc 并执行 ./ns3 run aqua-visual</span>
           <button class="wb-run" data-testid="exp-run" :disabled="runStatus === 'running'" @click="runExperiment">
             {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
           </button>
@@ -346,22 +344,6 @@ const copyJson = async () => {
           @selection-change="onSelectionChange"
           @protocol-drop="onProtocolDrop"
         />
-        <aside v-if="stackOpen" class="wb-hud">
-          <div class="stack-board">
-            <div class="stack-board-title">
-              协议架构
-              <button class="btn btn-compact" type="button" @click="stackOpen = false">关闭</button>
-            </div>
-            <ol class="stack-list">
-              <li v-for="row in protocolStack" :key="row.key" class="stack-row">
-                <span class="stack-layer">{{ row.layer }}</span>
-                <span class="stack-name">{{ row.name }}</span>
-                <span class="stack-tid">{{ row.typeId }}</span>
-                <span v-if="row.source" class="stack-src">{{ row.source }}</span>
-              </li>
-            </ol>
-          </div>
-        </aside>
       </div>
 
       <footer v-if="consoleOpen && runLog" class="wb-console">
@@ -374,6 +356,17 @@ const copyJson = async () => {
     </div>
 
     <aside v-show="inspectOpen" class="wb-inspect">
+      <div class="stack-board">
+        <div class="stack-board-title">协议架构</div>
+        <ol class="stack-list">
+          <li v-for="row in protocolStack" :key="row.key" class="stack-row">
+            <span class="stack-layer">{{ row.layer }}</span>
+            <span class="stack-name">{{ row.name }}</span>
+            <span class="stack-tid">{{ row.typeId }}</span>
+            <span v-if="row.source" class="stack-src">{{ row.source }}</span>
+          </li>
+        </ol>
+      </div>
       <div class="wb-inspect-head">
         <span>{{ selectedSummary }}</span>
       </div>

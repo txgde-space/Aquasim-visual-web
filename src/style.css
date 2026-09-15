@@ -340,22 +340,11 @@ body {
 
 .wb-stack-brief {
   max-width: 280px;
-  height: 30px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 0 0.65rem;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
   color: var(--muted);
-  font: inherit;
   font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.wb-stack-brief:hover {
-  color: var(--text);
 }
 
 .wb-inspect {
