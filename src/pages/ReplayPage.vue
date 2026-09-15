@@ -671,11 +671,6 @@ const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
   { key: 'extreme', label: '增强' },
 ])
-const UNDERWATER_DETAIL_OPTIONS = Object.freeze([
-  { key: 'low', label: '简略' },
-  { key: 'standard', label: '标准' },
-  { key: 'cinematic', label: '精细' },
-])
 
 const normalizePacketsFromParsed = (parsed) => (
   (
@@ -697,7 +692,6 @@ const uploadedLogName = ref('')
 const uploadedNodeLogNames = ref([])
 const selectedTheme = ref('research-lab')
 const fxLevel = ref('standard')
-const underwaterDetail = ref('standard')
 const baseNodesState = ref(enforceMinGap(initialParsed.nodes))
 const nodeMovementRows = ref(initialParsed.movements)
 const sourcePacketRows = ref(normalizePacketsFromParsed(initialParsed))
@@ -1267,9 +1261,6 @@ const reset = () => {
   lastTs = 0
 }
 
-const ensureBgm = () => {}
-const toggleMute = () => {}
-
 const onJump = (event) => {
   const next = Number(event.target.value)
   if (Number.isFinite(next)) seekTime(next)
@@ -1473,10 +1464,6 @@ const onFxLevelChange = (event) => {
   fxLevel.value = event.target.value
 }
 
-const onUnderwaterDetailChange = (event) => {
-  underwaterDetail.value = event.target.value
-}
-
 const onReplayModeChange = (event) => {
   replayMode.value = event.target.value
   if (replayMode.value === 'lifecycle' && lifecyclePacket.value) {
@@ -1617,14 +1604,6 @@ watch(fxLevel, (next) => {
   }
 })
 
-watch(underwaterDetail, (next) => {
-  try {
-    localStorage.setItem('aquasim_underwater_detail', next)
-  } catch {
-    // ignore persistence errors
-  }
-})
-
 watch([replayMode, globalActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
   if (mode !== 'global' || !eventId) return
   if (mode === prevMode && eventId === prevEventId) return
@@ -1672,10 +1651,6 @@ onMounted(() => {
     const savedFx = localStorage.getItem('aquasim_fx_level')
     if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
       fxLevel.value = savedFx
-    }
-    const savedUnderwaterDetail = localStorage.getItem('aquasim_underwater_detail')
-    if (savedUnderwaterDetail && UNDERWATER_DETAIL_OPTIONS.some((item) => item.key === savedUnderwaterDetail)) {
-      underwaterDetail.value = savedUnderwaterDetail
     }
   } catch {
     // ignore persistence errors
@@ -1728,7 +1703,6 @@ onBeforeUnmount(() => {
             :current-time="currentTime"
             :theme-key="selectedTheme"
             :fx-level="fxLevel"
-            :underwater-detail="underwaterDetail"
             :edit-mode="isEditMode"
             :original-positions="originalEditPositions"
             :selected-node-id="selectedEditNodeId"
@@ -1846,18 +1820,6 @@ onBeforeUnmount(() => {
                 <select class="select" :value="fxLevel" @change="onFxLevelChange">
                   <option
                     v-for="item in FX_LEVEL_OPTIONS"
-                    :key="item.key"
-                    :value="item.key"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select>
-              </label>
-              <label class="field field-compact" :class="{ 'field-hidden': fxLevel === 'standard' }">
-                <div class="field-head"><span>环境细节</span></div>
-                <select class="select" :value="underwaterDetail" @change="onUnderwaterDetailChange">
-                  <option
-                    v-for="item in UNDERWATER_DETAIL_OPTIONS"
                     :key="item.key"
                     :value="item.key"
                   >

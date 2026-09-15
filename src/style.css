@@ -306,6 +306,15 @@ body {
   cursor: wait;
 }
 
+.wb-run-hint {
+  font-size: 0.68rem;
+  color: rgba(148, 163, 184, 0.85);
+  max-width: 26rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wb-canvas {
   position: relative;
   min-height: 0;
@@ -1114,11 +1123,6 @@ body {
   font: 0.72rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.experiment-argv {
-  min-height: 5.5rem;
-  color: #bae6fd;
-}
-
 .protocol-palette {
   display: flex;
   flex-wrap: wrap;
@@ -1317,10 +1321,6 @@ body {
 
 .field-span-2 {
   grid-column: 1 / -1;
-}
-
-.field-hidden {
-  display: none;
 }
 
 .field-compact .select {

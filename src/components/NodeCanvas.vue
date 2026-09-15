@@ -130,8 +130,6 @@ const props = defineProps({
   currentTime: { type: Number, required: true },
   themeKey: { type: String, default: 'ocean-sonar' },
   fxLevel: { type: String, default: 'standard' },
-  underwaterDetail: { type: String, default: 'standard' },
-  isMuted: { type: Boolean, default: false },
   editMode: { type: Boolean, default: false },
   allowPlaceNode: { type: Boolean, default: false },
   boxSelect: { type: Boolean, default: false },
@@ -286,37 +284,6 @@ const fxIntensity = computed(() => {
   if (props.fxLevel === 'extreme') return 2.2
   return 1
 })
-const isCrazyFx = computed(() => false)
-const underwaterDetailProfile = computed(() => {
-  if (props.underwaterDetail === 'low') {
-    return {
-      flowLines: 4,
-      reefCount: 4,
-      fishSchools: 2,
-      fishBaseCount: 6,
-      bubbleCount: 20,
-      hazeLayers: 2,
-    }
-  }
-  if (props.underwaterDetail === 'cinematic') {
-    return {
-      flowLines: 9,
-      reefCount: 10,
-      fishSchools: 6,
-      fishBaseCount: 11,
-      bubbleCount: 68,
-      hazeLayers: 4,
-    }
-  }
-  return {
-    flowLines: 6,
-    reefCount: 7,
-    fishSchools: 4,
-    fishBaseCount: 9,
-    bubbleCount: 42,
-    hazeLayers: 3,
-  }
-})
 const canvasEl = ref(null)
 const containerEl = ref(null)
 const displayWidth = ref(900)
@@ -327,7 +294,6 @@ const panStart = ref({ x: 0, y: 0 })
 const panOffsetStart = ref({ x: 0, y: 0 })
 const zoom = ref(1)
 const hasDragged = ref(false)
-const selectedNode = ref(null)
 const hoveredNodeId = ref(null)
 const hoverCursor = ref({ x: 0, y: 0 })
 const hoveredMeasureNode = ref(null)
@@ -356,7 +322,6 @@ const nodeRadius = computed(() => {
 const emit = defineEmits([
   'node-select',
   'pause-request',
-  'toggle-mute',
   'node-move',
   'node-move-end',
   'node-place',
@@ -423,17 +388,6 @@ const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => 
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const originalPoseById = computed(() => new Map((props.originalPositions || []).map((item) => [item.node_id, item])))
 
-const toolbarHelp = computed(() => {
-  if (toolMode.value === TOOL_MODES.MEASURE) {
-    return pendingMeasurePoint.value ? '点击第二点' : '先点起点'
-  }
-  if (toolMode.value === TOOL_MODES.PLACE) {
-    return '点击空白处放置节点 · 点到节点可拖动'
-  }
-  if (props.editMode) return '拖动节点改坐标 · 空白处平移'
-  return '当前为拖拽模式'
-})
-
 const selectedIdSet = computed(() => new Set((props.selectedNodeIds || []).map((id) => Number(id))))
 
 const canvasCursorClass = computed(() => {
@@ -490,16 +444,6 @@ const pickNodeAt = (sx, sy) => {
 
   return picked
 }
-
-const selectedNodePos = computed(() => {
-  if (!selectedNode.value) return null
-  return toScreen(selectedNode.value.x, selectedNode.value.y)
-})
-
-const selectedNodeVisual = computed(() => {
-  if (!selectedNode.value) return null
-  return nodeVisualById.value.get(selectedNode.value.node_id) || null
-})
 
 const hoveredNode = computed(() => {
   if (!hoveredNodeId.value) return null
@@ -976,7 +920,7 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
   const segEndX = src.x + (dx * endRatio)
   const segEndY = src.y + (dy * endRatio)
   const pulse = 0.7 + (Math.sin((phase * (8 + fx)) + (packet.tx_start_us * 0.000001)) * 0.3)
-  const halfWidth = (2.6 + (pulse * 1.6)) * (fx > 1 ? (isCrazyFx.value ? 1.84 : 1.26) : 1)
+  const halfWidth = (2.6 + (pulse * 1.6)) * (fx > 1 ? 1.26 : 1)
   const color = packetSegmentColor(packet, receiver, now, profile)
   const angle = Math.atan2(dy, dx)
 
@@ -1016,21 +960,21 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
   const headRatio = Math.max(0, Math.min(1, frontRatio))
   const headX = src.x + (dx * headRatio)
   const headY = src.y + (dy * headRatio)
-  fillCircle(ctx, headX, headY, (1.5 + (pulse * 1.8)) * (fx > 1 ? (isCrazyFx.value ? 2.05 : 1.6) : 1), color, fx > 1 ? 0.95 : 0.85)
+  fillCircle(ctx, headX, headY, (1.5 + (pulse * 1.8)) * (fx > 1 ? 1.6 : 1), color, fx > 1 ? 0.95 : 0.85)
 
   if (fx > 1) {
-    const trailCount = isCrazyFx.value ? 6 : 3
+    const trailCount = 3
     for (let i = 1; i <= trailCount; i += 1) {
-      const t = Math.max(0, headRatio - (i * (isCrazyFx.value ? 0.036 : 0.05)))
+      const t = Math.max(0, headRatio - (i * 0.05))
       const tx = src.x + (dx * t)
       const ty = src.y + (dy * t)
       fillCircle(
         ctx,
         tx,
         ty,
-        Math.max(1.2, (isCrazyFx.value ? 3.8 : 2.8) - (i * (isCrazyFx.value ? 0.45 : 0.65))),
+        Math.max(1.2, 2.8 - (i * 0.65)),
         color,
-        (isCrazyFx.value ? 0.46 : 0.3) - (i * (isCrazyFx.value ? 0.052 : 0.07)),
+        0.3 - (i * 0.07),
       )
     }
 
@@ -1040,19 +984,9 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
       headY,
       angle,
       color,
-      (isCrazyFx.value ? 8.4 : 5.5) + (pulse * (isCrazyFx.value ? 2.7 : 1.6)),
-      isCrazyFx.value ? 1.14 : 0.92,
+      5.5 + (pulse * 1.6),
+      0.92,
     )
-
-    if (isCrazyFx.value) {
-      ctx.save()
-      ctx.globalCompositeOperation = 'screen'
-      for (let i = 0; i < 3; i += 1) {
-        const rr = 8 + (i * 6) + (((phase * (22 + (i * 3))) + (packet.tx_start_us * 0.0000005)) % 9)
-        strokeCircle(ctx, headX, headY, rr, color, 1.1 - (i * 0.18), 0.42 - (i * 0.1))
-      }
-      ctx.restore()
-    }
 
     if (receiver.status !== 'ok') {
       const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
@@ -1063,10 +997,6 @@ const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
         fillCircle(ctx, shellX, shellY, 3.6, '#fb923c', 0.92)
         fillCircle(ctx, shellX - (ux * 8), shellY - (uy * 8), 2.2, '#fdba74', 0.5)
         drawShellBurst(ctx, dst.x, dst.y, '#ef4444', phase + impactRatio, 1.05)
-        if (isCrazyFx.value) {
-          drawShellBurst(ctx, dst.x, dst.y, '#f97316', phase + impactRatio + 0.16, 1.55)
-          drawShellBurst(ctx, dst.x, dst.y, '#fb7185', phase + impactRatio + 0.31, 1.95)
-        }
       }
     }
   }
@@ -1137,24 +1067,6 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
     if (isSink) drawCarrierNode(ctx, p, baseColor, strokeColor, profile, phase)
     else drawSubmarineNode(ctx, p, baseColor, strokeColor, profile, pulse)
     ctx.restore()
-
-    if (isCrazyFx.value) {
-      ctx.save()
-      ctx.setLineDash([4, 5])
-      ctx.lineDashOffset = -((phase * 26) + (node.node_id * 6))
-      const haloColor = colorMix(baseColor, '#ffffff', 0.4)
-      strokeCircle(ctx, p.x, p.y, r + 16 + (pulse * 8), haloColor, 1.1, 0.44)
-      strokeCircle(ctx, p.x, p.y, r + 26 + (pulse * 11), haloColor, 0.9, 0.28)
-      ctx.setLineDash([])
-      for (let i = 0; i < 3; i += 1) {
-        const theta = (phase * (1.6 + (i * 0.3))) + (node.node_id * 0.45) + (i * ((Math.PI * 2) / 3))
-        const orbitR = r + 14 + (i * 7)
-        const ox = p.x + (Math.cos(theta) * orbitR)
-        const oy = p.y + (Math.sin(theta) * orbitR * 0.66)
-        fillCircle(ctx, ox, oy, 2.2 + (i * 0.35), haloColor, 0.62 - (i * 0.12))
-      }
-      ctx.restore()
-    }
   }
 
   ctx.save()
@@ -1266,465 +1178,6 @@ const drawMeasurementLines = (ctx) => {
   }
 }
 
-const hashNoise = (seed) => {
-  const x = Math.sin(seed * 12.9898) * 43758.5453
-  return x - Math.floor(x)
-}
-
-const drawUnderwaterBackdrop = (ctx, w, h, profile, phase, detail, crazy) => {
-  ctx.save()
-
-  const seabedTop = h * 0.78
-  const seabedGradient = ctx.createLinearGradient(0, seabedTop, 0, h)
-  seabedGradient.addColorStop(0, 'rgba(10, 39, 57, 0.42)')
-  seabedGradient.addColorStop(1, 'rgba(10, 22, 35, 0.84)')
-  ctx.fillStyle = seabedGradient
-  ctx.fillRect(0, seabedTop, w, h - seabedTop)
-
-  ctx.strokeStyle = 'rgba(120, 210, 255, 0.14)'
-  ctx.lineWidth = 1.1
-  const flowLines = crazy ? detail.flowLines + 4 : detail.flowLines
-  for (let r = 0; r < flowLines; r += 1) {
-    const yBase = (h * 0.16) + (r * h * 0.1)
-    ctx.beginPath()
-    for (let x = 0; x <= w; x += 14) {
-      const y = yBase + (Math.sin((x * 0.013) + (phase * (0.8 + (r * 0.12)))) * (8 + r))
-      if (x === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.stroke()
-  }
-
-  const reefCount = crazy ? detail.reefCount + 4 : detail.reefCount
-  for (let i = 0; i < reefCount; i += 1) {
-    const n = hashNoise(i * 17.3)
-    const x = (i / (reefCount - 1)) * w
-    const baseY = h * (0.81 + (hashNoise(i * 9.1) * 0.07))
-    const width = 55 + (n * 120)
-    const height = 26 + (hashNoise(i * 23.7) * 78)
-    const drift = Math.sin((phase * 0.4) + i) * 2.6
-    const grad = ctx.createLinearGradient(x, baseY - height, x, baseY + 2)
-    grad.addColorStop(0, 'rgba(26, 64, 87, 0.55)')
-    grad.addColorStop(1, 'rgba(8, 24, 39, 0.86)')
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.moveTo(x - width + drift, baseY)
-    ctx.quadraticCurveTo(x - (width * 0.34) + drift, baseY - height, x + drift, baseY - (height * 0.38))
-    ctx.quadraticCurveTo(x + (width * 0.35) + drift, baseY - (height * 1.06), x + width + drift, baseY)
-    ctx.closePath()
-    ctx.fill()
-  }
-
-  const fishSchools = crazy ? detail.fishSchools + 2 : detail.fishSchools
-  for (let s = 0; s < fishSchools; s += 1) {
-    const fishCount = detail.fishBaseCount + (s * 2) + (crazy ? 3 : 0)
-    const yBase = h * (0.22 + (s * 0.12))
-    const dir = s % 2 === 0 ? 1 : -1
-    for (let i = 0; i < fishCount; i += 1) {
-      const offset = i / fishCount
-      const travel = ((phase * (44 + (s * 8))) + (offset * w * 1.2)) % (w + 180)
-      const x = dir > 0 ? (travel - 90) : (w - travel + 90)
-      const y = yBase
-        + (Math.sin((phase * 1.3) + (i * 0.8) + s) * 8)
-        + (Math.sin((phase * 3.2) + (i * 0.2)) * 3)
-      const size = 3.6 + ((i % 4) * 0.55)
-      const angle = dir > 0 ? 0 : Math.PI
-      ctx.save()
-      ctx.translate(x, y)
-      ctx.rotate(angle)
-      ctx.globalAlpha = 0.26 + ((i % 3) * 0.1)
-      ctx.fillStyle = profile.particle
-      ctx.beginPath()
-      ctx.moveTo(size * 1.2, 0)
-      ctx.lineTo(-size * 0.4, size * 0.5)
-      ctx.lineTo(-size * 0.1, 0)
-      ctx.lineTo(-size * 0.4, -size * 0.5)
-      ctx.closePath()
-      ctx.fill()
-      ctx.restore()
-    }
-  }
-
-  const bubbleCount = crazy ? detail.bubbleCount + 36 : detail.bubbleCount
-  for (let i = 0; i < bubbleCount; i += 1) {
-    const col = i % 7
-    const columnX = ((col + 0.5) / 7) * w
-    const wobble = Math.sin((phase * 1.8) + i) * (4 + (i % 5))
-    const speed = 26 + ((i % 6) * 7)
-    const y = h - (((phase * speed) + (i * 29)) % (h + 120))
-    const x = columnX + wobble
-    const radius = 1.2 + ((i % 4) * 0.58)
-    strokeCircle(ctx, x, y, radius, 'rgba(186, 230, 253, 0.34)', 1, 0.8)
-  }
-
-  const hazeLayers = crazy ? detail.hazeLayers + 2 : detail.hazeLayers
-  for (let i = 0; i < hazeLayers; i += 1) {
-    const fog = ctx.createLinearGradient(0, 0, 0, h)
-    fog.addColorStop(0, `rgba(125, 211, 252, ${0.03 + (i * 0.008)})`)
-    fog.addColorStop(0.55, `rgba(2, 14, 28, ${0.08 + (i * 0.03)})`)
-    fog.addColorStop(1, `rgba(2, 10, 20, ${0.2 + (i * 0.05)})`)
-    ctx.fillStyle = fog
-    ctx.fillRect(0, 0, w, h)
-  }
-
-  if (crazy) {
-    ctx.save()
-    ctx.globalCompositeOperation = 'screen'
-    const eqRows = [
-      'phi(t)=int_0^T SNR(t)dt',
-      'arg max P(rx|tx,theta)',
-      'dE/dt = -alpha*v^2 + beta',
-      'L = sum_i w_i * m_i(t)',
-    ]
-    ctx.font = '600 10px "IBM Plex Mono", "SFMono-Regular", monospace'
-    for (let i = 0; i < eqRows.length; i += 1) {
-      const x = 18 + (i * 8)
-      const y = 36 + (i * 16)
-      ctx.fillStyle = `rgba(148, 230, 255, ${0.12 + (i * 0.03)})`
-      ctx.fillText(eqRows[i], x, y)
-    }
-    ctx.restore()
-  }
-
-  ctx.restore()
-}
-
-const clamp01 = (v) => Math.max(0, Math.min(1, v))
-
-const drawBetaTelemetry = (ctx, w, h, profile, phase, crazy) => {
-  const txCount = props.nodeVisuals.filter((item) => item.mode === 'tx').length
-  const rxCount = props.nodeVisuals.filter((item) => item.mode === 'rx' || item.mode === 'rx-done').length
-  const collisionCount = props.nodeVisuals.filter((item) => item.mode === 'collision' || item.mode === 'collision-linger').length
-  const activePackets = props.visiblePackets.length
-  const totalNodes = Math.max(1, props.nodes.length)
-
-  const load = clamp01((txCount + rxCount + (activePackets * 1.8)) / (totalNodes * 1.9))
-  const risk = clamp01((collisionCount * 1.4) / totalNodes)
-  const spread = clamp01(activePackets / Math.max(1, totalNodes / 2))
-  const linkQuality = clamp01(1 - (risk * 0.92))
-  const energy = clamp01(0.42 + (Math.sin((phase * 0.9) + (load * 2.4)) * 0.2) + (load * 0.25))
-  const stability = clamp01((linkQuality * 0.65) + ((1 - load) * 0.35))
-
-  const panelW = crazy ? 272 : 230
-  const panelH = crazy ? 108 : 86
-  const panelX = 14
-  const panelY = h - panelH - (crazy ? 64 : 56)
-  roundedRectPath(ctx, panelX, panelY, panelW, panelH, 11)
-  ctx.fillStyle = 'rgba(8, 23, 39, 0.72)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.22)'
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  const graphX = panelX + 10
-  const graphY = panelY + 14
-  const graphW = panelW - 20
-  const graphH = panelH - (crazy ? 34 : 26)
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(graphX, graphY, graphW, graphH)
-  ctx.clip()
-
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.16)'
-  ctx.lineWidth = 1
-  for (let i = 0; i <= 4; i += 1) {
-    const y = graphY + ((graphH / 4) * i)
-    ctx.beginPath()
-    ctx.moveTo(graphX, y)
-    ctx.lineTo(graphX + graphW, y)
-    ctx.stroke()
-  }
-
-  const samples = crazy ? 120 : 84
-  ctx.beginPath()
-  for (let i = 0; i < samples; i += 1) {
-    const t = (i / (samples - 1))
-    const x = graphX + (t * graphW)
-    const moving = ((phase * 0.9) + (t * 6.2))
-    const yNorm = clamp01((0.36 + (Math.sin(moving * 2.6) * 0.22) + (Math.sin(moving * 6.4) * 0.08) + (load * 0.18) - (risk * 0.24)))
-    const y = graphY + ((1 - yNorm) * graphH)
-    if (i === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  }
-  ctx.strokeStyle = profile.idleInner
-  ctx.lineWidth = crazy ? 2.2 : 1.8
-  ctx.shadowColor = profile.idleInner
-  ctx.shadowBlur = crazy ? 14 : 10
-  ctx.stroke()
-
-  if (crazy) {
-    ctx.beginPath()
-    for (let i = 0; i < samples; i += 1) {
-      const t = (i / (samples - 1))
-      const x = graphX + (t * graphW)
-      const moving = ((phase * 1.2) + (t * 8.1))
-      const yNorm = clamp01((0.38 + (Math.cos(moving * 2.9) * 0.18) + (spread * 0.22) - (risk * 0.16)))
-      const y = graphY + ((1 - yNorm) * graphH)
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
-    }
-    ctx.strokeStyle = 'rgba(190, 242, 255, 0.72)'
-    ctx.lineWidth = 1.2
-    ctx.shadowBlur = 0
-    ctx.stroke()
-  }
-  ctx.restore()
-
-  ctx.save()
-  ctx.font = '600 10px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillStyle = 'rgba(191, 219, 254, 0.88)'
-  ctx.fillText(`Signal Flux ${Math.round((load * 100))}%`, panelX + 12, panelY + panelH - (crazy ? 20 : 8))
-  if (crazy) {
-    ctx.font = '600 9px "IBM Plex Mono", "SFMono-Regular", monospace'
-    ctx.fillStyle = 'rgba(191, 219, 254, 0.72)'
-    ctx.fillText(`Var=${Math.round((risk * 1000)) / 1000}  SNR*= ${(22 + (linkQuality * 18)).toFixed(1)} dB`, panelX + 12, panelY + panelH - 8)
-  }
-  ctx.restore()
-
-  const radarSize = crazy ? 136 : 120
-  const radarX = w - radarSize - (crazy ? 148 : 124)
-  const radarY = 16
-  roundedRectPath(ctx, radarX, radarY, radarSize, radarSize, 12)
-  ctx.fillStyle = 'rgba(8, 23, 39, 0.72)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.24)'
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  const cx = radarX + (radarSize / 2)
-  const cy = radarY + (radarSize / 2) + 2
-  const radius = crazy ? 45 : 40
-  const dims = [
-    { label: 'TX', value: load },
-    { label: 'RX', value: clamp01(rxCount / totalNodes) },
-    { label: 'RISK', value: risk },
-    { label: 'SPREAD', value: spread },
-    { label: 'LINK', value: linkQuality },
-    { label: 'ENG', value: energy },
-  ]
-
-  ctx.save()
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.18)'
-  ctx.lineWidth = 1
-  for (let ring = 1; ring <= 4; ring += 1) {
-    ctx.beginPath()
-    ctx.arc(cx, cy, (radius / 4) * ring, 0, Math.PI * 2)
-    ctx.stroke()
-  }
-  for (let i = 0; i < dims.length; i += 1) {
-    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
-    const ax = cx + (Math.cos(ang) * radius)
-    const ay = cy + (Math.sin(ang) * radius)
-    ctx.beginPath()
-    ctx.moveTo(cx, cy)
-    ctx.lineTo(ax, ay)
-    ctx.stroke()
-  }
-
-  ctx.beginPath()
-  for (let i = 0; i < dims.length; i += 1) {
-    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
-    const r = radius * dims[i].value
-    const px = cx + (Math.cos(ang) * r)
-    const py = cy + (Math.sin(ang) * r)
-    if (i === 0) ctx.moveTo(px, py)
-    else ctx.lineTo(px, py)
-  }
-  ctx.closePath()
-  ctx.fillStyle = 'rgba(56, 189, 248, 0.22)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.86)'
-  ctx.lineWidth = 1.6
-  ctx.stroke()
-
-  const sweepAngle = (phase * 1.2) % (Math.PI * 2)
-  ctx.strokeStyle = 'rgba(96, 250, 255, 0.8)'
-  ctx.lineWidth = crazy ? 1.45 : 1.2
-  ctx.beginPath()
-  ctx.moveTo(cx, cy)
-  ctx.lineTo(cx + (Math.cos(sweepAngle) * radius), cy + (Math.sin(sweepAngle) * radius))
-  ctx.stroke()
-
-  if (crazy) {
-    ctx.save()
-    ctx.globalCompositeOperation = 'screen'
-    const fan = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius + 16)
-    fan.addColorStop(0, 'rgba(56, 189, 248, 0.22)')
-    fan.addColorStop(1, 'rgba(0, 0, 0, 0)')
-    ctx.fillStyle = fan
-    ctx.beginPath()
-    ctx.moveTo(cx, cy)
-    ctx.arc(cx, cy, radius + 16, sweepAngle - 0.22, sweepAngle + 0.22)
-    ctx.closePath()
-    ctx.fill()
-    ctx.restore()
-  }
-
-  ctx.font = '600 9px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillStyle = 'rgba(191, 219, 254, 0.78)'
-  ctx.textAlign = 'center'
-  for (let i = 0; i < dims.length; i += 1) {
-    const ang = -Math.PI / 2 + ((Math.PI * 2 * i) / dims.length)
-    const lx = cx + (Math.cos(ang) * (radius + 11))
-    const ly = cy + (Math.sin(ang) * (radius + 11)) + 3
-    ctx.fillText(dims[i].label, lx, ly)
-  }
-  ctx.restore()
-
-  const badgeW = crazy ? 166 : 124
-  roundedRectPath(ctx, w - badgeW - 16, h - 42, badgeW, 26, 999)
-  ctx.fillStyle = 'rgba(11, 33, 54, 0.82)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(125, 211, 252, 0.28)'
-  ctx.stroke()
-  ctx.fillStyle = 'rgba(191, 219, 254, 0.92)'
-  ctx.font = '600 10px "IBM Plex Sans", "Segoe UI", sans-serif'
-  const stabilityText = crazy
-    ? `Stability ${Math.round(stability * 100)}% | Entropy ${(1 - stability + (risk * 0.2)).toFixed(2)}`
-    : `Stability ${Math.round(stability * 100)}%`
-  ctx.fillText(stabilityText, w - badgeW + 10, h - 24)
-}
-
-const drawThemeAmbient = (ctx, w, h, profile, phase, fx) => {
-  if (fx <= 1) {
-    const sweep = ((phase * 0.07) % 1) * w
-    const sweepGradient = ctx.createLinearGradient(sweep - 240, 0, sweep + 240, 0)
-    sweepGradient.addColorStop(0, 'rgba(0,0,0,0)')
-    sweepGradient.addColorStop(0.5, profile.sweep)
-    sweepGradient.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = sweepGradient
-    ctx.fillRect(0, 0, w, h)
-  }
-
-  if (profile.effect === 'sonar' || profile.effect === 'radar') {
-    ctx.save()
-    ctx.strokeStyle = profile.ring
-    ctx.lineWidth = 1
-    for (let i = 0; i < 4; i += 1) {
-      const r = ((phase * (36 + (fx * 8))) + (i * 95)) % Math.max(w, h)
-      ctx.beginPath()
-      ctx.arc(w * (profile.effect === 'radar' ? 0.2 : 0.12), h * 0.2, r, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-    ctx.restore()
-  }
-
-  if (profile.effect === 'grid' || profile.effect === 'timeline') {
-    ctx.save()
-    ctx.strokeStyle = profile.ring
-    ctx.lineWidth = 0.6
-    const spacing = profile.effect === 'grid' ? 44 : 56
-    for (let x = 0; x < w; x += spacing) {
-      ctx.beginPath()
-      ctx.moveTo(x + ((phase * (5 + fx)) % spacing), 0)
-      ctx.lineTo(x + ((phase * (5 + fx)) % spacing), h)
-      ctx.stroke()
-    }
-    for (let y = 0; y < h; y += spacing) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(w, y)
-      ctx.stroke()
-    }
-    ctx.restore()
-  }
-
-  if (profile.effect === 'scanline' && fx <= 1) {
-    ctx.save()
-    const y = (phase * (45 + (fx * 14))) % h
-    const line = ctx.createLinearGradient(0, y - 80, 0, y + 80)
-    line.addColorStop(0, 'rgba(0,0,0,0)')
-    line.addColorStop(0.5, profile.sweep)
-    line.addColorStop(1, 'rgba(0,0,0,0)')
-    ctx.fillStyle = line
-    ctx.fillRect(0, y - 80, w, 160)
-    ctx.restore()
-  }
-
-  if (profile.effect === 'neon' || profile.effect === 'terrain' || profile.effect === 'minimal') {
-    ctx.save()
-    const waveCount = profile.effect === 'minimal' ? 2 : (fx > 1 ? 6 : 4)
-    ctx.strokeStyle = profile.ring
-    ctx.lineWidth = profile.effect === 'minimal' ? 0.8 : 1.2
-    for (let i = 0; i < waveCount; i += 1) {
-      const y0 = h * (0.2 + (i * 0.18))
-      ctx.beginPath()
-      for (let x = 0; x <= w; x += 18) {
-        const y = y0 + Math.sin((x * 0.008) + (phase * ((1.2 + (i * 0.2)) * (1 + (fx * 0.18))))) * (6 + (i * 2) + (fx > 1 ? 3 : 0))
-        if (x === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      }
-      ctx.stroke()
-    }
-    ctx.restore()
-  }
-
-  ctx.save()
-  const particles = fx > 1 ? 52 : 26
-  for (let i = 0; i < particles; i += 1) {
-    const px = ((i * 213) + (phase * (9 + (i % 5)))) % w
-    const py = (((i * 127) % h) + (Math.sin((phase * 0.8) + i) * 14))
-    fillCircle(ctx, px, py, 1.2 + ((i % 3) * 0.3), profile.particle, 0.25 + ((i % 4) * 0.09))
-  }
-  ctx.restore()
-
-  if (fx > 1) {
-    ctx.save()
-    ctx.globalCompositeOperation = 'screen'
-    for (let i = 0; i < 3; i += 1) {
-      const cx = w * (0.2 + (i * 0.28))
-      const cy = h * (0.22 + (Math.sin((phase * 0.7) + i) * 0.06))
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.35)
-      g.addColorStop(0, profile.sweep)
-      g.addColorStop(1, 'rgba(0,0,0,0)')
-      ctx.fillStyle = g
-      ctx.fillRect(0, 0, w, h)
-    }
-    ctx.restore()
-  }
-
-  if (isCrazyFx.value) {
-    ctx.save()
-    ctx.strokeStyle = 'rgba(148, 230, 255, 0.12)'
-    ctx.lineWidth = 0.8
-    const hexSize = 22
-    const rowH = hexSize * 0.86
-    for (let y = -rowH; y < h + rowH; y += rowH) {
-      const offset = (Math.floor(y / rowH) % 2 === 0) ? 0 : hexSize * 0.5
-      for (let x = -hexSize; x < w + hexSize; x += hexSize) {
-        const cx = x + offset + ((phase * 6) % hexSize)
-        const cy = y
-        ctx.beginPath()
-        for (let k = 0; k < 6; k += 1) {
-          const a = (Math.PI / 3) * k
-          const px = cx + (Math.cos(a) * (hexSize * 0.33))
-          const py = cy + (Math.sin(a) * (hexSize * 0.33))
-          if (k === 0) ctx.moveTo(px, py)
-          else ctx.lineTo(px, py)
-        }
-        ctx.closePath()
-        ctx.stroke()
-      }
-    }
-    ctx.restore()
-
-    ctx.save()
-    const bars = 32
-    for (let i = 0; i < bars; i += 1) {
-      const x = (i / bars) * w
-      const s = 0.5 + (Math.sin((phase * 2.6) + (i * 0.4)) * 0.5)
-      const barH = 22 + (s * 48)
-      const g = ctx.createLinearGradient(x, 0, x, barH)
-      g.addColorStop(0, 'rgba(34, 211, 238, 0.34)')
-      g.addColorStop(1, 'rgba(34, 211, 238, 0)')
-      ctx.fillStyle = g
-      ctx.fillRect(x, 0, Math.max(2, (w / bars) - 1), barH)
-    }
-    ctx.restore()
-  }
-}
-
 const pickWorldGridStep = (pxPerMeter) => {
   const raw = 56 / Math.max(pxPerMeter, 1e-9)
   const nice = [5, 10, 20, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000]
@@ -1816,7 +1269,6 @@ const draw = () => {
   const h = displayHeight.value
   const profile = themeProfile.value
   const fx = fxIntensity.value
-  const underwaterDetail = underwaterDetailProfile.value
   const phase = props.currentTime / 1_000_000
 
   const background = ctx.createRadialGradient(w * 0.2, h * 0.18, 0, w * 0.2, h * 0.18, Math.max(w, h))
@@ -1973,7 +1425,6 @@ const onPointerDown = (event) => {
       activePointerId = event.pointerId
       hasDragged.value = false
       panStart.value = { x: sx, y: sy }
-      selectedNode.value = target
       emit('node-select', target)
       emit('pause-request')
       try {
@@ -2026,7 +1477,6 @@ const onPointerDown = (event) => {
       activePointerId = event.pointerId
       hasDragged.value = false
       panStart.value = { x: sx, y: sy }
-      selectedNode.value = target
       emit('pause-request')
       try {
         canvas.setPointerCapture(event.pointerId)
@@ -2252,10 +1702,7 @@ const onPointerUp = (event) => {
       const y = event.clientY - rect.top
       const target = pickNodeAt(x, y)
       if (target) {
-        selectedNode.value = target
         emit('node-select', target)
-      } else {
-        selectedNode.value = null
       }
     }
   }
@@ -2273,11 +1720,6 @@ const onPointerUp = (event) => {
     }
   }
   activePointerId = null
-}
-
-const activatePanTool = () => {
-  toolMode.value = toolMode.value === TOOL_MODES.PAN ? TOOL_MODES.SELECT : TOOL_MODES.PAN
-  requestAnimationFrame(draw)
 }
 
 const onDragOver = (event) => {
@@ -2354,7 +1796,6 @@ const clearMeasurements = () => {
 const resetView = () => {
   pan.value = { x: 0, y: 0 }
   zoom.value = 1
-  selectedNode.value = null
   hoveredNodeId.value = null
   requestAnimationFrame(draw)
 }
@@ -2419,7 +1860,7 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.underwaterDetail, props.editMode, props.originalPositions, props.selectedNodeId, props.selectedNodeIds],
+  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.originalPositions, props.selectedNodeId, props.selectedNodeIds],
   () => {
     requestAnimationFrame(draw)
   },

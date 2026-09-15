@@ -40,7 +40,6 @@ import {
   Color4,
   DynamicTexture,
   Engine,
-  GlowLayer,
   HemisphericLight,
   Matrix,
   MeshBuilder,
@@ -58,9 +57,7 @@ const props = defineProps({
   currentTime: { type: Number, required: true },
   themeKey: { type: String, default: 'ocean-sonar' },
   fxLevel: { type: String, default: 'standard' },
-  isMuted: { type: Boolean, default: false },
 })
-const emit = defineEmits(['toggle-mute'])
 
 const hostEl = ref(null)
 const canvasEl = ref(null)
@@ -92,7 +89,6 @@ let renderQueued = false
 let defaultCameraState = null
 let middlePanPointerId = null
 let middlePanLast = null
-let glowLayer = null
 
 const NODE_RADIUS = 130
 const DEPTH_SCALE = 38
@@ -190,10 +186,6 @@ const fx3D = computed(() => {
   return 1
 })
 const isCrazyFx = computed(() => false)
-const glowKernelByLevel = (level) => {
-  if (level === 'extreme') return 48
-  return 32
-}
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
@@ -950,10 +942,6 @@ watch(
 watch(
   () => props.fxLevel,
   () => {
-    if (glowLayer) {
-      glowLayer.intensity = 0.44 * fx3D.value
-      glowLayer.blurKernelSize = glowKernelByLevel(props.fxLevel)
-    }
     queueRefresh()
   },
 )
@@ -969,10 +957,6 @@ onBeforeUnmount(() => {
   }
   if (resizeObserver) resizeObserver.disconnect()
   if (scene && pointerObserver) scene.onPointerObservable.remove(pointerObserver)
-  if (glowLayer) {
-    glowLayer.dispose()
-    glowLayer = null
-  }
   disposeEntryMap(nodeMeshMap)
   disposeEntryMap(packetMeshMap)
   disposeEntryMap(worldAxesMap)

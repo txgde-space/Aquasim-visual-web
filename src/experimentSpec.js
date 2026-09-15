@@ -59,18 +59,6 @@ export const createDefaultExperimentForm = () => ({
   trafficStop: '100s',
 })
 
-export const inferMacIdFromMeta = (meta) => {
-  const names = []
-  const protocols = meta?.protocols
-  if (Array.isArray(protocols?.mac)) names.push(...protocols.mac)
-  else if (typeof protocols?.mac === 'string') names.push(protocols.mac)
-  const blob = names.join(' ')
-  if (/TDMA/i.test(blob)) return 'tdma'
-  if (/Broadcast/i.test(blob)) return 'broadcast'
-  if (/Swarm/i.test(blob)) return 'swarm'
-  return 'swarm'
-}
-
 const roundCoord = (value) => Math.round((Number(value) || 0) * 100) / 100
 
 export const macAttrsFor = (form, macId, nodeCount) => {
@@ -171,41 +159,4 @@ export const validateExperiment = (spec) => {
   }
 
   return warnings
-}
-
-export const chainSpacing = (nodes) => {
-  const xs = (nodes || []).map((node) => Number(node.x) || 0)
-  if (xs.length < 2) return 1000
-  return Math.max(1, Math.round((Math.max(...xs) - Math.min(...xs)) / Math.max(xs.length - 1, 1)))
-}
-
-export const buildRunPlan = (spec) => {
-  const mac = spec.stack?.mac?.type || ''
-  const nodeNum = spec.nodes?.length || 5
-  const simStop = spec.simStop || '120s'
-  const transRange = Number(spec.stack?.phy?.attrs?.transRange) || 1200
-  const spacing = chainSpacing(spec.nodes)
-  if (/TDMA/i.test(mac)) {
-    return {
-      program: 'aqua-sim-test-tdma',
-      args: {
-        simStop,
-        nodeNum,
-        spacing,
-        transRange,
-        SlotNum: Number(spec.stack?.mac?.attrs?.SlotNum) || 4,
-        SlotLen: spec.stack?.mac?.attrs?.SlotLen || '5s',
-      },
-    }
-  }
-  return {
-    program: 'swarm',
-    args: { simStop, nodeNum: 5, spacing, transRange },
-  }
-}
-
-export const buildArgvPreview = (spec) => {
-  const plan = buildRunPlan(spec)
-  const flags = Object.entries(plan.args).map(([key, value]) => `--${key}=${value}`).join(' ')
-  return `./ns3 run "${plan.program} ${flags}"`
 }

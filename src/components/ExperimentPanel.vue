@@ -5,7 +5,6 @@ import { TRAFFIC_PRESETS, macPresetById } from '../experimentSpec.js'
 const props = defineProps({
   form: { type: Object, required: true },
   specJson: { type: String, required: true },
-  argvPreview: { type: String, required: true },
   scratchCc: { type: String, default: '' },
   warnings: { type: Array, default: () => [] },
   nodeCount: { type: Number, default: 0 },

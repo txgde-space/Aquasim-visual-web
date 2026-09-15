@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 import { generateAquaVisualCc } from '../src/generateScratch.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const PROGRAMS = new Set(['aqua-visual', 'swarm', 'aqua-sim-test-tdma'])
 
 const resolveAquaHome = () => {
   const candidates = [

@@ -6,7 +6,6 @@ import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
 import { session } from '../sessionStore.js'
 import {
-  buildArgvPreview,
   buildExperimentSpec,
   createDefaultExperimentForm,
   createDefaultTopology,
@@ -37,7 +36,6 @@ const experimentSpec = computed(() => buildExperimentSpec(experimentForm.value, 
 const experimentWarnings = computed(() => validateExperiment(experimentSpec.value))
 const experimentSpecJson = computed(() => JSON.stringify(experimentSpec.value, null, 2))
 const generatedScratch = computed(() => generateAquaVisualCc(experimentSpec.value))
-const experimentArgvPreview = computed(() => buildArgvPreview(experimentSpec.value))
 const canvasNodes = computed(() => editNodes.value.map((node) => ({
   ...node,
   macId: experimentForm.value.macId || 'swarm',
@@ -318,6 +316,7 @@ const copyJson = async () => {
         </div>
         <div class="wb-chrome-right">
           <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
+          <span class="wb-run-hint">运行时生成 scratch/aqua-visual.cc 并执行 ./ns3 run aqua-visual</span>
           <button class="wb-run" data-testid="exp-run" :disabled="runStatus === 'running'" @click="runExperiment">
             {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
           </button>
@@ -395,7 +394,6 @@ const copyJson = async () => {
       <ExperimentPanel
         :form="experimentForm"
         :spec-json="experimentSpecJson"
-        :argv-preview="experimentArgvPreview"
         :scratch-cc="generatedScratch"
         :warnings="experimentWarnings"
         :node-count="editNodes.length"
