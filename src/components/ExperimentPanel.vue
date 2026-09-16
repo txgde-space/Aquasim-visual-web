@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { TRAFFIC_PRESETS, macPresetById } from '../experimentSpec.js'
+import { TRAFFIC_PRESETS, macPresetById } from '@/features/experiment/lib/experimentSpec'
 
 const props = defineProps({
   form: { type: Object, required: true },

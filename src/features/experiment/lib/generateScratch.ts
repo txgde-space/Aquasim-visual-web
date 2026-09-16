@@ -1,23 +1,25 @@
-import { TYPEID_LAYERS } from './typeIdCatalog.js'
+import type { ExperimentSpec } from '../../../shared/types/experiment'
+import { TYPEID_LAYERS } from './typeIdCatalog'
 
 const TYPE_IDS = new Set(
   TYPEID_LAYERS.flatMap((layer) => layer.items.map((item) => item.typeId).filter(Boolean)),
 )
 
-const num = (value, fallback = 0) => {
+const num = (value: unknown, fallback = 0): number => {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
 }
 
-const timeLit = (value, fallback = '30s') => {
+const timeLit = (value: unknown, fallback = '30s'): string => {
   const text = String(value || fallback).trim()
   if (!/^\d+(\.\d+)?s$/.test(text)) return fallback
   return text
 }
 
-const typeLit = (value, fallback) => (TYPE_IDS.has(value) ? value : fallback)
+const typeLit = (value: unknown, fallback: string): string =>
+  typeof value === 'string' && TYPE_IDS.has(value) ? value : fallback
 
-export const generateAquaVisualCc = (spec) => {
+export const generateAquaVisualCc = (spec: ExperimentSpec): string => {
   const nodes = Array.isArray(spec?.nodes) ? spec.nodes.slice(0, 64) : []
   const nodeNum = Math.max(2, nodes.length)
   const simStop = timeLit(spec?.simStop, '30s')
@@ -30,7 +32,7 @@ export const generateAquaVisualCc = (spec) => {
   const slotNum = Math.min(8, Math.max(1, Math.round(num(spec?.stack?.mac?.attrs?.SlotNum, nodeNum))))
   const slotLen = timeLit(spec?.stack?.mac?.attrs?.SlotLen, '5s')
   const initialRoundDelay = timeLit(spec?.stack?.mac?.attrs?.InitialRoundDelay, '1s')
-  const traffic = spec?.traffic || { preset: 'none' }
+  const traffic = spec?.traffic || { preset: 'none' as const }
   const logName = macType.replace(/^ns3::/, '')
 
   const positions = nodes.map((node) => {
@@ -61,11 +63,11 @@ export const generateAquaVisualCc = (spec) => {
                     UintegerValue(${slotNum}));`
   }
 
-  const destId = Math.max(1, Math.round(num(traffic.dst, nodeNum)))
-  const useTraffic = traffic.preset && traffic.preset !== 'none'
-  const srcId = Math.max(1, Math.round(num(traffic.src, 1)))
-  const rate = Math.max(1, Math.round(num(traffic.rate_bps, 80)))
-  const pkt = Math.max(1, Math.round(num(traffic.pkt, 50)))
+  const destId = Math.max(1, Math.round(num(traffic && 'dst' in traffic ? traffic.dst : undefined, nodeNum)))
+  const useTraffic = !!traffic && traffic.preset !== 'none'
+  const srcId = Math.max(1, Math.round(num(traffic && 'src' in traffic ? traffic.src : undefined, 1)))
+  const rate = Math.max(1, Math.round(num(traffic && 'rate_bps' in traffic ? traffic.rate_bps : undefined, 80)))
+  const pkt = Math.max(1, Math.round(num(traffic && 'pkt' in traffic ? traffic.pkt : undefined, 50)))
 
   const appBlock = useTraffic
     ? `    AquaSimSocketAddress socket;

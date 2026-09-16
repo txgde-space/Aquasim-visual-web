@@ -11,9 +11,9 @@ import {
   createDefaultTopology,
   macPresetById,
   validateExperiment,
-} from '../experimentSpec.js'
-import { generateAquaVisualCc } from '../generateScratch.js'
-import { catalogItemById } from '../typeIdCatalog.js'
+} from '@/features/experiment/lib/experimentSpec'
+import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
+import { catalogItemById } from '@/features/experiment/lib/typeIdCatalog'
 
 const router = useRouter()
 const editNodes = ref(createDefaultTopology())

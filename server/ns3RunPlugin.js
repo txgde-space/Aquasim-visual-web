@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { generateAquaVisualCc } from '../src/generateScratch.js'
+import { generateAquaVisualCc } from '../src/features/experiment/lib/generateScratch.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
