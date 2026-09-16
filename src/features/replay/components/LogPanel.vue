@@ -113,7 +113,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
   <aside class="log-panel">
     <div class="side-controls">
       <details class="panel-section" open>
-        <summary>日志源</summary>
+        <summary>设置</summary>
         <div class="control-btn-row">
           <button class="btn btn-compact" @click="openLogFilePicker">导入全局日志</button>
           <button class="btn btn-compact" @click="openNodeLogFilePicker">导入节点日志</button>
@@ -134,9 +134,6 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             </option>
           </select>
         </label>
-      </details>
-      <details class="panel-section" open>
-        <summary>回放设置</summary>
         <div class="control-fields-grid">
           <label class="field field-compact">
             <div class="field-head"><span>回放模式</span></div>

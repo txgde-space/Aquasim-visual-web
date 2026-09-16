@@ -227,11 +227,24 @@ onBeforeUnmount(() => {
       <ReplayToolbar
         :is-edit-mode="isEditMode"
         :visual-mode="visualMode"
-        :log-panel-open="logPanelOpen"
         @set-interaction-mode="setInteractionMode"
         @update:visual-mode="onVisualModeChange"
-        @toggle-log-panel="onToggleLogPanel"
       />
+
+      <button
+        class="panel-ear"
+        :class="{ open: logPanelOpen }"
+        :style="{ right: logPanelOpen ? logWidth + 'px' : '0px' }"
+        :title="logPanelOpen ? '收起日志面板' : '展开日志面板'"
+        :aria-label="logPanelOpen ? '收起日志面板' : '展开日志面板'"
+        :aria-expanded="logPanelOpen"
+        @click="onToggleLogPanel"
+      >
+        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+          <path :d="logPanelOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="ear-label">日志</span>
+      </button>
 
       <SplitPane
         v-show="logPanelOpen"

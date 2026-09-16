@@ -2,13 +2,11 @@
 defineProps<{
   isEditMode: boolean
   visualMode: string
-  logPanelOpen: boolean
 }>()
 
 const emit = defineEmits<{
   setInteractionMode: [mode: string]
   'update:visualMode': [mode: string]
-  toggleLogPanel: []
 }>()
 </script>
 
@@ -25,7 +23,5 @@ const emit = defineEmits<{
       <button class="view-switch-btn" :class="{ active: isEditMode }" @click="emit('setInteractionMode', 'edit')">编辑</button>
     </div>
     <span v-if="isEditMode && visualMode === '3d'" class="hint-chip">编辑模式仅 2D 可用</span>
-    <span class="cmd-sep" aria-hidden="true"></span>
-    <button class="btn btn-compact" :class="{ active: logPanelOpen }" @click="emit('toggleLogPanel')">日志</button>
   </div>
 </template>
