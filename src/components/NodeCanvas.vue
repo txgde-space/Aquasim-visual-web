@@ -132,6 +132,18 @@ import {
   toWorldPoint,
   viewInsetsFor,
 } from '@/features/canvas2d/lib/coordinate'
+import {
+  colorMix,
+  fillCircle,
+  strokeCircle,
+} from '@/features/canvas2d/lib/draw/primitives'
+import {
+  drawCarrierNode,
+  drawSubmarineNode,
+} from '@/features/canvas2d/lib/draw/nodes'
+import { drawPacketRect } from '@/features/canvas2d/lib/draw/packets'
+import { drawWorldGrid } from '@/features/canvas2d/lib/draw/grid'
+import { drawMeasurementLines as drawMeasureLinesView } from '@/features/canvas2d/lib/draw/measure'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -471,363 +483,46 @@ const selectMeasurementAt = (sx, sy) => {
   return picked
 }
 
-const roundedRectPath = (ctx, x, y, width, height, radius) => {
-  const r = Math.min(radius, width / 2, height / 2)
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + width - r, y)
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r)
-  ctx.lineTo(x + width, y + height - r)
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height)
-  ctx.lineTo(x + r, y + height)
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
-}
-
-const fillCircle = (ctx, x, y, radius, fillStyle, alpha = 1) => {
-  ctx.save()
-  ctx.globalAlpha = alpha
-  ctx.fillStyle = fillStyle
-  ctx.beginPath()
-  ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.restore()
-}
-
-const strokeCircle = (ctx, x, y, radius, strokeStyle, lineWidth, alpha = 1) => {
-  ctx.save()
-  ctx.globalAlpha = alpha
-  ctx.strokeStyle = strokeStyle
-  ctx.lineWidth = lineWidth
-  ctx.beginPath()
-  ctx.arc(x, y, radius, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.restore()
-}
-
-const drawPlanePulse = (ctx, x, y, angle, color, size, alpha = 1) => {
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.rotate(angle)
-  ctx.globalAlpha = alpha
-  ctx.fillStyle = color
-  ctx.shadowColor = color
-  ctx.shadowBlur = 12
-  ctx.beginPath()
-  ctx.moveTo(size * 1.2, 0)
-  ctx.lineTo(-size * 0.55, size * 0.4)
-  ctx.lineTo(-size * 0.2, 0)
-  ctx.lineTo(-size * 0.55, -size * 0.4)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.2, 0)
-  ctx.lineTo(-size * 0.9, size * 0.65)
-  ctx.lineTo(-size * 0.72, 0)
-  ctx.lineTo(-size * 0.9, -size * 0.65)
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-}
-
-const drawShellBurst = (ctx, x, y, color, phase, power = 1) => {
-  const pulse = 0.5 + (Math.sin(phase * 18) * 0.5)
-  const r = (16 + (pulse * 12)) * power
-  ctx.save()
-  ctx.globalCompositeOperation = 'screen'
-  const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 2.1)
-  glow.addColorStop(0, color)
-  glow.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = glow
-  ctx.beginPath()
-  ctx.arc(x, y, r * 2.1, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.strokeStyle = color
-  ctx.lineWidth = 1.6
-  for (let i = 0; i < 3; i += 1) {
-    ctx.globalAlpha = 0.58 - (i * 0.16)
-    ctx.beginPath()
-    ctx.arc(x, y, r + (i * 8), 0, Math.PI * 2)
-    ctx.stroke()
-  }
-  ctx.restore()
-}
-
-const drawSubmarineNode = (ctx, p, fillColor, strokeColor, profile, pulse) => {
-  const hullW = 38
-  const hullH = 16
-  roundedRectPath(ctx, p.x - (hullW / 2), p.y - (hullH / 2), hullW, hullH, 8)
-  ctx.fillStyle = fillColor
-  ctx.shadowColor = profile.ring
-  ctx.shadowBlur = 12 + (pulse * 5)
-  ctx.fill()
-  ctx.strokeStyle = strokeColor
-  ctx.lineWidth = 1.4
-  ctx.stroke()
-
-  roundedRectPath(ctx, p.x - 6, p.y - 16, 12, 8, 3)
-  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.15)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(p.x - 19, p.y)
-  ctx.lineTo(p.x - 26, p.y - 5)
-  ctx.lineTo(p.x - 26, p.y + 5)
-  ctx.closePath()
-  ctx.fillStyle = strokeColor
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.arc(p.x + 8, p.y, 2.2, 0, Math.PI * 2)
-  ctx.fillStyle = '#dbeafe'
-  ctx.fill()
-}
-
-const drawCarrierNode = (ctx, p, fillColor, strokeColor, profile, phase) => {
-  const hullW = 78
-  const hullH = 24
-  const wakePulse = 0.5 + (Math.sin((phase * 5.8) + (p.x * 0.01)) * 0.5)
-
-  ctx.save()
-  ctx.translate(p.x, p.y)
-
-  ctx.strokeStyle = colorMix(profile.ring, '#ffffff', 0.12)
-  ctx.lineWidth = 1.1
-  for (let i = 0; i < 3; i += 1) {
-    ctx.globalAlpha = 0.28 - (i * 0.08)
-    ctx.beginPath()
-    ctx.moveTo(-(hullW * 0.65) - (i * 6), -(hullH * 0.12))
-    ctx.quadraticCurveTo(-(hullW * 0.82) - (i * 8), 0, -(hullW * 0.65) - (i * 6), hullH * 0.12)
-    ctx.stroke()
-  }
-  ctx.globalAlpha = 1
-
-  const hullGradient = ctx.createLinearGradient(-(hullW * 0.6), 0, hullW * 0.6, 0)
-  hullGradient.addColorStop(0, colorMix(fillColor, '#1e293b', 0.5))
-  hullGradient.addColorStop(0.55, fillColor)
-  hullGradient.addColorStop(1, colorMix(fillColor, '#ffffff', 0.2))
-  ctx.fillStyle = hullGradient
-  ctx.shadowColor = profile.ring
-  ctx.shadowBlur = 18
-  ctx.beginPath()
-  ctx.moveTo(-(hullW * 0.58), -(hullH * 0.34))
-  ctx.lineTo(hullW * 0.3, -(hullH * 0.44))
-  ctx.quadraticCurveTo(hullW * 0.52, -(hullH * 0.2), hullW * 0.6, 0)
-  ctx.quadraticCurveTo(hullW * 0.52, hullH * 0.2, hullW * 0.3, hullH * 0.44)
-  ctx.lineTo(-(hullW * 0.58), hullH * 0.34)
-  ctx.quadraticCurveTo(-(hullW * 0.7), 0, -(hullW * 0.58), -(hullH * 0.34))
-  ctx.closePath()
-  ctx.fill()
-  ctx.strokeStyle = strokeColor
-  ctx.lineWidth = 1.8
-  ctx.stroke()
-
-  roundedRectPath(ctx, -(hullW * 0.5), -(hullH * 0.18), hullW * 0.84, hullH * 0.36, 5)
-  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.18)
-  ctx.fill()
-  ctx.strokeStyle = colorMix(strokeColor, '#ffffff', 0.18)
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  roundedRectPath(ctx, -(hullW * 0.06), -(hullH * 0.66), 18, 13, 3)
-  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.33)
-  ctx.fill()
-  roundedRectPath(ctx, (hullW * 0.03), -(hullH * 0.95), 8, 10, 2)
-  ctx.fillStyle = colorMix(fillColor, '#ffffff', 0.5)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-(hullW * 0.38), 0)
-  ctx.lineTo(hullW * 0.44, 0)
-  ctx.strokeStyle = '#f8fafc'
-  ctx.lineWidth = 1
-  ctx.setLineDash([4, 3])
-  ctx.stroke()
-  ctx.setLineDash([])
-
-  ctx.beginPath()
-  ctx.moveTo(8, -(hullH * 0.72))
-  ctx.lineTo(8, -(hullH * 1.2))
-  ctx.strokeStyle = colorMix(profile.ring, '#ffffff', 0.34)
-  ctx.lineWidth = 1.2
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.arc(8, -(hullH * 1.23), 3.2 + (wakePulse * 1.8), 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(219, 234, 254, 0.9)'
-  ctx.fill()
-
-  ctx.restore()
-
-  strokeCircle(ctx, p.x, p.y, 20 + (wakePulse * 11), profile.ring, 1.2, 0.34)
-  strokeCircle(ctx, p.x, p.y, 30 + (wakePulse * 8), profile.ring, 0.9, 0.2)
-}
-
-const colorMix = (hexA, hexB, ratio = 0.5) => {
-  const parse = (hex) => {
-    const clean = hex.replace('#', '')
-    const expanded = clean.length === 3
-      ? clean.split('').map((c) => c + c).join('')
-      : clean
-    const num = parseInt(expanded, 16)
-    return [(num >> 16) & 255, (num >> 8) & 255, num & 255]
-  }
-  try {
-    const a = parse(hexA)
-    const b = parse(hexB)
-    const m = a.map((v, i) => Math.round((v * (1 - ratio)) + (b[i] * ratio)))
-    return `rgb(${m[0]} ${m[1]} ${m[2]})`
-  } catch {
-    return hexA
-  }
-}
-
-const packetSegmentColor = (packet, receiver, now, profile) => {
-  const txColor = profile.tx
-  const rxColor = profile.rx
-  const collisionColor = profile.bad
-
-  if (now < receiver.rx_start_us) {
-    return txColor
-  }
-
-  if (receiver.status === 'ok') {
-    return rxColor
-  }
-
-  if (receiver.reason === 'collision_rx_rx') {
-    const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
-    return now < collisionAt ? rxColor : collisionColor
-  }
-
-  if (receiver.reason === 'collision_rx_tx') {
-    return now < receiver.rx_start_us ? txColor : collisionColor
-  }
-
-  return collisionColor
-}
-
-const drawPacketRect = (ctx, packet, receiver, now, profile, phase, fx) => {
-  const srcNode = nodeById.value.get(packet.src)
-  const dstNode = nodeById.value.get(receiver.dst)
-  if (!srcNode || !dstNode) return
-
-  const src = toScreen(srcNode.x, srcNode.y)
-  const dst = toScreen(dstNode.x, dstNode.y)
-  const dx = dst.x - src.x
-  const dy = dst.y - src.y
-  const pathLength = Math.hypot(dx, dy)
-  if (pathLength < 1) return
-
-  const ux = dx / pathLength
-  const uy = dy / pathLength
-  const nx = -uy
-  const ny = ux
-  const pathDuration = Math.max(1, receiver.rx_start_us - packet.tx_start_us)
-  const frontRatio = Math.max(0, Math.min(1, (now - packet.tx_start_us) / pathDuration))
-  const tailRatio = Math.max(0, Math.min(1, (now - (packet.tx_start_us + packet.tx_duration_us)) / pathDuration))
-  const startRatio = Math.min(tailRatio, frontRatio)
-  const endRatio = Math.max(tailRatio, frontRatio)
-  if (endRatio <= 0) return
-
-  const segStartX = src.x + (dx * startRatio)
-  const segStartY = src.y + (dy * startRatio)
-  const segEndX = src.x + (dx * endRatio)
-  const segEndY = src.y + (dy * endRatio)
-  const pulse = 0.7 + (Math.sin((phase * (8 + fx)) + (packet.tx_start_us * 0.000001)) * 0.3)
-  const halfWidth = (2.6 + (pulse * 1.6)) * (fx > 1 ? 1.26 : 1)
-  const color = packetSegmentColor(packet, receiver, now, profile)
-  const angle = Math.atan2(dy, dx)
-
-  ctx.save()
-  ctx.setLineDash([2, 7])
-  ctx.lineDashOffset = -((phase * 48) + (packet.tx_start_us * 0.000002))
-  ctx.lineCap = 'round'
-  ctx.strokeStyle = profile.ring
-  ctx.globalAlpha = 0.72
-  ctx.lineWidth = 1.8
-  ctx.beginPath()
-  ctx.moveTo(src.x, src.y)
-  ctx.lineTo(dst.x, dst.y)
-  ctx.stroke()
-  ctx.restore()
-
-  ctx.save()
-  ctx.shadowColor = color
-  ctx.shadowBlur = (8 + (pulse * 10)) * (fx > 1 ? 1.8 : 1)
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.moveTo(segStartX + (nx * halfWidth), segStartY + (ny * halfWidth))
-  ctx.lineTo(segEndX + (nx * halfWidth), segEndY + (ny * halfWidth))
-  ctx.lineTo(segEndX - (nx * halfWidth), segEndY - (ny * halfWidth))
-  ctx.lineTo(segStartX - (nx * halfWidth), segStartY - (ny * halfWidth))
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-
-  if (now >= receiver.rx_start_us) {
-    const linger = Math.max(0, 1 - ((now - receiver.rx_start_us) / Math.max(150_000, receiver.rx_duration_us * 0.75)))
-    if (linger > 0) {
-      fillCircle(ctx, dst.x, dst.y, 2.8, color, 0.45 + (linger * 0.3))
-    }
-  }
-
-  const headRatio = Math.max(0, Math.min(1, frontRatio))
-  const headX = src.x + (dx * headRatio)
-  const headY = src.y + (dy * headRatio)
-  fillCircle(ctx, headX, headY, (1.5 + (pulse * 1.8)) * (fx > 1 ? 1.6 : 1), color, fx > 1 ? 0.95 : 0.85)
-
-  if (fx > 1) {
-    const trailCount = 3
-    for (let i = 1; i <= trailCount; i += 1) {
-      const t = Math.max(0, headRatio - (i * 0.05))
-      const tx = src.x + (dx * t)
-      const ty = src.y + (dy * t)
-      fillCircle(
-        ctx,
-        tx,
-        ty,
-        Math.max(1.2, 2.8 - (i * 0.65)),
-        color,
-        0.3 - (i * 0.07),
-      )
-    }
-
-    drawPlanePulse(
-      ctx,
-      headX,
-      headY,
-      angle,
-      color,
-      5.5 + (pulse * 1.6),
-      0.92,
-    )
-
-    if (receiver.status !== 'ok') {
-      const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
-      if (now >= collisionAt) {
-        const impactRatio = Math.max(0, Math.min(1, (now - collisionAt) / Math.max(1, receiver.rx_duration_us)))
-        const shellX = src.x + (dx * (0.72 + (impactRatio * 0.28)))
-        const shellY = src.y + (dy * (0.72 + (impactRatio * 0.28)))
-        fillCircle(ctx, shellX, shellY, 3.6, '#fb923c', 0.92)
-        fillCircle(ctx, shellX - (ux * 8), shellY - (uy * 8), 2.2, '#fdba74', 0.5)
-        drawShellBurst(ctx, dst.x, dst.y, '#ef4444', phase + impactRatio, 1.05)
-      }
-    }
-  }
-}
-
 const drawVisiblePackets = (ctx, profile, phase, fx) => {
   const now = props.currentTime
   for (const packet of props.visiblePackets) {
     for (const receiver of packet.receivers) {
       if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
-      drawPacketRect(ctx, packet, receiver, now, profile, phase, fx)
+      const srcNode = nodeById.value.get(packet.src)
+      const dstNode = nodeById.value.get(receiver.dst)
+      if (!srcNode || !dstNode) continue
+      drawPacketRect(
+        ctx,
+        { src: toScreen(srcNode.x, srcNode.y), dst: toScreen(dstNode.x, dstNode.y) },
+        packet,
+        receiver,
+        now,
+        profile,
+        phase,
+        fx,
+      )
     }
   }
+}
+
+const paintMeasurements = (ctx) => {
+  const lines = measurementLines.value.map((item) => {
+    const start = resolveMeasurePoint(item.start)
+    const end = resolveMeasurePoint(item.end)
+    return {
+      id: item.id,
+      start: toScreen(start.x, start.y),
+      end: toScreen(end.x, end.y),
+      distanceText: `${distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`,
+      isSelected: selectedMeasurementId.value === item.id,
+    }
+  })
+  let pendingPoint = null
+  if (toolMode.value === TOOL_MODES.MEASURE && pendingMeasurePoint.value) {
+    const pending = resolveMeasurePoint(pendingMeasurePoint.value)
+    pendingPoint = toScreen(pending.x, pending.y)
+  }
+  drawMeasureLinesView(ctx, lines, pendingPoint, displayWidth.value, displayHeight.value)
 }
 
 const drawNode = (ctx, node, visual, profile, phase, fx) => {
@@ -908,164 +603,6 @@ const drawNode = (ctx, node, visual, profile, phase, fx) => {
   ctx.restore()
 }
 
-const drawMeasurementLines = (ctx) => {
-  for (const item of measurementLines.value) {
-    const start = resolveMeasurePoint(item.start)
-    const end = resolveMeasurePoint(item.end)
-    const p1 = toScreen(start.x, start.y)
-    const p2 = toScreen(end.x, end.y)
-    const dx = p2.x - p1.x
-    const dy = p2.y - p1.y
-    const angle = Math.atan2(dy, dx)
-    const isSelected = selectedMeasurementId.value === item.id
-
-    ctx.save()
-    ctx.strokeStyle = isSelected ? 'rgba(251, 191, 36, 0.98)' : 'rgba(56, 189, 248, 0.94)'
-    ctx.setLineDash([8, 8])
-    ctx.lineWidth = isSelected ? 3 : 2.2
-    ctx.beginPath()
-    ctx.moveTo(p1.x, p1.y)
-    ctx.lineTo(p2.x, p2.y)
-    ctx.stroke()
-    ctx.restore()
-
-    fillCircle(ctx, p1.x, p1.y, isSelected ? 5.5 : 4.5, isSelected ? 'rgba(251, 191, 36, 0.98)' : 'rgba(56, 189, 248, 0.95)')
-    fillCircle(ctx, p2.x, p2.y, isSelected ? 5.5 : 4.5, isSelected ? 'rgba(251, 191, 36, 0.98)' : 'rgba(56, 189, 248, 0.95)')
-
-    const labelText = `${distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`
-    const midX = (p1.x + p2.x) / 2
-    const midY = (p1.y + p2.y) / 2
-    ctx.save()
-    ctx.font = '11px "IBM Plex Sans", "Segoe UI", sans-serif'
-    const textWidth = ctx.measureText(labelText).width
-    const boxX = midX - (textWidth / 2) - 6
-    const boxY = midY - 19
-    roundedRectPath(ctx, boxX, boxY, textWidth + 12, 18, 8)
-    ctx.fillStyle = isSelected ? 'rgba(66, 32, 6, 0.92)' : 'rgba(8, 18, 34, 0.88)'
-    ctx.fill()
-    ctx.strokeStyle = isSelected ? 'rgba(251, 191, 36, 0.62)' : 'rgba(56, 189, 248, 0.5)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-    ctx.fillStyle = '#e2e8f0'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(labelText, midX, boxY + 9.5)
-    ctx.restore()
-
-    ctx.save()
-    ctx.strokeStyle = isSelected ? '#fbbf24' : '#60a5fa'
-    ctx.lineWidth = 1.2
-    ctx.beginPath()
-    ctx.moveTo(midX - 5, midY - 12)
-    ctx.lineTo(midX + 5, midY - 12)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(midX - 5, midY - 12)
-    ctx.lineTo(midX - 5 + (Math.cos(angle) * 10), midY - 12 + (Math.sin(angle) * 10))
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(midX + 5, midY - 12)
-    ctx.lineTo(midX + 5 + (Math.cos(angle) * 10), midY - 12 + (Math.sin(angle) * 10))
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  if (toolMode.value === TOOL_MODES.MEASURE && pendingMeasurePoint.value) {
-    const pendingPoint = resolveMeasurePoint(pendingMeasurePoint.value)
-    const p = toScreen(pendingPoint.x, pendingPoint.y)
-    ctx.save()
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)'
-    ctx.fillStyle = 'rgba(251, 191, 36, 0.95)'
-    ctx.setLineDash([4, 4])
-    ctx.lineWidth = 1.8
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(0, p.y)
-    ctx.lineTo(displayWidth.value, p.y)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(p.x, 0)
-    ctx.lineTo(p.x, displayHeight.value)
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
-    ctx.fillText('起点', p.x + 10, p.y - 10)
-    ctx.restore()
-  }
-}
-
-const pickWorldGridStep = (pxPerMeter) => {
-  const raw = 56 / Math.max(pxPerMeter, 1e-9)
-  const nice = [5, 10, 20, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000]
-  for (const value of nice) {
-    if (value >= raw * 0.85) return value
-  }
-  return nice[nice.length - 1]
-}
-
-const drawWorldGrid = (ctx, w, h) => {
-  const topLeft = toWorld(0, 0)
-  const topRight = toWorld(w, 0)
-  const bottomLeft = toWorld(0, h)
-  const bottomRight = toWorld(w, h)
-  const minX = Math.min(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x)
-  const maxX = Math.max(topLeft.x, topRight.x, bottomLeft.x, bottomRight.x)
-  const minY = Math.min(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y)
-  const maxY = Math.max(topLeft.y, topRight.y, bottomLeft.y, bottomRight.y)
-  const step = pickWorldGridStep(effectiveScale.value)
-  const majorStep = step * 4
-  const startX = Math.floor(minX / step) * step
-  const startY = Math.floor(minY / step) * step
-  const startMajorX = Math.floor(minX / majorStep) * majorStep
-  const startMajorY = Math.floor(minY / majorStep) * majorStep
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(0, 0, w, h)
-  ctx.clip()
-
-  ctx.strokeStyle = 'rgba(191, 219, 254, 0.12)'
-  ctx.lineWidth = 1
-  for (let x = startX; x <= maxX + (step * 0.01); x += step) {
-    const a = toScreen(x, minY)
-    const b = toScreen(x, maxY)
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-  }
-  for (let y = startY; y <= maxY + (step * 0.01); y += step) {
-    const a = toScreen(minX, y)
-    const b = toScreen(maxX, y)
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-  }
-
-  ctx.strokeStyle = 'rgba(191, 219, 254, 0.2)'
-  ctx.lineWidth = 1.2
-  for (let x = startMajorX; x <= maxX + (majorStep * 0.01); x += majorStep) {
-    const a = toScreen(x, minY)
-    const b = toScreen(x, maxY)
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-  }
-  for (let y = startMajorY; y <= maxY + (majorStep * 0.01); y += majorStep) {
-    const a = toScreen(minX, y)
-    const b = toScreen(maxX, y)
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-  }
-  ctx.restore()
-}
-
 const draw = () => {
   const canvas = canvasEl.value
   if (!canvas) return
@@ -1095,7 +632,7 @@ const draw = () => {
   background.addColorStop(1, profile.bg[2])
   ctx.fillStyle = background
   ctx.fillRect(0, 0, w, h)
-  drawWorldGrid(ctx, w, h)
+  drawWorldGrid(ctx, w, h, projection.value)
 
   drawVisiblePackets(ctx, profile, phase, fx)
 
@@ -1166,7 +703,7 @@ const draw = () => {
   }
   ctx.restore()
 
-  drawMeasurementLines(ctx)
+  paintMeasurements(ctx)
 }
 
 const nodesInMarquee = (box) => {
