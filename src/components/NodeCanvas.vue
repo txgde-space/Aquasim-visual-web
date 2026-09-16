@@ -127,27 +127,28 @@ import {
   computeBounds,
   computeContentOrigin,
   computeScale,
+  NODE_HIT_EXTRA_PX,
   nodeRadiusFor,
   toScreenPoint,
   toWorldPoint,
   viewInsetsFor,
 } from '@/features/canvas2d/lib/coordinate'
 import {
-  colorMix,
-  fillCircle,
-  strokeCircle,
-} from '@/features/canvas2d/lib/draw/primitives'
-import {
-  drawCarrierNode,
-  drawSubmarineNode,
-} from '@/features/canvas2d/lib/draw/nodes'
-import { drawPacketRect } from '@/features/canvas2d/lib/draw/packets'
-import { drawWorldGrid } from '@/features/canvas2d/lib/draw/grid'
-import { drawMeasurementLines as drawMeasureLinesView } from '@/features/canvas2d/lib/draw/measure'
+  drawEditGhosts,
+  drawHudText,
+  drawMarqueeBox,
+  drawNodeBody,
+  drawSelectionRing,
+  drawVisiblePacketSet,
+  paintMeasurementOverlay,
+  paintSceneBackdrop,
+  syncCanvasContext,
+} from '@/features/canvas2d/lib/draw/scene'
 import { useCanvasLoop } from '@/features/canvas2d/composables/useCanvasLoop'
 import { useCanvasView } from '@/features/canvas2d/composables/useCanvasView'
 import { useMeasureTool } from '@/features/canvas2d/composables/useMeasureTool'
 import { TOOL_MODES, usePointerTools } from '@/features/canvas2d/composables/usePointerTools'
+import { useNodeTooltip } from '@/features/canvas2d/composables/useNodeTooltip'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -166,10 +167,7 @@ const props = defineProps({
 })
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
-const fxIntensity = computed(() => {
-  if (props.fxLevel === 'extreme') return 2.2
-  return 1
-})
+const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
 const canvasEl = ref(null)
 const containerEl = ref(null)
 const displayWidth = ref(900)
@@ -179,13 +177,7 @@ const hoverCursor = ref({ x: 0, y: 0 })
 const viewInsets = computed(() => viewInsetsFor(displayWidth.value, displayHeight.value))
 const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)))
 const emit = defineEmits([
-  'node-select',
-  'pause-request',
-  'node-move',
-  'node-move-end',
-  'node-place',
-  'selection-change',
-  'nodes-move',
+  'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
   'protocol-drop',
 ])
 let resizeObserver = null
@@ -199,12 +191,7 @@ const effectiveScale = computed(() => scale.value * zoom.value)
 
 const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value, scale.value))
 
-const projection = computed(() => ({
-  bounds: bounds.value,
-  origin: contentOrigin.value,
-  scale: effectiveScale.value,
-  pan: pan.value,
-}))
+const projection = computed(() => ({ bounds: bounds.value, origin: contentOrigin.value, scale: effectiveScale.value, pan: pan.value }))
 
 const loop = useCanvasLoop(() => draw)
 const { scheduleDraw } = loop
@@ -260,7 +247,7 @@ const toWorld = (x, y) => toWorldPoint(x, y, projection.value)
 const pickNodeAt = (sx, sy) => {
   let picked = null
   let bestDist = Number.POSITIVE_INFINITY
-  const hit = nodeRadius.value + 4
+  const hit = nodeRadius.value + NODE_HIT_EXTRA_PX
   const thresholdSq = hit * hit
 
   for (const node of props.nodes) {
@@ -358,249 +345,40 @@ const {
   deleteSelectedMeasurement,
 } = measure
 
-const hoveredNode = computed(() => {
-  if (!hoveredNodeId.value) return null
-  return nodeById.value.get(hoveredNodeId.value) || null
+const {
+  hoveredNode,
+  hoveredNodePos,
+  hoveredNodeStats,
+  hoveredTooltipStyle,
+  nodeLabel,
+  nodeTitle,
+} = useNodeTooltip({
+  hoveredNodeId,
+  nodeById,
+  nodeVisualById,
+  toScreenFn: toScreen,
+  getVisiblePackets: () => props.visiblePackets,
+  displayWidth,
+  displayHeight,
+  hoverCursor,
 })
-
-const hoveredNodePos = computed(() => {
-  if (!hoveredNode.value) return null
-  return toScreen(hoveredNode.value.x, hoveredNode.value.y)
-})
-
-const hoveredNodeVisual = computed(() => {
-  if (!hoveredNode.value) return null
-  return nodeVisualById.value.get(hoveredNode.value.node_id) || null
-})
-
-const nodeLabel = (node) => `Node ${node.node_id}`
-const nodeTitle = (node) => node.name ? `${nodeLabel(node)} · ${node.name}` : nodeLabel(node)
-
-const hoveredNodeStats = computed(() => {
-  const node = hoveredNode.value
-  if (!node) return null
-  const visual = hoveredNodeVisual.value
-
-  let txLinks = 0
-  let rxLinks = 0
-  let okCount = 0
-  let collisionRxRxCount = 0
-  let collisionRxTxCount = 0
-  let failCount = 0
-  const packetIds = new Set()
-  const reasonSet = new Set()
-
-  for (const packet of props.visiblePackets) {
-    if (packet.src === node.node_id) {
-      txLinks += packet.receivers.length
-      packetIds.add(packet.packet_id)
-    }
-    for (const receiver of packet.receivers) {
-      if (receiver.dst !== node.node_id) continue
-      rxLinks += 1
-      packetIds.add(packet.packet_id)
-      if (receiver.status === 'ok') okCount += 1
-      else {
-        failCount += 1
-        if (receiver.reason === 'collision_rx_rx') collisionRxRxCount += 1
-        else if (receiver.reason === 'collision_rx_tx') collisionRxTxCount += 1
-        if (receiver.reason) reasonSet.add(receiver.reason)
-      }
-    }
-  }
-
-  const modeLabelMap = {
-    idle: 'IDLE',
-    tx: 'TX',
-    rx: 'RX',
-    'rx-done': 'RX-DONE',
-    collision: 'COLLISION',
-    'collision-linger': 'COLLISION',
-  }
-
-  const packetList = [...packetIds]
-  const reasonText = reasonSet.size ? [...reasonSet].join(' / ') : '无'
-  return {
-    modeLabel: modeLabelMap[visual?.mode] || 'IDLE',
-    packetText: visual?.packetId || '无',
-    txLinks,
-    rxLinks,
-    okCount,
-    collisionRxRxCount,
-    collisionRxTxCount,
-    failCount,
-    packetListText: packetList.length ? packetList.join(', ') : '无',
-    reasonText,
-  }
-})
-
-const hoveredTooltipStyle = computed(() => {
-  if (!hoveredNodePos.value) return null
-  const compact = displayWidth.value < 720 || displayHeight.value < 520
-  const estimatedWidth = compact ? 280 : 360
-  const estimatedHeight = compact ? 180 : 210
-  const margin = 8
-  const gap = 16
-  const cursorX = hoverCursor.value.x
-  const cursorY = hoverCursor.value.y
-  let x = cursorX + gap
-  let y = cursorY - (estimatedHeight * 0.46)
-
-  if (x + estimatedWidth > (displayWidth.value - margin)) {
-    x = cursorX - estimatedWidth - gap
-  }
-  if (x < margin) {
-    x = margin
-  }
-  if (y + estimatedHeight > (displayHeight.value - margin)) {
-    y = displayHeight.value - estimatedHeight - margin
-  }
-  if (y < margin) {
-    y = margin
-  }
-
-  return {
-    left: `${x}px`,
-    top: `${y}px`,
-  }
-})
-
-const drawVisiblePackets = (ctx, profile, phase, fx) => {
-  const now = props.currentTime
-  for (const packet of props.visiblePackets) {
-    for (const receiver of packet.receivers) {
-      if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
-      const srcNode = nodeById.value.get(packet.src)
-      const dstNode = nodeById.value.get(receiver.dst)
-      if (!srcNode || !dstNode) continue
-      drawPacketRect(
-        ctx,
-        { src: toScreen(srcNode.x, srcNode.y), dst: toScreen(dstNode.x, dstNode.y) },
-        packet,
-        receiver,
-        now,
-        profile,
-        phase,
-        fx,
-      )
-    }
-  }
-}
 
 const paintMeasurements = (ctx) => {
-  const lines = measurementLines.value.map((item) => {
-    const start = measure.resolveMeasurePoint(item.start)
-    const end = measure.resolveMeasurePoint(item.end)
-    return {
-      id: item.id,
-      start: toScreen(start.x, start.y),
-      end: toScreen(end.x, end.y),
-      distanceText: `${measure.distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`,
-      isSelected: selectedMeasurementId.value === item.id,
-    }
+  paintMeasurementOverlay(ctx, measurementLines.value, {
+    resolvePoint: measure.resolveMeasurePoint,
+    distanceOf: measure.distanceByMeasurePoints,
+    toScreen,
+    selectedId: selectedMeasurementId.value,
+    pendingPoint: pendingMeasurePoint.value,
+    showPending: toolMode.value === TOOL_MODES.MEASURE,
+    width: displayWidth.value,
+    height: displayHeight.value,
   })
-  let pendingPoint = null
-  if (toolMode.value === TOOL_MODES.MEASURE && pendingMeasurePoint.value) {
-    const pending = measure.resolveMeasurePoint(pendingMeasurePoint.value)
-    pendingPoint = toScreen(pending.x, pending.y)
-  }
-  drawMeasureLinesView(ctx, lines, pendingPoint, displayWidth.value, displayHeight.value)
-}
-
-const drawNode = (ctx, node, visual, profile, phase, fx) => {
-  const p = toScreen(node.x, node.y)
-  const r = nodeRadius.value
-  const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, r + 6)
-  idleGradient.addColorStop(0, profile.idleInner)
-  idleGradient.addColorStop(1, profile.idleOuter)
-
-  const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
-  fillCircle(ctx, p.x, p.y, r, idleGradient, 0.92)
-  strokeCircle(ctx, p.x, p.y, r, profile.nodeStroke, 1.4, 0.9)
-
-  const pulse = 0.5 + (Math.sin((phase * (4.2 + (fx * 0.8))) + (node.node_id * 0.6)) * 0.5)
-  strokeCircle(ctx, p.x, p.y, r + 4 + (pulse * 3), profile.ring, 1, 0.35 + (pulse * 0.3))
-  if (fx > 1) {
-    strokeCircle(ctx, p.x, p.y, r + 10 + (pulse * 6), profile.ring, 1.2, 0.3)
-  }
-
-  if (visual.mode === 'tx') {
-    const progressRadius = 3 + ((r - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, profile.tx, 0.98)
-    strokeCircle(ctx, p.x, p.y, r + 8 + (pulse * 5), profile.tx, 1.2, 0.35)
-
-    if (visual.overlay?.kind === 'collision_rx_tx') {
-      fillCircle(ctx, p.x, p.y, r * 0.8, profile.bad, 0.78)
-    }
-  } else if (visual.mode === 'rx' || visual.mode === 'rx-done') {
-    const progressRadius = visual.mode === 'rx-done'
-      ? r
-      : 3 + ((r - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, profile.rx, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, r + 7 + (pulse * 4), profile.rx, 1, 0.28)
-  } else if (visual.mode === 'collision' || visual.mode === 'collision-linger') {
-    fillCircle(ctx, p.x, p.y, r, profile.bad, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, r + 10 + (pulse * 4), profile.bad, 1.6, 0.5)
-    if (fx > 1) {
-      for (let i = 0; i < 3; i += 1) {
-        const rr = r + 13 + (i * 7) + (((phase * 42) + (i * 8)) % 10)
-        strokeCircle(ctx, p.x, p.y, rr, profile.bad, 1.1, 0.22 - (i * 0.05))
-      }
-    }
-  }
-
-  if (fx > 1) {
-    const baseColor = visual.mode === 'collision' || visual.mode === 'collision-linger'
-      ? profile.bad
-      : visual.mode === 'tx'
-        ? profile.tx
-        : visual.mode === 'rx' || visual.mode === 'rx-done'
-          ? profile.rx
-          : profile.idleInner
-    const strokeColor = colorMix(baseColor, '#ffffff', 0.32)
-    ctx.save()
-    if (isSink) drawCarrierNode(ctx, p, baseColor, strokeColor, profile, phase)
-    else drawSubmarineNode(ctx, p, baseColor, strokeColor, profile, pulse)
-    ctx.restore()
-  }
-
-  ctx.save()
-  ctx.fillStyle = '#f8fafc'
-  ctx.font = fx > 1 ? '700 10px "IBM Plex Sans", "Segoe UI", sans-serif' : '600 11px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(String(node.node_id), p.x, p.y + (fx > 1 ? 20 : 0.5))
-  ctx.restore()
-
-  ctx.save()
-  ctx.fillStyle = profile.label
-  ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'alphabetic'
-  const labelOffset = fx > 1 ? r + 14 : r + 10
-  ctx.fillText(node.name, p.x + labelOffset, p.y + 2)
-  ctx.fillStyle = profile.depth
-  ctx.font = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillText(`z ${Number(node.z ?? 0).toFixed(2)}m`, p.x + labelOffset, p.y + 16)
-  ctx.restore()
 }
 
 const draw = () => {
-  const canvas = canvasEl.value
-  if (!canvas) return
-
-  const ctx = canvas.getContext('2d')
+  const ctx = syncCanvasContext(canvasEl.value, displayWidth.value, displayHeight.value)
   if (!ctx) return
-
-  const dpr = window.devicePixelRatio || 1
-  if (
-    canvas.width !== Math.floor(displayWidth.value * dpr)
-    || canvas.height !== Math.floor(displayHeight.value * dpr)
-  ) {
-    canvas.width = Math.floor(displayWidth.value * dpr)
-    canvas.height = Math.floor(displayHeight.value * dpr)
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  }
 
   const w = displayWidth.value
   const h = displayHeight.value
@@ -608,38 +386,20 @@ const draw = () => {
   const fx = fxIntensity.value
   const phase = props.currentTime / 1_000_000
 
-  const background = ctx.createRadialGradient(w * 0.2, h * 0.18, 0, w * 0.2, h * 0.18, Math.max(w, h))
-  background.addColorStop(0, profile.bg[0])
-  background.addColorStop(0.45, profile.bg[1])
-  background.addColorStop(1, profile.bg[2])
-  ctx.fillStyle = background
-  ctx.fillRect(0, 0, w, h)
-  drawWorldGrid(ctx, w, h, projection.value)
-
-  drawVisiblePackets(ctx, profile, phase, fx)
+  paintSceneBackdrop(ctx, w, h, profile, projection.value)
+  drawVisiblePacketSet(
+    ctx,
+    props.visiblePackets,
+    props.currentTime,
+    (id) => nodeById.value.get(id),
+    toScreen,
+    profile,
+    phase,
+    fx,
+  )
 
   if (props.editMode && props.originalPositions.length) {
-    ctx.save()
-    ctx.lineCap = 'butt'
-    ctx.setLineDash([11, 5])
-    ctx.lineWidth = 1.7
-    ctx.strokeStyle = 'rgba(245, 158, 11, 0.78)'
-    for (const original of props.originalPositions) {
-      const current = nodeById.value.get(original.node_id)
-      const from = toScreen(original.x, original.y)
-      ctx.beginPath()
-      ctx.arc(from.x, from.y, 8, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.12)'
-      ctx.fill()
-      ctx.stroke()
-      if (!current) continue
-      const to = toScreen(current.x, current.y)
-      ctx.beginPath()
-      ctx.moveTo(from.x, from.y)
-      ctx.lineTo(to.x, to.y)
-      ctx.stroke()
-    }
-    ctx.restore()
+    drawEditGhosts(ctx, props.originalPositions, (id) => nodeById.value.get(id), toScreen)
   }
 
   for (const node of props.nodes) {
@@ -652,38 +412,18 @@ const draw = () => {
       statusText: '空闲',
       packetId: null,
     }
-    drawNode(ctx, node, visual, profile, phase, fx)
+    drawNodeBody(ctx, node, visual, profile, phase, fx, nodeRadius.value, toScreen(node.x, node.y))
     const selected = selectedIdSet.value.has(Number(node.node_id)) || props.selectedNodeId === node.node_id
     if (props.editMode && selected) {
-      const p = toScreen(node.x, node.y)
-      strokeCircle(ctx, p.x, p.y, 22, profile.idleInner, 2.1, 0.95)
+      drawSelectionRing(ctx, toScreen(node.x, node.y), profile)
     }
   }
 
   if (marquee.value) {
-    const x = Math.min(marquee.value.x0, marquee.value.x1)
-    const y = Math.min(marquee.value.y0, marquee.value.y1)
-    const wBox = Math.abs(marquee.value.x1 - marquee.value.x0)
-    const hBox = Math.abs(marquee.value.y1 - marquee.value.y0)
-    ctx.save()
-    ctx.fillStyle = 'rgba(56, 189, 248, 0.12)'
-    ctx.strokeStyle = 'rgba(125, 211, 252, 0.9)'
-    ctx.lineWidth = 1.2
-    ctx.setLineDash([5, 4])
-    ctx.fillRect(x, y, wBox, hBox)
-    ctx.strokeRect(x, y, wBox, hBox)
-    ctx.restore()
+    drawMarqueeBox(ctx, marquee.value)
   }
 
-  ctx.save()
-  ctx.fillStyle = profile.label
-  ctx.font = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
-  ctx.fillText(`time: ${(props.currentTime / 1000).toFixed(1)} ms`, 18, 22)
-  if (props.visiblePackets.length === 1) {
-    ctx.fillStyle = profile.idleInner
-    ctx.fillText(`focus: ${props.visiblePackets[0].packet_id}`, 18, 42)
-  }
-  ctx.restore()
+  drawHudText(ctx, profile, props.currentTime, props.visiblePackets)
 
   paintMeasurements(ctx)
 }

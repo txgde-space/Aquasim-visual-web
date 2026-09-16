@@ -33,6 +33,9 @@ export const SCALE_FIT_FACTOR = 0.86
 /** Smallest canvas edge that still counts as a roomy layout. */
 export const COMPACT_VIEWPORT_THRESHOLD_PX = 640
 
+/** Extra pixels beyond the node radius within which a node is pickable. */
+export const NODE_HIT_EXTRA_PX = 4
+
 const MIN_NODE_RADIUS_PX = 11
 
 export const viewInsetsFor = (width: number, height: number): ViewInsets => {
