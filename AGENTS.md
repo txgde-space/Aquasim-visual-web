@@ -19,14 +19,26 @@ src/
 │   ├── scene3d/   # Babylon.js：NodeScene3D.vue + 场景库（themes3d/factories/worldAxes/useBabylonScene）
 │   ├── replay/    # 回放：lib/ 纯函数（解析/规范化/合并/几何）+ composables + 面板组件
 │   └── experiment/# 实验：lib/（spec/catalog/scratch 生成）+ useTopologyEditor/useRunExperiment
-├── components/    # 跨功能域共享的 Vue 组件（NodeCanvas/ExperimentPanel/ProtocolDrawer）
+├── components/    # 跨功能域共享的 Vue 组件（NodeCanvas/ExperimentPanel/ProtocolDrawer/SplitPane/ThemePicker + useUiTheme/useUiPrefs）
 ├── shared/        # 准入标准见下
 └── styles/        # 全局 CSS：main.css（令牌/重置）、themes.css（关键帧）、pages/*.css（按域）
 ```
 
-- **功能域单向依赖**：pages → features → shared；features 之间不互相 import（replay 不依赖 experiment，反之亦然）。跨域需求下沉到 `shared/` 或 props/emit。
+- **功能域单向依赖**：pages → features → shared；features 之间不互相 import（replay 不依赖 experiment，反之亦然）。跨域需求下沉到 `shared/` 或 props/emit。components/ 可引用 features 的 lib（NodeCanvas → canvas2d/themes 为先例）；features 不反向引用 components（跨域 UI 由 pages 组装或经 slot 注入，见 ReplayToolbar 的 ThemePicker 插槽）。
 - **组件私有样式**写在 SFC `<style scoped>`；只有跨组件的全局规则才进 `src/styles/`。
 - 删除/新增全局 CSS 规则时，先用 `grep -r` 确认选择器在全仓库（含模板动态 `:class`、模板字符串拼接）无引用。
+
+## UI 约定（岛屿式布局与设计系统）
+
+- **布局范式**：画布全幅（`.deck-canvas` 绝对铺满 `.deck`），所有面板为浮动岛屿 dock（`.dock` + `.dock-left/.dock-right/.dock-top` 绝对定位，圆角 + 半透明 + backdrop blur）；页面骨架 `.page` = deck + `.statusbar`（mono 字体状态栏）。旧的 `wb*` 三列 grid 外壳已废弃，不得恢复。
+- **dock-right 定位**：SplitPane 作右侧岛屿时用 `.deck > .split-pane.dock-right`（三级类特异性压过组件 scoped 的 `position/height`，降为两级会被 scoped 反压，已踩过）。
+- **画布安全边距**：NodeCanvas 的 `viewPadding` prop（额外 px inset，叠加在 `viewInsetsFor` 基础上）用于让默认视图避开浮动岛屿；页面经 SplitPane 的 `update:width` 同步面板宽度传入。
+- **双主题令牌**：`main.css` 定义 dark（默认）/ light 全套令牌，经 `document.documentElement[data-theme]` 切换；`components/useUiTheme.ts` 负责读写与持久化（`aquasim_ui_theme`）。新增颜色一律走令牌，禁止写死色值（canvas 内部绘制颜色由 `features/canvas2d/lib/themes.ts` 主题包管，不受 UI 主题影响）。
+- **tailwind 已移除**：样式全部手写令牌 + 按域 CSS，不要重新引入工具类框架。
+- **画布主题**：8 套主题（THEME_PROFILES）经 `components/ThemePicker.vue`（顶栏右侧）切换，`components/useUiPrefs.ts` 的 `useCanvasTheme()` 跨页共享并持久化（`aquasim_canvas_theme`），默认值 `research-lab`。
+- **SplitPane**：右侧岛屿宽度容器（拖拽/双击复位/键盘方向键/localStorage），实验页 `aquasim_split_inspect`、回放页 `aquasim_split_log`；localStorage key 统一登记在 `shared/constants.ts` 的 `LOCAL_STORAGE_KEYS`（`aquasim_*` 前缀）。
+- **z-index 刻度**：1-2 画布内图层；10 浮动 dock 与画布工具栏；30 弹层菜单；80 全屏弹层。
+- **表单标签规范**：中文主标签 + mono 参数名辅标（`.field-param`），时间类参数接受带单位字符串（如 `30s`）；`txPower` 输入框已移除（生成器从未消费该字段，spec JSON 字段保留勿删）。
 
 ## shared/ 准入标准
 
@@ -51,7 +63,7 @@ src/
 - `AQUA_SIM_HOME` 指向的 aqua-sim-dev 未配置时，运行仿真返回明确错误（不影响回放功能）。
 - build 的 chunk size 警告（rolldown，>500 kB）为现状，不阻断；是否 code-split 属产品决策。
 - 日志格式与解析语义冻结：别名兼容逻辑保留，只收敛写法，不改语义。
-- Out of scope（重构计划明确不做）：不引入 Pinia / 测试框架 / UI 组件库；不改 Babylon 与 tailwind 大版本；不做视觉 redesign。
+- Out of scope（重构计划明确不做）：不引入 Pinia / 测试框架 / UI 组件库 / 图标库；不改 Babylon 大版本。
 
 ## vue-tsc 已知坑（踩过）
 

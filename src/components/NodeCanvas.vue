@@ -20,9 +20,10 @@
           v-if="allowPlaceNode"
           class="toolbar-btn"
           :class="{ active: toolMode === 'place' }"
+          title="在画布上点击放置新节点"
           @click="activatePlaceTool"
         >
-          添加
+          放置节点
         </button>
 
 
@@ -58,6 +59,19 @@
             <path d="M14.5 10.5 9.5 15.5" />
           </svg>
         </button>
+        <button class="toolbar-btn toolbar-btn-icon" @click="resetView" title="回到默认位置" aria-label="回到默认位置">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 4v4" />
+            <path d="M12 16v4" />
+            <path d="M4 12h4" />
+            <path d="M16 12h4" />
+            <path d="M7.5 7.5l2.5 2.5" />
+            <path d="M14 14l2.5 2.5" />
+            <path d="M16.5 7.5 14 10" />
+            <path d="M10 14l-2.5 2.5" />
+            <circle cx="12" cy="12" r="3.5" />
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -72,19 +86,6 @@
       @pointerleave="onCanvasPointerLeave"
     />
 
-    <button class="canvas-reset-view" @click="resetView" title="回到默认位置" aria-label="回到默认位置">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4v4" />
-        <path d="M12 16v4" />
-        <path d="M4 12h4" />
-        <path d="M16 12h4" />
-        <path d="M7.5 7.5l2.5 2.5" />
-        <path d="M14 14l2.5 2.5" />
-        <path d="M16.5 7.5 14 10" />
-        <path d="M10 14l-2.5 2.5" />
-        <circle cx="12" cy="12" r="3.5" />
-      </svg>
-    </button>
     <div
       v-if="hoveredNodePos && hoveredNode && hoveredNodeStats"
       class="node-tooltip"
@@ -164,6 +165,8 @@ const props = defineProps({
   selectedNodeId: { type: [Number, String], default: null },
   selectedNodeIds: { type: Array, default: () => [] },
   soundSpeedMps: { type: Number, default: 1500 },
+  /* 额外安全边距（px），为浮动 dock 留出默认视图空间：{ left, top, right, bottom } */
+  viewPadding: { type: Object, default: null },
 })
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
@@ -174,7 +177,17 @@ const displayWidth = ref(900)
 const displayHeight = ref(520)
 const hoveredNodeId = ref(null)
 const hoverCursor = ref({ x: 0, y: 0 })
-const viewInsets = computed(() => viewInsetsFor(displayWidth.value, displayHeight.value))
+const viewInsets = computed(() => {
+  const base = viewInsetsFor(displayWidth.value, displayHeight.value)
+  const extra = props.viewPadding
+  if (!extra) return base
+  return {
+    left: base.left + (Number(extra.left) || 0),
+    top: base.top + (Number(extra.top) || 0),
+    right: base.right + (Number(extra.right) || 0),
+    bottom: base.bottom + (Number(extra.bottom) || 0),
+  }
+})
 const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)))
 const emit = defineEmits([
   'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
@@ -518,54 +531,6 @@ onBeforeUnmount(() => {
   gap: 0.45rem;
 }
 
-.canvas-reset-view {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 12px;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
-  background: color-mix(in srgb, var(--card, #0b1a2d) 86%, #020617 14%);
-  backdrop-filter: blur(6px);
-  color: var(--accent-soft, #dbeafe);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: transform 130ms ease, box-shadow 180ms ease, border-color 180ms ease, filter 160ms ease;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 5px 14px rgba(2, 8, 20, 0.26);
-}
-
-.canvas-reset-view:hover {
-  border-color: color-mix(in srgb, var(--accent-soft, #93c5fd) 48%, transparent);
-  filter: brightness(1.06);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 18px color-mix(in srgb, var(--accent, #38bdf8) 22%, transparent);
-}
-
-.canvas-reset-view:active {
-  transform: translateY(1.5px) scale(0.96);
-  box-shadow:
-    inset 0 3px 9px rgba(2, 8, 20, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 2px 6px rgba(2, 8, 20, 0.22);
-}
-
-.canvas-reset-view svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .toolbar-group {
   display: inline-flex;
   align-items: center;
@@ -890,13 +855,6 @@ onBeforeUnmount(() => {
 
   .toolbar-help {
     font-size: 0.68rem;
-  }
-
-  .canvas-reset-view {
-    top: 8px;
-    right: 8px;
-    width: 32px;
-    height: 32px;
   }
 
   .node-tooltip {

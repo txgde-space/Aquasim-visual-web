@@ -110,7 +110,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
 </script>
 
 <template>
-  <aside class="wb-inspect card log">
+  <aside class="log-panel">
     <div class="side-controls">
       <details class="panel-section" open>
         <summary>日志源</summary>
@@ -164,7 +164,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             </select>
           </label>
           <label v-if="replayMode === 'lifecycle'" class="field field-compact field-span-2">
-            <span>选择包</span>
+            <span>选择数据包</span>
             <select class="select" :value="selectedLifecyclePacketId" @change="emit('lifecyclePacketChange', $event)">
               <option
                 v-for="packet in lifecyclePacketOptions"

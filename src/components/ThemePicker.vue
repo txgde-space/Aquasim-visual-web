@@ -140,7 +140,7 @@ onBeforeUnmount(() => {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  z-index: 6;
+  z-index: 30;
   min-width: 188px;
   padding: 4px;
   border: 1px solid var(--line);

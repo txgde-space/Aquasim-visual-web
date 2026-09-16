@@ -127,10 +127,10 @@ onBeforeUnmount(() => {
 }
 .split-handle {
   position: absolute;
-  left: -3px;
+  left: 0;
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: 7px;
   cursor: col-resize;
   z-index: 5;
   touch-action: none;
@@ -138,10 +138,11 @@ onBeforeUnmount(() => {
 .split-handle::after {
   content: '';
   position: absolute;
-  left: 2px;
+  left: 1px;
   top: 0;
   bottom: 0;
   width: 2px;
+  border-radius: 2px;
   background: transparent;
   transition: background 0.15s ease;
 }

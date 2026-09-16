@@ -47,7 +47,9 @@ export const useTopologyEditor = () => {
     selectedNodes.value.length === 1 ? selectedNodes.value[0] : null
   ))
   const selectedMacId: ComputedRef<string> = computed(() => experimentForm.value.macId || 'swarm')
-  const selectedSummary = computed(() => `${selectedNodes.value.length} 选中`)
+  const selectedSummary = computed(() =>
+    selectedNodes.value.length ? `已选 ${selectedNodes.value.length} 个节点` : '未选中节点',
+  )
 
   /** Nodes handed to the canvas: form-level protocol fields merged in. */
   const canvasNodes = computed(() => editNodes.value.map((node) => ({

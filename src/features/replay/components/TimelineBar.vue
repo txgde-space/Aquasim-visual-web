@@ -24,11 +24,31 @@ const onInput = (event: Event) => {
 </script>
 
 <template>
-  <div class="wb-timeline">
-    <button class="btn btn-compact primary" @click="emit('togglePlay')">{{ isPlaying ? '暂停' : '播放' }}</button>
-    <button class="btn btn-compact" @click="emit('reset')">重置</button>
-    <span class="wb-time">{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }}</span>
-    <label class="field range-wrap">
+  <div class="dock transport">
+    <button class="tp-reset" title="重置" aria-label="重置" @click="emit('reset')">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
+      </svg>
+    </button>
+    <button
+      class="tp-play"
+      :title="isPlaying ? '暂停' : '播放'"
+      :aria-label="isPlaying ? '暂停' : '播放'"
+      @click="emit('togglePlay')"
+    >
+      <svg v-if="!isPlaying" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 5.5v13l11-6.5z" />
+      </svg>
+      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+      </svg>
+    </button>
+    <div class="tp-time">
+      <span class="tp-now">{{ timeDisplay(currentTime) }}</span>
+      <span class="tp-total">/ {{ timeDisplay(cycleEndUs) }}</span>
+    </div>
+    <label class="range-wrap">
       <input
         class="range"
         type="range"
@@ -37,12 +57,12 @@ const onInput = (event: Event) => {
         :step="1000"
         :value="currentTime"
         :style="{ '--range-progress': rangeProgressStyle }"
+        aria-label="回放进度"
         @input="onInput"
       />
     </label>
-    <label class="tl-speed">
-      <span>倍速</span>
-      <select class="select" :value="speed" @change="emit('speedChange', $event)">
+    <label class="tp-speed">
+      <select class="select" :value="speed" aria-label="倍速" @change="emit('speedChange', $event)">
         <option v-for="option in SPEED_OPTIONS" :key="option" :value="option">{{ option }}x</option>
       </select>
     </label>

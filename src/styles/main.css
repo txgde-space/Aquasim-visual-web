@@ -1,58 +1,62 @@
 /* 基础层：设计令牌（亮/暗双主题）、重置、全局元素 */
 /*
- * z-index 刻度（现状约定，新增层级时对齐）：
- *   1-2  画布内图层 / 日志内容层（event-track、log-content）
- *   3-5  工作台悬浮件（rail、canvas 工具栏/提示、SplitPane 手柄）
- *   6    小屏覆盖面板（split-pane/flyout）与弹层菜单（tp-menu）
- *   80   全屏弹层（code-modal-backdrop）
+ * z-index 刻度（新增层级时对齐）：
+ *   1-2   画布内图层 / 日志内容层（event-track、log-content）
+ *   10    浮动 dock（目录/检查器/命令条/transport/控制台）与画布工具栏
+ *   30    弹层菜单（tp-menu）
+ *   80    全屏弹层（code-modal-backdrop）
  */
 
-/* ---------- 暗色主题（默认） ---------- */
+/* ---------- 暗色主题（默认）：深海控制台 ---------- */
 :root,
 [data-theme="dark"] {
   /* surface */
-  --bg: #101114;
-  --app-bg: #101114;
-  --panel: #16171c;
-  --card: #16171c;
-  --raised: #1c1d24;
-  --sunken: #0c0d10; /* 最深层背景：工作台/画布/控制台 */
-  --overlay: #1e2028; /* 弹层表面 */
+  --bg: #0a0e15;
+  --app-bg: #0a0e15;
+  --panel: rgba(17, 23, 34, 0.88);
+  --panel-solid: #111722;
+  --card: #111722;
+  --raised: #1a2231;
+  --sunken: #060a11; /* 最深层背景：画布/控制台/列表 */
+  --overlay: #151d2c; /* 弹层表面 */
   /* 文本 */
-  --text: #ececef;
-  --muted: #8b8d97;
-  --faint: #6b6e78; /* 比 muted 更弱：辅助说明 */
+  --text: #e8ecf3;
+  --muted: #8b93a5;
+  --faint: #5d6474; /* 比 muted 更弱：辅助说明 */
   /* 语义色 */
-  --accent: #5b8def;
-  --accent-soft: #8eb0f5;
+  --accent: #4cc3ff;
+  --accent-soft: #8fd9ff;
   --idle: #7aa2f7;
   --tx: #f0a14a;
   --rx: #3dd68c;
   --bad: #f07178;
   --warn: #e6b450;
-  --on-accent: #ffffff;
+  --on-accent: #05283c;
   /* 控件与效果 */
-  --btn-top: #23242c;
-  --btn-bottom: #1c1d24;
-  --line: rgba(255, 255, 255, 0.07);
+  --btn-top: #1e2736;
+  --btn-bottom: #171f2c;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
   --shadow: none;
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
-  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.55);
+  --shadow-island: 0 14px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+  /* 字体 */
+  --font-ui: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  /* 圆角 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
   /* 尺寸 */
-  --page-pad: 0;
-  --page-gap: 0;
-  --panel-pad: 0.85rem;
-  --card-pad: 0.85rem;
-  --title-size: 1.05rem;
-  --ui-font-size: 13.5px;
-  --ui-line: 1.45;
-  --sidebar-min: 300px;
-  --card-grid-cols: minmax(0, 1fr) minmax(var(--sidebar-min), 320px);
+  --topbar-h: 44px;
+  --statusbar-h: 26px;
+  --dock-gap: 12px;
   --btn-h: 34px;
   --btn-compact-h: 30px;
   --select-h: 30px;
-  --card-radius: 0;
-  --panel-radius: 0;
+  --ui-font-size: 13.5px;
+  --ui-line: 1.45;
   --eyebrow-size: 0.68rem;
   --meta-size: 0.8rem;
   --legend-size: 0.78rem;
@@ -61,37 +65,39 @@
   --log-item-pad-x: 0.55rem;
   --view-switch-w: 52px;
   --view-switch-h: 28px;
-  --nav-h: 46px;
 }
 
-/* ---------- 亮色主题 ---------- */
+/* ---------- 亮色主题：实验报告纸面 ---------- */
 [data-theme="light"] {
-  --bg: #f5f6f8;
-  --app-bg: #f5f6f8;
-  --panel: #ffffff;
+  --bg: #e9edf3;
+  --app-bg: #e9edf3;
+  --panel: rgba(255, 255, 255, 0.92);
+  --panel-solid: #ffffff;
   --card: #ffffff;
-  --raised: #eef0f4;
-  --sunken: #e7e9ee;
+  --raised: #f2f5f9;
+  --sunken: #dde3ec;
   --overlay: #ffffff;
-  --text: #1a1c22;
-  --muted: #5d6472;
-  --faint: #9aa1ad;
-  --accent: #2f6bde;
-  --accent-soft: #2456b8;
+  --text: #1a2230;
+  --muted: #5b6474;
+  --faint: #98a1af;
+  --accent: #0284c7;
+  --accent-soft: #0369a1;
   --idle: #3b6fd4;
   --tx: #c26d1a;
-  --rx: #1a9e63;
+  --rx: #15803d;
   --bad: #d64550;
-  --warn: #b07d1e;
+  --warn: #a16207;
   --on-accent: #ffffff;
   --btn-top: #ffffff;
-  --btn-bottom: #eef0f4;
-  --line: rgba(0, 0, 0, 0.1);
+  --btn-bottom: #eef1f6;
+  --line: rgba(15, 23, 42, 0.1);
+  --line-strong: rgba(15, 23, 42, 0.18);
   --shadow: 0 1px 2px rgba(16, 17, 20, 0.06);
-  --shadow-pop: 0 18px 48px rgba(16, 24, 40, 0.18);
+  --shadow-pop: 0 18px 48px rgba(16, 24, 40, 0.2);
+  --shadow-island: 0 14px 36px rgba(16, 24, 40, 0.14), 0 2px 8px rgba(16, 24, 40, 0.08);
 }
 
-/* ---------- 重置（原 tailwind preflight 覆盖部分） ---------- */
+/* ---------- 重置 ---------- */
 *,
 ::before,
 ::after {
@@ -136,7 +142,7 @@ svg {
 a {
   color: inherit;
 }
-/* 现状基线：项目内 ul/ol 均不依赖原生列表样式（含 .experiment-warnings） */
+/* 现状基线：项目内 ul/ol 均不依赖原生列表样式 */
 ul,
 ol {
   list-style: none;
@@ -148,12 +154,38 @@ ol {
   box-shadow: var(--focus-ring);
 }
 
+/* ---------- 全局滚动条 ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 38%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 38%, transparent);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 html,
 body {
   margin: 0;
   background: var(--app-bg);
   color: var(--text);
-  font: var(--ui-font-size)/var(--ui-line) var(--font-ui, "IBM Plex Sans", "Segoe UI", sans-serif);
+  font: var(--ui-font-size)/var(--ui-line) var(--font-ui);
   width: 100%;
   height: 100%;
   max-height: 100dvh;
@@ -172,40 +204,26 @@ body {
 }
 
 @media (max-width: 1680px), (max-height: 980px) {
-    :root {
-      --page-pad: 0.5rem;
-      --page-gap: 0.45rem;
-      --panel-pad: 0.5rem;
-      --card-pad: 0.5rem;
-      --title-size: 1.5rem;
-      --ui-font-size: 13px;
-      --ui-line: 1.4;
-      --sidebar-min: 280px;
-      --card-grid-cols: minmax(0, 1fr) minmax(260px, min(320px, 34vw));
-      --btn-h: 30px;
-      --btn-compact-h: 28px;
-      --select-h: 26px;
-      --card-radius: 10px;
-      --panel-radius: 10px;
-      --eyebrow-size: 0.66rem;
-      --meta-size: 0.78rem;
-      --legend-size: 0.74rem;
-      --stat-size: 0.74rem;
-      --log-item-pad-y: 0.32rem;
-      --log-item-pad-x: 0.48rem;
-      --view-switch-w: 46px;
-      --view-switch-h: 26px;
-    }
+  :root {
+    --ui-font-size: 13px;
+    --ui-line: 1.4;
+    --btn-h: 30px;
+    --btn-compact-h: 28px;
+    --select-h: 26px;
+    --eyebrow-size: 0.66rem;
+    --meta-size: 0.78rem;
+    --legend-size: 0.74rem;
+    --stat-size: 0.74rem;
+    --log-item-pad-y: 0.32rem;
+    --log-item-pad-x: 0.48rem;
+    --view-switch-w: 46px;
+    --view-switch-h: 26px;
+  }
 }
 
 @media (max-height: 760px) {
-    :root {
-      --page-pad: 0.32rem;
-      --page-gap: 0.3rem;
-      --panel-pad: 0.38rem;
-      --card-pad: 0.38rem;
-      --title-size: 1.32rem;
-      --btn-compact-h: 26px;
-      --select-h: 24px;
-    }
+  :root {
+    --btn-compact-h: 26px;
+    --select-h: 24px;
+  }
 }

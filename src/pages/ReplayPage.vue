@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, watch } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
-import ThemePicker from '../components/ThemePicker.vue'
 import { useCanvasTheme } from '../components/useUiPrefs'
 import { session } from '../shared/sessionStore'
 import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
 import { parseLog } from '@/features/replay/lib/logParser'
+import { timeDisplay } from '@/features/replay/lib/format'
 import { usePlaybackEngine } from '@/features/replay/composables/usePlaybackEngine'
 import { useReplayState } from '@/features/replay/composables/useReplayState'
 import { useLogPanel } from '@/features/replay/composables/useLogPanel'
@@ -54,6 +54,7 @@ const {
 } = playback
 
 const { canvasTheme } = useCanvasTheme()
+const logWidth = ref(340)
 
 const {
   logSourceKey,
@@ -178,19 +179,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="wb replay-wb" :class="{ 'wb-inspect-open': logPanelOpen }">
-    <div class="wb-stage">
-      <ReplayToolbar
-        :is-edit-mode="isEditMode"
-        :visual-mode="visualMode"
-        :log-panel-open="logPanelOpen"
-        @set-interaction-mode="setInteractionMode"
-        @update:visual-mode="onVisualModeChange"
-        @toggle-log-panel="onToggleLogPanel"
-      >
-        <ThemePicker v-model="canvasTheme" />
-      </ReplayToolbar>
-      <div class="wb-canvas visual-main">
+  <section class="page">
+    <div class="deck">
+      <div class="deck-canvas">
         <NodeCanvas
           v-if="visualMode === '2d'"
           :nodes="nodesState"
@@ -203,6 +194,7 @@ onBeforeUnmount(() => {
           :original-positions="originalEditPositions"
           :selected-node-id="selectedEditNodeId ?? undefined"
           :sound-speed-mps="editSoundSpeed"
+          :view-padding="{ top: 24, right: logPanelOpen ? logWidth : 0 }"
           @pause-request="pauseForTool"
           @node-move="onEditNodeMove"
           @node-move-end="onEditNodeMoveEnd"
@@ -231,6 +223,67 @@ onBeforeUnmount(() => {
           </template>
         </Suspense>
       </div>
+
+      <ReplayToolbar
+        :is-edit-mode="isEditMode"
+        :visual-mode="visualMode"
+        :log-panel-open="logPanelOpen"
+        @set-interaction-mode="setInteractionMode"
+        @update:visual-mode="onVisualModeChange"
+        @toggle-log-panel="onToggleLogPanel"
+      />
+
+      <SplitPane
+        v-show="logPanelOpen"
+        class="dock-right"
+        :default-width="340"
+        :min="280"
+        :max="520"
+        :storage-key="LOCAL_STORAGE_KEYS.splitLog"
+        @update:width="logWidth = $event"
+      >
+        <LogPanel
+          :show-all-active-packets="showAllActivePackets"
+          :is-playing="isPlaying"
+          :replay-mode="replayMode"
+          :log-source-key="logSourceKey"
+          :is-custom-log="isCustomLog"
+          :custom-log-select-label="customLogSelectLabel"
+          :fx-level="fxLevel"
+          :fx-level-options="FX_LEVEL_OPTIONS"
+          :is-edit-mode="isEditMode"
+          :edit-sound-speed="editSoundSpeed"
+          :selected-edit-node="selectedEditNode"
+          :selected-lifecycle-packet-id="selectedLifecyclePacketId"
+          :lifecycle-packet-options="lifecyclePacketOptions"
+          :lifecycle-packet="lifecyclePacket"
+          :active-lifecycle-stage="activeLifecycleStage"
+          :lifecycle-stages="lifecycleStages"
+          :parse-errors="parseErrors"
+          :visible-packet-entries="visiblePacketEntries"
+          :current-packet-ids="currentPacketIds"
+          :focused-packet-id="focusedPacketId"
+          :summary="summary"
+          :original-summary="originalSummary"
+          :global-active-event-id="globalActiveEventId"
+          :lifecycle-active-event-id="lifecycleActiveEventId"
+          @update:show-all-active-packets="onShowAllActiveChange"
+          @log-file-change="onLogFileChange"
+          @node-log-files-change="onNodeLogFilesChange"
+          @sample-log-change="onSampleLogChange"
+          @replay-mode-change="onReplayModeChange"
+          @edit-sound-speed-change="onEditSoundSpeedChange"
+          @fx-level-change="onFxLevelChange"
+          @coord-change="onEditCoordChange"
+          @restore-selected="restoreSelectedEditNode"
+          @restore-all="restoreAllEditNodes"
+          @lifecycle-packet-change="onLifecyclePacketChange"
+          @log-select="onLogSelect"
+          @stage-select="onLifecycleStageSelect"
+          @track-pointer-down="onEventTrackPointerDown"
+        />
+      </SplitPane>
+
       <TimelineBar
         :current-time="currentTime"
         :cycle-end-us="cycleEndUs"
@@ -244,53 +297,13 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <SplitPane
-      v-show="logPanelOpen"
-      :default-width="340"
-      :min="280"
-      :max="520"
-      :storage-key="LOCAL_STORAGE_KEYS.splitLog"
-    >
-      <LogPanel
-        :show-all-active-packets="showAllActivePackets"
-        :is-playing="isPlaying"
-        :replay-mode="replayMode"
-        :log-source-key="logSourceKey"
-      :is-custom-log="isCustomLog"
-      :custom-log-select-label="customLogSelectLabel"
-      :fx-level="fxLevel"
-      :fx-level-options="FX_LEVEL_OPTIONS"
-      :is-edit-mode="isEditMode"
-      :edit-sound-speed="editSoundSpeed"
-      :selected-edit-node="selectedEditNode"
-      :selected-lifecycle-packet-id="selectedLifecyclePacketId"
-      :lifecycle-packet-options="lifecyclePacketOptions"
-      :lifecycle-packet="lifecyclePacket"
-      :active-lifecycle-stage="activeLifecycleStage"
-      :lifecycle-stages="lifecycleStages"
-      :parse-errors="parseErrors"
-      :visible-packet-entries="visiblePacketEntries"
-      :current-packet-ids="currentPacketIds"
-      :focused-packet-id="focusedPacketId"
-      :summary="summary"
-      :original-summary="originalSummary"
-      :global-active-event-id="globalActiveEventId"
-      :lifecycle-active-event-id="lifecycleActiveEventId"
-        @update:show-all-active-packets="onShowAllActiveChange"
-        @log-file-change="onLogFileChange"
-        @node-log-files-change="onNodeLogFilesChange"
-        @sample-log-change="onSampleLogChange"
-        @replay-mode-change="onReplayModeChange"
-      @edit-sound-speed-change="onEditSoundSpeedChange"
-      @fx-level-change="onFxLevelChange"
-      @coord-change="onEditCoordChange"
-      @restore-selected="restoreSelectedEditNode"
-      @restore-all="restoreAllEditNodes"
-      @lifecycle-packet-change="onLifecyclePacketChange"
-      @log-select="onLogSelect"
-      @stage-select="onLifecycleStageSelect"
-        @track-pointer-down="onEventTrackPointerDown"
-      />
-    </SplitPane>
-  </div>
+    <footer class="statusbar">
+      <span class="sb-item">{{ replayMode === 'lifecycle' ? '生命周期' : '全局' }} · {{ isCustomLog ? customLogSelectLabel : '示例日志' }}</span>
+      <span class="sb-item">成功 <b>{{ summary.okReceivers }}</b></span>
+      <span class="sb-item">rx-rx <b>{{ summary.rxrxCollisions }}</b></span>
+      <span class="sb-item">rx-tx <b>{{ summary.rxtxCollisions }}</b></span>
+      <span class="sb-spacer"></span>
+      <span class="sb-item">{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }} · {{ speed }}x</span>
+    </footer>
+  </section>
 </template>

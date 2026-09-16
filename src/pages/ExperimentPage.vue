@@ -5,7 +5,6 @@ import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
 import SplitPane from '../components/SplitPane.vue'
-import ThemePicker from '../components/ThemePicker.vue'
 import { useCanvasTheme } from '../components/useUiPrefs'
 import { LOCAL_STORAGE_KEYS } from '../shared/constants'
 import { session } from '../shared/sessionStore'
@@ -43,6 +42,7 @@ const {
 
 const copyHint = ref('')
 const inspectOpen = ref(true)
+const inspectWidth = ref(300)
 const { canvasTheme } = useCanvasTheme()
 
 // 底部控制台：可折叠为标题条，拖拽上边缘调高
@@ -142,29 +142,9 @@ const copyJson = async () => {
 </script>
 
 <template>
-  <section class="wb" :class="{ 'wb-inspect-open': inspectOpen }">
-    <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
-
-    <div ref="stageEl" class="wb-stage">
-      <header class="wb-chrome">
-        <div class="wb-chrome-left">
-          <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
-          <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除</button>
-        </div>
-        <div class="wb-chrome-mid">
-          <span class="wb-stack-brief">{{ stackBrief }}</span>
-        </div>
-        <div class="wb-chrome-right">
-          <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
-          <ThemePicker v-model="canvasTheme" />
-          <button class="btn btn-compact" @click="inspectOpen = !inspectOpen">{{ inspectOpen ? '收起属性' : '属性' }}</button>
-          <button class="wb-run" data-testid="exp-run" :disabled="runStatus === 'running'" @click="onRun">
-            {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
-          </button>
-        </div>
-      </header>
-
-      <div class="wb-canvas">
+  <section class="page">
+    <div ref="stageEl" class="deck">
+      <div class="deck-canvas">
         <NodeCanvas
           :nodes="canvasNodes"
           :node-visuals="nodeVisuals"
@@ -179,6 +159,7 @@ const copyJson = async () => {
           :selected-node-id="selectedEditNode?.node_id ?? undefined"
           :selected-node-ids="selectedIds"
           :sound-speed-mps="1500"
+          :view-padding="{ left: 232, top: 24, right: inspectOpen ? inspectWidth : 0, bottom: 0 }"
           @node-move="onNodeMove"
           @nodes-move="onNodesMove"
           @node-select="onNodeSelect"
@@ -188,25 +169,100 @@ const copyJson = async () => {
         />
       </div>
 
+      <div class="dock dock-left">
+        <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
+      </div>
+
+      <div class="dock dock-top cmd-bar">
+        <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
+        <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除</button>
+        <span class="cmd-sep" aria-hidden="true"></span>
+        <span class="stack-brief">{{ stackBrief }}</span>
+        <span class="cmd-sep" aria-hidden="true"></span>
+        <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
+        <button class="btn btn-compact" :class="{ active: inspectOpen }" @click="inspectOpen = !inspectOpen">属性</button>
+        <button class="run-btn" data-testid="exp-run" :disabled="runStatus === 'running'" @click="onRun">
+          {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
+        </button>
+      </div>
+
+      <SplitPane
+        v-show="inspectOpen"
+        class="dock-right"
+        :default-width="300"
+        :min="240"
+        :max="480"
+        :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
+        @update:width="inspectWidth = $event"
+      >
+        <aside class="dock-body">
+          <div class="stack-board">
+            <div class="stack-board-title">协议架构</div>
+            <ol class="stack-list">
+              <li v-for="row in protocolStack" :key="row.key" class="stack-row">
+                <span class="stack-layer">{{ row.layer }}</span>
+                <span class="stack-name">{{ row.name }}</span>
+                <span class="stack-tid">{{ row.typeId }}</span>
+                <span v-if="row.source" class="stack-src">{{ row.source }}</span>
+              </li>
+            </ol>
+          </div>
+          <div class="dock-title">{{ selectedSummary }}</div>
+          <div v-if="selectedEditNode" class="coord-grid">
+            <label class="field field-compact">
+              <div class="field-head"><span>X (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="onCoordChange('x', $event)" />
+            </label>
+            <label class="field field-compact">
+              <div class="field-head"><span>Y (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="onCoordChange('y', $event)" />
+            </label>
+            <label class="field field-compact">
+              <div class="field-head"><span>Z (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="onCoordChange('z', $event)" />
+            </label>
+          </div>
+          <ExperimentPanel
+            :form="experimentForm"
+            :spec-json="experimentSpecJson"
+            :scratch-cc="generatedScratch"
+            :warnings="experimentWarnings"
+            :node-count="editNodes.length"
+            :selected-count="selectedIds.length"
+            :selected-mac-id="selectedMacId"
+            :selected-summary="selectedSummary"
+            :run-status="runStatus"
+            @update-field="setField"
+            @run="onRun"
+            @sync-from-replay="syncFromReplay"
+            @apply-to-replay="applyToReplay"
+            @add-node="() => addNode()"
+            @remove-node="removeSelected"
+            @download="downloadJson"
+            @copy="copyJson"
+          />
+        </aside>
+      </SplitPane>
+
       <footer
         v-if="consoleVisible"
-        class="wb-console"
+        class="dock console"
         :class="{ collapsed: !consoleOpen }"
         :style="consoleOpen ? { height: consoleHeight + 'px' } : undefined"
       >
         <div
           v-show="consoleOpen"
-          class="wb-console-grip"
+          class="console-grip"
           role="separator"
           aria-orientation="horizontal"
           aria-label="调整控制台高度"
           title="拖拽调整高度"
           @pointerdown="onConsoleGripDown"
         ></div>
-        <div class="wb-console-head" @click="consoleOpen = !consoleOpen">
-          <span class="wb-console-title">输出</span>
+        <div class="console-head" @click="consoleOpen = !consoleOpen">
+          <span class="console-title">输出</span>
           <span v-if="runStatusLabel" class="run-badge" :class="`is-${runStatus}`">{{ runStatusLabel }}</span>
-          <button class="wb-console-toggle" type="button" :aria-label="consoleOpen ? '收起输出' : '展开输出'">
+          <button class="console-toggle" type="button" :aria-label="consoleOpen ? '收起输出' : '展开输出'">
             <svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" :style="{ transform: consoleOpen ? 'none' : 'rotate(180deg)' }">
               <path d="M1 5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
@@ -216,62 +272,12 @@ const copyJson = async () => {
       </footer>
     </div>
 
-    <SplitPane
-      v-show="inspectOpen"
-      :default-width="300"
-      :min="240"
-      :max="480"
-      :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
-    >
-      <aside class="wb-inspect">
-      <div class="stack-board">
-        <div class="stack-board-title">协议架构</div>
-        <ol class="stack-list">
-          <li v-for="row in protocolStack" :key="row.key" class="stack-row">
-            <span class="stack-layer">{{ row.layer }}</span>
-            <span class="stack-name">{{ row.name }}</span>
-            <span class="stack-tid">{{ row.typeId }}</span>
-            <span v-if="row.source" class="stack-src">{{ row.source }}</span>
-          </li>
-        </ol>
-      </div>
-      <div class="wb-inspect-head">
-        <span>{{ selectedSummary }}</span>
-      </div>
-      <div v-if="selectedEditNode" class="coord-grid">
-        <label class="field field-compact">
-          <div class="field-head"><span>X</span></div>
-          <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="onCoordChange('x', $event)" />
-        </label>
-        <label class="field field-compact">
-          <div class="field-head"><span>Y</span></div>
-          <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="onCoordChange('y', $event)" />
-        </label>
-        <label class="field field-compact">
-          <div class="field-head"><span>Z</span></div>
-          <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="onCoordChange('z', $event)" />
-        </label>
-      </div>
-      <ExperimentPanel
-        :form="experimentForm"
-        :spec-json="experimentSpecJson"
-        :scratch-cc="generatedScratch"
-        :warnings="experimentWarnings"
-        :node-count="editNodes.length"
-        :selected-count="selectedIds.length"
-        :selected-mac-id="selectedMacId"
-        :selected-summary="selectedSummary"
-        :run-status="runStatus"
-        @update-field="setField"
-        @run="onRun"
-        @sync-from-replay="syncFromReplay"
-        @apply-to-replay="applyToReplay"
-        @add-node="() => addNode()"
-        @remove-node="removeSelected"
-        @download="downloadJson"
-        @copy="copyJson"
-      />
-      </aside>
-    </SplitPane>
+    <footer class="statusbar">
+      <span class="sb-item"><span class="sb-dot" :class="`is-${runStatus}`"></span>{{ runStatusLabel || '就绪' }}</span>
+      <span class="sb-item">节点 <b>{{ editNodes.length }}</b></span>
+      <span class="sb-item">选中 <b>{{ selectedIds.length }}</b></span>
+      <span class="sb-spacer"></span>
+      <span class="sb-item">{{ stackBrief }}</span>
+    </footer>
   </section>
 </template>
