@@ -10,7 +10,13 @@ interface DragEventState {
   maxUs: number
   left: number
   width: number
+  startX: number
+  startY: number
+  moved: boolean
 }
+
+/** A press that travels farther than this counts as a drag, not a click. */
+export const DRAG_CLICK_THRESHOLD_PX = 6
 
 /** Minimal shape needed to seek by dragging an event track (LogPanel builds this for lifecycle stages). */
 export interface PacketTrackTarget {
@@ -57,12 +63,11 @@ export const useLogPanel = ({
   }
 
   const onLogSelect = (packet: PacketEntry) => {
-    if (suppressLogClick.value === packet.eventId) {
-      suppressLogClick.value = null
-      return
-    }
-
-    if (activeDragEvent.value && activeDragEvent.value.eventId === packet.eventId) {
+    // Consume-on-read: any click clears the flag, so a stale suppression
+    // from a drag released off-item cannot eat a future genuine click.
+    const suppressedEventId = suppressLogClick.value
+    suppressLogClick.value = null
+    if (suppressedEventId === packet.eventId) {
       return
     }
 
@@ -94,12 +99,22 @@ export const useLogPanel = ({
       maxUs: startUs + durationUs,
       left: rect.left,
       width: Math.max(rect.width, 1),
+      startX: (event as PointerEvent).clientX,
+      startY: (event as PointerEvent).clientY,
+      moved: false,
     }
-    suppressLogClick.value = packet.eventId
   }
 
   const onGlobalPointerMove = (event: PointerEvent) => {
     if (!activeDragEvent.value) return
+
+    if (!activeDragEvent.value.moved) {
+      const dx = Math.abs(event.clientX - activeDragEvent.value.startX)
+      const dy = Math.abs(event.clientY - activeDragEvent.value.startY)
+      if (Math.max(dx, dy) > DRAG_CLICK_THRESHOLD_PX) {
+        activeDragEvent.value = { ...activeDragEvent.value, moved: true }
+      }
+    }
 
     const durationUs = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
     const ratio = clampRatio((event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width)
@@ -107,11 +122,9 @@ export const useLogPanel = ({
   }
 
   const onGlobalPointerUp = () => {
-    if (activeDragEvent.value) {
-      const eventId = activeDragEvent.value.eventId
-      requestAnimationFrame(() => {
-        if (suppressLogClick.value === eventId) suppressLogClick.value = null
-      })
+    if (activeDragEvent.value?.moved) {
+      // The gesture was a drag: suppress the click that follows pointerup.
+      suppressLogClick.value = activeDragEvent.value.eventId
     }
     activeDragEvent.value = null
   }
