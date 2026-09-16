@@ -35,7 +35,6 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const logSourceKey: Ref<string> = ref('default')
   const uploadedLogName: Ref<string> = ref('')
   const uploadedNodeLogNames: Ref<string[]> = ref([])
-  const selectedTheme: Ref<string> = ref('research-lab')
   const fxLevel: Ref<string> = ref('standard')
   const replayMode: Ref<string> = ref('global')
   const selectedLifecyclePacketId: Ref<string> = ref('')
@@ -411,7 +410,6 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     logSourceKey,
     uploadedLogName,
     uploadedNodeLogNames,
-    selectedTheme,
     fxLevel,
     replayMode,
     selectedLifecyclePacketId,

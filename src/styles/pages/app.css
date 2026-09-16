@@ -97,21 +97,50 @@
   grid-template-columns: minmax(0, 1fr);
 }
 .replay-wb.wb-inspect-open {
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 .wb-time {
   color: var(--muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.wb-transport {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
-  padding: 0.4rem 0.9rem 0.55rem;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--sunken) 92%, transparent));
+.wb-timeline {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.wb-timeline .range-wrap {
+  display: flex;
+  align-items: center;
+}
+.wb-timeline .range {
+  margin-top: 0;
+}
+.tl-speed {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+.tl-speed .select {
+  width: auto;
+  height: var(--select-h);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--text);
+  padding: 0 0.4rem;
+}
+.wb-hint-chip {
+  color: var(--warn);
+  font-size: 0.72rem;
+  white-space: nowrap;
 }
 .rail-wrap {
   display: flex;

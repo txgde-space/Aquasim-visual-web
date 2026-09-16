@@ -1,18 +1,4 @@
 /* 回放页：视图切换、日志列表、事件轨道、统计 */
-.edit-3d-hint {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 3;
-  padding: 0.35rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent-soft) 30%, transparent);
-  background: color-mix(in srgb, var(--card) 88%, #020617 12%);
-  color: var(--accent-soft);
-  font-size: 0.78rem;
-  pointer-events: none;
-}
 .tag-sim {
   background: rgba(56, 189, 248, 0.16);
   border-color: rgba(56, 189, 248, 0.42);
@@ -113,14 +99,47 @@
   flex: 1;
   min-height: 0;
 }
-.visual-main > .edit-3d-hint {
-  flex: 0 0 auto;
+.panel-section {
+  border: 0;
+  margin: 0 0 0.4rem;
 }
-.visual-timeline {
-  margin-top: 0.45rem;
-  border-top: 1px solid var(--line);
-  padding-top: 0.35rem;
-  flex-shrink: 0;
+.panel-section > summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.15rem 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.panel-section > summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.15s ease;
+}
+.panel-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+.panel-section > summary:hover {
+  color: var(--text);
+}
+.panel-section > .control-btn-row,
+.panel-section > .control-fields-grid,
+.panel-section > .field,
+.panel-section > .btn-wide {
+  margin-top: 0.35rem;
+}
+.panel-section .control-btn-row + .field {
+  margin-top: 0.4rem;
 }
 .side-controls {
   margin-bottom: 0.45rem;
@@ -497,11 +516,6 @@
   .side-controls {
     margin-bottom: 0.32rem;
     padding-bottom: 0.32rem;
-  }
-
-  .visual-timeline {
-    margin-top: 0.28rem;
-    padding-top: 0.22rem;
   }
 
   .stat-grid {

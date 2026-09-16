@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
+import SplitPane from '../components/SplitPane.vue'
+import ThemePicker from '../components/ThemePicker.vue'
+import { useCanvasTheme } from '../components/useUiPrefs'
 import { session } from '../shared/sessionStore'
 import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
 import { parseLog } from '@/features/replay/lib/logParser'
@@ -50,10 +53,11 @@ const {
   onSpeed,
 } = playback
 
+const { canvasTheme } = useCanvasTheme()
+
 const {
   logSourceKey,
   uploadedLogName,
-  selectedTheme,
   fxLevel,
   replayMode,
   selectedLifecyclePacketId,
@@ -177,18 +181,15 @@ onBeforeUnmount(() => {
   <div class="wb replay-wb" :class="{ 'wb-inspect-open': logPanelOpen }">
     <div class="wb-stage">
       <ReplayToolbar
-        :is-playing="isPlaying"
         :is-edit-mode="isEditMode"
         :visual-mode="visualMode"
         :log-panel-open="logPanelOpen"
-        :current-time="currentTime"
-        :cycle-end-us="cycleEndUs"
-        @toggle-play="togglePlay"
-        @reset="reset"
         @set-interaction-mode="setInteractionMode"
         @update:visual-mode="onVisualModeChange"
         @toggle-log-panel="onToggleLogPanel"
-      />
+      >
+        <ThemePicker v-model="canvasTheme" />
+      </ReplayToolbar>
       <div class="wb-canvas visual-main">
         <NodeCanvas
           v-if="visualMode === '2d'"
@@ -196,7 +197,7 @@ onBeforeUnmount(() => {
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
           :current-time="currentTime"
-          :theme-key="selectedTheme"
+          :theme-key="canvasTheme"
           :fx-level="fxLevel"
           :edit-mode="isEditMode"
           :original-positions="originalEditPositions"
@@ -214,7 +215,7 @@ onBeforeUnmount(() => {
               :node-visuals="nodeVisuals"
               :visible-packets="displayPackets"
               :current-time="currentTime"
-              :theme-key="selectedTheme"
+              :theme-key="canvasTheme"
               :fx-level="fxLevel"
             />
           </template>
@@ -229,23 +230,32 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </Suspense>
-        <div v-if="isEditMode && visualMode === '3d'" class="edit-3d-hint">2D</div>
-        <TimelineBar
-          :current-time="currentTime"
-          :cycle-end-us="cycleEndUs"
-          :range-progress-style="rangeProgressStyle"
-          @seek="seekTime"
-        />
       </div>
+      <TimelineBar
+        :current-time="currentTime"
+        :cycle-end-us="cycleEndUs"
+        :range-progress-style="rangeProgressStyle"
+        :is-playing="isPlaying"
+        :speed="speed"
+        @seek="seekTime"
+        @toggle-play="togglePlay"
+        @reset="reset"
+        @speed-change="onSpeed"
+      />
     </div>
 
-    <LogPanel
+    <SplitPane
       v-show="logPanelOpen"
-      :show-all-active-packets="showAllActivePackets"
-      :is-playing="isPlaying"
-      :replay-mode="replayMode"
-      :speed="speed"
-      :log-source-key="logSourceKey"
+      :default-width="340"
+      :min="280"
+      :max="520"
+      :storage-key="LOCAL_STORAGE_KEYS.splitLog"
+    >
+      <LogPanel
+        :show-all-active-packets="showAllActivePackets"
+        :is-playing="isPlaying"
+        :replay-mode="replayMode"
+        :log-source-key="logSourceKey"
       :is-custom-log="isCustomLog"
       :custom-log-select-label="customLogSelectLabel"
       :fx-level="fxLevel"
@@ -266,14 +276,11 @@ onBeforeUnmount(() => {
       :original-summary="originalSummary"
       :global-active-event-id="globalActiveEventId"
       :lifecycle-active-event-id="lifecycleActiveEventId"
-      @update:show-all-active-packets="onShowAllActiveChange"
-      @toggle-play="togglePlay"
-      @reset="reset"
-      @log-file-change="onLogFileChange"
-      @node-log-files-change="onNodeLogFilesChange"
-      @sample-log-change="onSampleLogChange"
-      @speed-change="onSpeed"
-      @replay-mode-change="onReplayModeChange"
+        @update:show-all-active-packets="onShowAllActiveChange"
+        @log-file-change="onLogFileChange"
+        @node-log-files-change="onNodeLogFilesChange"
+        @sample-log-change="onSampleLogChange"
+        @replay-mode-change="onReplayModeChange"
       @edit-sound-speed-change="onEditSoundSpeedChange"
       @fx-level-change="onFxLevelChange"
       @coord-change="onEditCoordChange"
@@ -282,7 +289,8 @@ onBeforeUnmount(() => {
       @lifecycle-packet-change="onLifecyclePacketChange"
       @log-select="onLogSelect"
       @stage-select="onLifecycleStageSelect"
-      @track-pointer-down="onEventTrackPointerDown"
-    />
+        @track-pointer-down="onEventTrackPointerDown"
+      />
+    </SplitPane>
   </div>
 </template>

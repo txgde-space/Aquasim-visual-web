@@ -179,12 +179,6 @@
   font: 0.7rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
 }
-.control-actions {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.45rem;
-  align-items: end;
-}
 .field {
   display: grid;
   gap: 0.3rem;
@@ -319,11 +313,5 @@
 @media (max-height: 760px) {
   .card-title, .card-title-row {
     margin-bottom: 0.28rem;
-  }
-}
-
-@media (max-width: 640px) {
-  .control-actions {
-    grid-template-columns: 1fr;
   }
 }

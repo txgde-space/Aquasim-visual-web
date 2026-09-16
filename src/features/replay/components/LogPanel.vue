@@ -6,7 +6,7 @@ import type {
   PacketEntry,
   ReplayNode,
 } from '@/shared/types/replay'
-import { SOUND_SPEED_OPTIONS_MPS, SPEED_OPTIONS } from '@/shared/constants'
+import { SOUND_SPEED_OPTIONS_MPS } from '@/shared/constants'
 import { LOG_SOURCES } from '../lib/sources'
 import { timeDisplay } from '../lib/format'
 import { receiverPillClass } from '../lib/packetEntries'
@@ -17,7 +17,6 @@ import StatsBar from './StatsBar.vue'
 const props = defineProps<{
   isPlaying: boolean
   replayMode: string
-  speed: number
   logSourceKey: string
   isCustomLog: boolean
   customLogSelectLabel: string
@@ -48,12 +47,9 @@ const toggleShowAllActive = () => {
 }
 
 const emit = defineEmits<{
-  togglePlay: []
-  reset: []
   logFileChange: [event: Event]
   nodeLogFilesChange: [event: Event]
   sampleLogChange: [event: Event]
-  speedChange: [event: Event]
   replayModeChange: [event: Event]
   editSoundSpeedChange: [event: Event]
   fxLevelChange: [event: Event]
@@ -116,55 +112,37 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
 <template>
   <aside class="wb-inspect card log">
     <div class="side-controls">
-      <div class="control-actions">
+      <details class="panel-section" open>
+        <summary>日志源</summary>
         <div class="control-btn-row">
-          <button class="btn btn-compact primary" @click="emit('togglePlay')">{{ isPlaying ? '暂停' : '播放' }}</button>
-          <button class="btn btn-compact" @click="emit('reset')">重置</button>
           <button class="btn btn-compact" @click="openLogFilePicker">导入全局日志</button>
           <button class="btn btn-compact" @click="openNodeLogFilePicker">导入节点日志</button>
-          <button
-            v-if="replayMode === 'global'"
-            class="btn btn-compact btn-wide"
-            :class="{ active: showAllActivePackets }"
-            @click="toggleShowAllActive"
-          >
-            {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
-          </button>
         </div>
+        <label class="field field-compact">
+          <div class="field-head">
+            <span>示例日志</span>
+            <span v-if="isCustomLog" class="field-chip">已导入</span>
+          </div>
+          <select class="select" :value="logSourceKey" @change="emit('sampleLogChange', $event)">
+            <option v-if="isCustomLog" :value="logSourceKey" disabled>{{ customLogSelectLabel }}</option>
+            <option
+              v-for="[key, source] in Object.entries(LOG_SOURCES)"
+              :key="key"
+              :value="key"
+            >
+              {{ source.label }}
+            </option>
+          </select>
+        </label>
+      </details>
+      <details class="panel-section" open>
+        <summary>回放设置</summary>
         <div class="control-fields-grid">
-          <label class="field field-compact">
-            <div class="field-head"><span>倍速</span></div>
-            <select class="select" :value="speed" @change="emit('speedChange', $event)">
-              <option v-for="option in SPEED_OPTIONS" :key="option" :value="option">{{ option }}x</option>
-            </select>
-          </label>
-          <label class="field field-compact">
-            <div class="field-head">
-              <span>示例日志</span>
-              <span v-if="isCustomLog" class="field-chip">已导入</span>
-            </div>
-            <select class="select" :value="logSourceKey" @change="emit('sampleLogChange', $event)">
-              <option v-if="isCustomLog" :value="logSourceKey" disabled>{{ customLogSelectLabel }}</option>
-              <option
-                v-for="[key, source] in Object.entries(LOG_SOURCES)"
-                :key="key"
-                :value="key"
-              >
-                {{ source.label }}
-              </option>
-            </select>
-          </label>
           <label class="field field-compact">
             <div class="field-head"><span>回放模式</span></div>
             <select class="select" :value="replayMode" @change="emit('replayModeChange', $event)">
               <option value="global">全局模式</option>
               <option value="lifecycle">生命周期模式</option>
-            </select>
-          </label>
-          <label v-if="isEditMode" class="field field-compact">
-            <div class="field-head"><span>声速</span></div>
-            <select class="select" :value="String(editSoundSpeed)" @change="emit('editSoundSpeedChange', $event)">
-              <option v-for="option in SOUND_SPEED_OPTIONS_MPS" :key="option" :value="option">{{ option }} m/s</option>
             </select>
           </label>
           <label class="field field-compact">
@@ -179,27 +157,12 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
               </option>
             </select>
           </label>
-          <div v-if="isEditMode && selectedEditNode" class="field field-compact field-span-2">
-            <div class="field-head"><span>{{ selectedEditNode.name }}（{{ selectedEditNode.node_id }}）</span></div>
-            <div class="coord-grid">
-              <label class="field field-compact">
-                <div class="field-head"><span>X (m)</span></div>
-                <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="emit('coordChange', 'x', $event)" />
-              </label>
-              <label class="field field-compact">
-                <div class="field-head"><span>Y (m)</span></div>
-                <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="emit('coordChange', 'y', $event)" />
-              </label>
-              <label class="field field-compact">
-                <div class="field-head"><span>Z (m)</span></div>
-                <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="emit('coordChange', 'z', $event)" />
-              </label>
-            </div>
-            <div class="control-btn-row coord-actions">
-              <button class="btn btn-compact" @click="emit('restoreSelected')">恢复该点</button>
-              <button class="btn btn-compact" @click="emit('restoreAll')">恢复全部</button>
-            </div>
-          </div>
+          <label v-if="isEditMode" class="field field-compact">
+            <div class="field-head"><span>声速</span></div>
+            <select class="select" :value="String(editSoundSpeed)" @change="emit('editSoundSpeedChange', $event)">
+              <option v-for="option in SOUND_SPEED_OPTIONS_MPS" :key="option" :value="option">{{ option }} m/s</option>
+            </select>
+          </label>
           <label v-if="replayMode === 'lifecycle'" class="field field-compact field-span-2">
             <span>选择包</span>
             <select class="select" :value="selectedLifecyclePacketId" @change="emit('lifecyclePacketChange', $event)">
@@ -213,22 +176,54 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             </select>
           </label>
         </div>
-        <input
-          ref="logFileInput"
-          class="hidden-file-input"
-          type="file"
-          accept=".log,.jsonl,.json,.txt,application/json,text/plain"
-          @change="emit('logFileChange', $event)"
-        />
-        <input
-          ref="nodeLogFileInput"
-          class="hidden-file-input"
-          type="file"
-          multiple
-          accept=".log,.jsonl,.json,.txt,application/json,text/plain"
-          @change="emit('nodeLogFilesChange', $event)"
-        />
-      </div>
+        <button
+          v-if="replayMode === 'global'"
+          class="btn btn-compact btn-wide"
+          :class="{ active: showAllActivePackets }"
+          @click="toggleShowAllActive"
+        >
+          {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
+        </button>
+      </details>
+      <details v-if="isEditMode && selectedEditNode" class="panel-section" open>
+        <summary>节点参数</summary>
+        <div class="field field-compact">
+          <div class="field-head"><span>{{ selectedEditNode.name }}（{{ selectedEditNode.node_id }}）</span></div>
+          <div class="coord-grid">
+            <label class="field field-compact">
+              <div class="field-head"><span>X (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="emit('coordChange', 'x', $event)" />
+            </label>
+            <label class="field field-compact">
+              <div class="field-head"><span>Y (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="emit('coordChange', 'y', $event)" />
+            </label>
+            <label class="field field-compact">
+              <div class="field-head"><span>Z (m)</span></div>
+              <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="emit('coordChange', 'z', $event)" />
+            </label>
+          </div>
+          <div class="control-btn-row coord-actions">
+            <button class="btn btn-compact" @click="emit('restoreSelected')">恢复该点</button>
+            <button class="btn btn-compact" @click="emit('restoreAll')">恢复全部</button>
+          </div>
+        </div>
+      </details>
+      <input
+        ref="logFileInput"
+        class="hidden-file-input"
+        type="file"
+        accept=".log,.jsonl,.json,.txt,application/json,text/plain"
+        @change="emit('logFileChange', $event)"
+      />
+      <input
+        ref="nodeLogFileInput"
+        class="hidden-file-input"
+        type="file"
+        multiple
+        accept=".log,.jsonl,.json,.txt,application/json,text/plain"
+        @change="emit('nodeLogFilesChange', $event)"
+      />
     </div>
     <div class="card-title">{{ isEditMode ? '推演' : (replayMode === 'lifecycle' ? '生命周期' : '日志') }}</div>
 
