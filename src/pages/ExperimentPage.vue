@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
+import SplitPane from '../components/SplitPane.vue'
+import ThemePicker from '../components/ThemePicker.vue'
+import { useCanvasTheme } from '../components/useUiPrefs'
+import { LOCAL_STORAGE_KEYS } from '../shared/constants'
 import { session } from '../shared/sessionStore'
 import { buildExperimentSpec, validateExperiment } from '@/features/experiment/lib/experimentSpec'
 import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
@@ -39,7 +43,35 @@ const {
 
 const copyHint = ref('')
 const inspectOpen = ref(true)
+const { canvasTheme } = useCanvasTheme()
+
+// 底部控制台：可折叠为标题条，拖拽上边缘调高
+const stageEl = ref<HTMLElement | null>(null)
 const consoleOpen = ref(false)
+const consoleHeight = ref(180)
+let consoleDragY = 0
+let consoleDragH = 0
+
+const onConsoleGripMove = (event: PointerEvent) => {
+  const maxH = Math.max(160, (stageEl.value?.clientHeight ?? window.innerHeight) * 0.5)
+  consoleHeight.value = Math.min(maxH, Math.max(120, consoleDragH + (consoleDragY - event.clientY)))
+}
+const onConsoleGripUp = () => {
+  window.removeEventListener('pointermove', onConsoleGripMove)
+  document.body.style.userSelect = ''
+}
+const onConsoleGripDown = (event: PointerEvent) => {
+  if (event.button !== 0) return
+  consoleDragY = event.clientY
+  consoleDragH = consoleHeight.value
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onConsoleGripMove)
+  window.addEventListener('pointerup', onConsoleGripUp, { once: true })
+}
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onConsoleGripMove)
+  document.body.style.userSelect = ''
+})
 
 const experimentSpec = computed(() => buildExperimentSpec(experimentForm.value, editNodes.value))
 const experimentWarnings = computed(() => validateExperiment(experimentSpec.value))
@@ -56,6 +88,11 @@ const { runStatus, runLog, runExperiment } = useRunExperiment({
   getSpec: () => experimentSpec.value,
   onSuccess: onRunSuccess,
 })
+
+const consoleVisible = computed(() => runStatus.value !== 'idle' || !!runLog.value)
+const runStatusLabel = computed(
+  () => ({ running: '运行中', ok: '成功', fail: '失败', idle: '' })[runStatus.value],
+)
 
 const onRun = async () => {
   await runExperiment()
@@ -105,19 +142,22 @@ const copyJson = async () => {
 </script>
 
 <template>
-  <section class="wb" :class="{ 'wb-inspect-open': inspectOpen, 'wb-console-open': consoleOpen && !!runLog }">
+  <section class="wb" :class="{ 'wb-inspect-open': inspectOpen }">
     <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
 
-    <div class="wb-stage">
+    <div ref="stageEl" class="wb-stage">
       <header class="wb-chrome">
         <div class="wb-chrome-left">
           <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
           <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除</button>
-          <button class="btn btn-compact" @click="inspectOpen = !inspectOpen">{{ inspectOpen ? '收起属性' : '属性' }}</button>
+        </div>
+        <div class="wb-chrome-mid">
           <span class="wb-stack-brief">{{ stackBrief }}</span>
         </div>
         <div class="wb-chrome-right">
           <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
+          <ThemePicker v-model="canvasTheme" />
+          <button class="btn btn-compact" @click="inspectOpen = !inspectOpen">{{ inspectOpen ? '收起属性' : '属性' }}</button>
           <button class="wb-run" data-testid="exp-run" :disabled="runStatus === 'running'" @click="onRun">
             {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
           </button>
@@ -130,7 +170,7 @@ const copyJson = async () => {
           :node-visuals="nodeVisuals"
           :visible-packets="[]"
           :current-time="0"
-          theme-key="research-lab"
+          :theme-key="canvasTheme"
           fx-level="standard"
           :edit-mode="true"
           :allow-place-node="true"
@@ -148,16 +188,42 @@ const copyJson = async () => {
         />
       </div>
 
-      <footer v-if="consoleOpen && runLog" class="wb-console">
-        <div class="wb-console-head">
-          <span>输出</span>
-          <button class="btn btn-compact" @click="consoleOpen = false">关闭</button>
+      <footer
+        v-if="consoleVisible"
+        class="wb-console"
+        :class="{ collapsed: !consoleOpen }"
+        :style="consoleOpen ? { height: consoleHeight + 'px' } : undefined"
+      >
+        <div
+          v-show="consoleOpen"
+          class="wb-console-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="调整控制台高度"
+          title="拖拽调整高度"
+          @pointerdown="onConsoleGripDown"
+        ></div>
+        <div class="wb-console-head" @click="consoleOpen = !consoleOpen">
+          <span class="wb-console-title">输出</span>
+          <span v-if="runStatusLabel" class="run-badge" :class="`is-${runStatus}`">{{ runStatusLabel }}</span>
+          <button class="wb-console-toggle" type="button" :aria-label="consoleOpen ? '收起输出' : '展开输出'">
+            <svg viewBox="0 0 10 6" width="10" height="6" aria-hidden="true" :style="{ transform: consoleOpen ? 'none' : 'rotate(180deg)' }">
+              <path d="M1 5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
         </div>
-        <pre class="run-log">{{ runLog }}</pre>
+        <pre v-show="consoleOpen" class="run-log">{{ runLog }}</pre>
       </footer>
     </div>
 
-    <aside v-show="inspectOpen" class="wb-inspect">
+    <SplitPane
+      v-show="inspectOpen"
+      :default-width="300"
+      :min="240"
+      :max="480"
+      :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
+    >
+      <aside class="wb-inspect">
       <div class="stack-board">
         <div class="stack-board-title">协议架构</div>
         <ol class="stack-list">
@@ -205,6 +271,7 @@ const copyJson = async () => {
         @download="downloadJson"
         @copy="copyJson"
       />
-    </aside>
+      </aside>
+    </SplitPane>
   </section>
 </template>

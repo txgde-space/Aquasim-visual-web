@@ -95,6 +95,7 @@
   cursor: grab;
   text-align: left;
   font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 .lib-item:hover, .lib-item.active {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
