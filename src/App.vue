@@ -39,7 +39,7 @@ const themeToggleLabel = computed(() => (theme.value === 'dark' ? '切换到亮�
     </header>
     <main class="app-main">
       <router-view v-slot="{ Component }">
-        <Transition name="page" mode="out-in">
+        <Transition name="page">
           <component :is="Component" />
         </Transition>
       </router-view>

@@ -31,14 +31,14 @@ src/
 ## UI 约定（岛屿式布局与设计系统）
 
 - **布局范式**：画布全幅（`.deck-canvas` 绝对铺满 `.deck`），所有面板为浮动岛屿 dock（`.dock` + `.dock-left/.dock-right/.dock-top` 绝对定位，圆角 + 半透明 + backdrop blur）；页面骨架 `.page` = deck + `.statusbar`（mono 字体状态栏）。旧的 `wb*` 三列 grid 外壳已废弃，不得恢复。
-- **dock-right 定位**：SplitPane 作右侧岛屿时用 `.deck > .split-pane.dock-right`（三级类特异性压过组件 scoped 的 `position/height`，降为两级会被 scoped 反压，已踩过）。
+- **面板单元（dock-unit）**：侧栏面板与其小耳朵包在一个 `.dock-unit-r`/`.dock-unit-l` 里作为整体开收——收起是整单元 transform 平移到只露出耳朵（`--ear-w`），弹簧曲线 `--ease-spring`，面板与耳朵永远一体，禁止再拆成两个独立定位的元素。单元 `pointer-events: none`，子元素各自恢复，缝隙处事件穿透到画布。
 - **画布安全边距**：NodeCanvas 的 `viewPadding` prop（额外 px inset，叠加在 `viewInsetsFor` 基础上）用于让默认视图避开浮动岛屿；值为按面板默认宽度定的**静态常量**，不随面板开收/拖宽变化——面板纯浮在画布上方，开收不得引起画布视图缩放或平移。
 - **双主题令牌**：`main.css` 定义 dark（默认）/ light 全套令牌，经 `document.documentElement[data-theme]` 切换；`components/useUiTheme.ts` 负责读写与持久化（`aquasim_ui_theme`）。新增颜色一律走令牌，禁止写死色值（canvas 内部绘制颜色由 `features/canvas2d/lib/themes.ts` 主题包管，不受 UI 主题影响）。
 - **tailwind 已移除**：样式全部手写令牌 + 按域 CSS，不要重新引入工具类框架。
 - **画布主题**：固定为工业监控（`industrial-scada`），2D/3D 共用 `shared/constants.ts` 的 `CANVAS_THEME_KEY` 传入 NodeCanvas/NodeScene3D；THEME_PROFILES / THEME_3D 各只保留这一套。主题选择器与 `aquasim_canvas_theme` 持久化已移除。
 - **SplitPane**：右侧岛屿宽度容器（拖拽/双击复位/键盘方向键/localStorage），实验页 `aquasim_split_inspect`、回放页 `aquasim_split_log`；localStorage key 统一登记在 `shared/constants.ts` 的 `LOCAL_STORAGE_KEYS`（`aquasim_*` 前缀）。
-- **面板小耳朵**：两侧浮动面板的开收用边缘竖排拉环 `.panel-ear`（app.css，两页共用），右侧用 `right`、左侧协议目录用镜像变体 `.ear-left`（`left`/`top` 由页面实测 dock 几何传入，垂直居中到卡片而非 deck）。耳朵与面板一体：同背景/模糊、无独立阴影、内嵌面板边缘 1px；开收时随面板滑入滑出（时长/缓动与 dock 过渡一致），拖拽调宽时经 `.deck:has(.split-pane.dragging)` 取消位置过渡保持跟手。不再在工具栏放开收按钮。
-- **动效约定**：时长/缓动走 main.css 令牌（`--dur-fast/--dur-med/--ease-out/--ease-in`）；面板开收用 `<Transition name="dock-r"/"dock-l">`（v-show 触发），路由切换用 `page`（out-in 淡入淡出），协议 flyout 用 `flyout`，控制台用 `console`（基础定位含 translateX(-50%)，过渡帧里必须保留）；拖拽调宽/调高的容器带 `.dragging` 类并关闭对应 transition。新增动效不得脱离这套时长与缓动。
+- **面板小耳朵**：边缘竖排拉环 `.panel-ear`（app.css，两页共用），作为 `.dock-unit` 内的 flex 项贴在面板边缘，同背景/模糊、无独立阴影；左侧协议目录用镜像变体 `.ear-left`。不再在工具栏放开收按钮。
+- **动效约定**：时长/缓动走 main.css 令牌（`--dur-fast/--dur-med/--ease-out/--ease-in`），位移类（dock-unit、控制台高度）用 `--ease-spring`；路由切换用 `page` 交叉淡入（旧页绝对定位覆盖淡出，新页轻微上浮，不用 out-in）；协议 flyout 用 `flyout`，控制台用 `console`（基础定位含 translateX(-50%)，过渡帧里必须保留）；拖拽调宽/调高的容器带 `.dragging` 类并关闭对应 transition。新增动效不得脱离这套时长与缓动。
 - **z-index 刻度**：1-2 画布内图层；10 浮动 dock 与画布工具栏；30 弹层菜单；80 全屏弹层。
 - **表单标签规范**：中文主标签 + mono 参数名辅标（`.field-param`），时间类参数接受带单位字符串（如 `30s`）；`txPower` 输入框已移除（生成器从未消费该字段，spec JSON 字段保留勿删）。
 

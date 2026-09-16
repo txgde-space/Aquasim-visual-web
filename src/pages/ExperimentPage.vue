@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
@@ -42,25 +42,6 @@ const {
 const copyHint = ref('')
 const protoOpen = ref(true)
 const inspectOpen = ref(true)
-const inspectWidth = ref(300)
-
-// 协议目录宽度/高度随层级开合变化（仅 rail / rail+flyout），实测驱动左耳位置与垂直居中
-const protoDockEl = ref<HTMLElement | null>(null)
-const protoDockRight = ref(0)
-const protoDockMidY = ref(0)
-let protoRO: ResizeObserver | null = null
-onMounted(() => {
-  const el = protoDockEl.value
-  if (!el) return
-  const measure = () => {
-    if (!el.offsetWidth) return // 收起时保持上次位置，耳朵留在卡片原高度
-    protoDockRight.value = el.offsetLeft + el.offsetWidth
-    protoDockMidY.value = el.offsetTop + el.offsetHeight / 2
-  }
-  measure()
-  protoRO = new ResizeObserver(measure)
-  protoRO.observe(el)
-})
 
 // 底部控制台：可折叠为标题条，拖拽上边缘调高
 const stageEl = ref<HTMLElement | null>(null)
@@ -89,7 +70,6 @@ const onConsoleGripDown = (event: PointerEvent) => {
   window.addEventListener('pointerup', onConsoleGripUp, { once: true })
 }
 onBeforeUnmount(() => {
-  protoRO?.disconnect()
   window.removeEventListener('pointermove', onConsoleGripMove)
   document.body.style.userSelect = ''
 })
@@ -190,25 +170,23 @@ const copyJson = async () => {
         />
       </div>
 
-      <Transition name="dock-l">
-        <div v-show="protoOpen" ref="protoDockEl" class="dock dock-left">
+      <div class="dock-unit dock-unit-l" :class="{ closed: !protoOpen }">
+        <div class="dock dock-left">
           <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
         </div>
-      </Transition>
-
-      <button
-        class="panel-ear ear-left"
-        :style="{ left: protoOpen ? protoDockRight - 1 + 'px' : '0px', top: protoDockMidY + 'px' }"
-        :title="protoOpen ? '收起协议目录' : '展开协议目录'"
-        :aria-label="protoOpen ? '收起协议目录' : '展开协议目录'"
-        :aria-expanded="protoOpen"
-        @click="protoOpen = !protoOpen"
-      >
-        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
-          <path :d="protoOpen ? 'M5 1L1 5l4 4' : 'M1 1l4 4-4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span class="ear-label">协议</span>
-      </button>
+        <button
+          class="panel-ear ear-left"
+          :title="protoOpen ? '收起协议目录' : '展开协议目录'"
+          :aria-label="protoOpen ? '收起协议目录' : '展开协议目录'"
+          :aria-expanded="protoOpen"
+          @click="protoOpen = !protoOpen"
+        >
+          <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+            <path :d="protoOpen ? 'M5 1L1 5l4 4' : 'M1 1l4 4-4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="ear-label">协议</span>
+        </button>
+      </div>
 
       <div class="dock dock-top cmd-bar">
         <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
@@ -222,30 +200,26 @@ const copyJson = async () => {
         </button>
       </div>
 
-      <button
-        class="panel-ear"
-        :class="{ open: inspectOpen }"
-        :style="{ right: inspectOpen ? inspectWidth + 11 + 'px' : '0px' }"
-        :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
-        :aria-label="inspectOpen ? '收起属性面板' : '展开属性面板'"
-        :aria-expanded="inspectOpen"
-        @click="inspectOpen = !inspectOpen"
-      >
-        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
-          <path :d="inspectOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span class="ear-label">属性</span>
-      </button>
+      <div class="dock-unit dock-unit-r" :class="{ closed: !inspectOpen }">
+        <button
+          class="panel-ear"
+          :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
+          :aria-label="inspectOpen ? '收起属性面板' : '展开属性面板'"
+          :aria-expanded="inspectOpen"
+          @click="inspectOpen = !inspectOpen"
+        >
+          <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+            <path :d="inspectOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="ear-label">属性</span>
+        </button>
 
-      <Transition name="dock-r">
         <SplitPane
-          v-show="inspectOpen"
           class="dock-right"
           :default-width="300"
           :min="240"
           :max="480"
           :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
-          @update:width="inspectWidth = $event"
         >
         <aside class="dock-body">
           <div class="stack-board">
@@ -295,7 +269,7 @@ const copyJson = async () => {
           />
         </aside>
         </SplitPane>
-      </Transition>
+      </div>
 
       <Transition name="console">
       <footer

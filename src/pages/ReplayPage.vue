@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
 import { session } from '../shared/sessionStore'
@@ -52,8 +52,6 @@ const {
   seekTime,
   onSpeed,
 } = playback
-
-const logWidth = ref(340)
 
 const {
   logSourceKey,
@@ -236,30 +234,26 @@ onBeforeUnmount(() => {
         @update:visual-mode="onVisualModeChange"
       />
 
-      <button
-        class="panel-ear"
-        :class="{ open: logPanelOpen }"
-        :style="{ right: logPanelOpen ? logWidth + 11 + 'px' : '0px' }"
-        :title="logPanelOpen ? '收起日志面板' : '展开日志面板'"
-        :aria-label="logPanelOpen ? '收起日志面板' : '展开日志面板'"
-        :aria-expanded="logPanelOpen"
-        @click="onToggleLogPanel"
-      >
-        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
-          <path :d="logPanelOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span class="ear-label">日志</span>
-      </button>
+      <div class="dock-unit dock-unit-r" :class="{ closed: !logPanelOpen }">
+        <button
+          class="panel-ear"
+          :title="logPanelOpen ? '收起日志面板' : '展开日志面板'"
+          :aria-label="logPanelOpen ? '收起日志面板' : '展开日志面板'"
+          :aria-expanded="logPanelOpen"
+          @click="onToggleLogPanel"
+        >
+          <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+            <path :d="logPanelOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="ear-label">日志</span>
+        </button>
 
-      <Transition name="dock-r">
         <SplitPane
-          v-show="logPanelOpen"
           class="dock-right"
           :default-width="340"
           :min="280"
           :max="520"
           :storage-key="LOCAL_STORAGE_KEYS.splitLog"
-          @update:width="logWidth = $event"
         >
         <LogPanel
           :show-all-active-packets="showAllActivePackets"
@@ -302,7 +296,7 @@ onBeforeUnmount(() => {
           @track-pointer-down="onEventTrackPointerDown"
         />
         </SplitPane>
-      </Transition>
+      </div>
 
       <TimelineBar
         :current-time="currentTime"

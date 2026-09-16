@@ -120,6 +120,7 @@
   height: 16px;
 }
 .app-main {
+  position: relative; /* 页面交叉淡入时旧页绝对定位的容器 */
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
@@ -159,17 +160,6 @@
   box-shadow: var(--shadow-island);
   backdrop-filter: blur(10px) saturate(1.05);
 }
-.dock-left {
-  top: var(--dock-gap);
-  left: var(--dock-gap);
-  bottom: auto;
-  max-height: calc(100% - 88px); /* 底部留给画布工具条 */
-}
-.dock-right {
-  top: var(--dock-gap);
-  right: var(--dock-gap);
-  bottom: var(--dock-gap);
-}
 .dock-top {
   top: var(--dock-gap);
   left: 50%;
@@ -191,12 +181,55 @@
   margin-bottom: 0.5rem;
 }
 
-/* SplitPane 作为右侧 dock：绝对定位 + 高度由 top/bottom 决定
-   （.deck > .split-pane.dock-right 三级类特异性，确保压过组件 scoped 的 position/height） */
-.deck > .split-pane.dock-right {
+/* ---------- 面板单元：面板 + 小耳朵一体 ----------
+   耳朵是单元内的 flex 项，贴在面板边缘；收起时整个单元平移到只露出
+   耳朵（宽度 = --ear-w），transform 驱动、弹簧曲线，二者永远一体 */
+.dock-unit {
   position: absolute;
-  height: auto;
   z-index: 10;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  pointer-events: none; /* 缝隙处穿透到画布，子元素各自恢复 */
+  transition: transform 0.36s var(--ease-spring);
+}
+.dock-unit-r {
+  top: var(--dock-gap);
+  bottom: var(--dock-gap);
+  right: 0;
+  padding-right: var(--dock-gap);
+}
+.dock-unit-l {
+  top: var(--dock-gap);
+  bottom: auto;
+  left: 0;
+  padding-left: var(--dock-gap);
+  max-height: calc(100% - 88px); /* 底部留给画布工具条 */
+}
+.dock-unit-r.closed {
+  transform: translateX(calc(100% - var(--ear-w)));
+}
+.dock-unit-l.closed {
+  transform: translateX(calc(var(--ear-w) - 100%));
+}
+.dock-unit .dock,
+.dock-unit .split-pane,
+.dock-unit .panel-ear {
+  pointer-events: auto;
+}
+.dock-unit .dock {
+  position: static;
+  z-index: auto;
+  height: 100%;
+}
+/* 左单元的 dock 需要显式高度上限，flyout 列表才能滚动而非被裁掉 */
+.dock-unit-l .dock {
+  max-height: calc(100vh - var(--topbar-h) - var(--statusbar-h) - 88px);
+}
+
+/* SplitPane 在单元内作右侧面板：补岛屿皮肤（特异性压过组件 scoped） */
+.dock-unit .split-pane.dock-right {
+  height: 100%;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--panel);
@@ -204,31 +237,23 @@
   backdrop-filter: blur(10px) saturate(1.05);
 }
 
-/* ---------- 面板边缘拉环（小耳朵，两页共用） ----------
-   与面板一体：背景/模糊同面板、无独立阴影、连接侧无边框并内嵌 1px；
-   面板开收时耳朵随面板滑入滑出（时长/缓动与 dock 过渡一致）；
-   拖拽 SplitPane 调宽时取消除位置过渡，耳朵跟手不拖影
-   （右侧：right = 面板宽 + dock-gap - 1；左侧：left = dock 实测右缘 - 1） */
+/* ---------- 面板边缘拉环（小耳朵，两页共用） ---------- */
 .panel-ear {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 11;
+  flex: none;
+  align-self: center;
+  width: var(--ear-w);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.65rem 0.3rem;
+  padding: 0.65rem 0.2rem;
   border: 1px solid var(--line);
   border-right: 0;
   border-radius: 10px 0 0 10px;
   background: var(--panel);
   backdrop-filter: blur(10px);
   color: var(--muted);
-  transition:
-    right var(--dur-med) var(--ease-out),
-    color var(--dur-fast) ease,
-    border-color var(--dur-fast) ease;
+  transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .panel-ear:hover {
   color: var(--accent-soft);
@@ -241,49 +266,29 @@
   user-select: none;
 }
 
-/* 左侧面板（协议目录）的镜像小耳朵；left/top 由页面按 dock 实测几何传入 */
+/* 左侧面板（协议目录）的镜像小耳朵 */
 .panel-ear.ear-left {
   border-right: 1px solid var(--line);
   border-left: 0;
   border-radius: 0 10px 10px 0;
-  transition:
-    left var(--dur-med) var(--ease-out),
-    top var(--dur-med) var(--ease-out),
-    color var(--dur-fast) ease,
-    border-color var(--dur-fast) ease;
 }
 
-/* 拖拽分栏调宽期间：耳朵跟手，不做位置过渡 */
-.deck:has(.split-pane.dragging) .panel-ear {
-  transition-property: color, border-color;
-}
-
-/* ---------- 过渡：面板开收 / 页面切换 / 飞层 / 控制台 ---------- */
-.dock-r-enter-active,
-.dock-l-enter-active {
-  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
-}
-.dock-r-leave-active,
-.dock-l-leave-active {
-  transition: opacity var(--dur-fast) var(--ease-in), transform var(--dur-fast) var(--ease-in);
-}
-.dock-r-enter-from,
-.dock-r-leave-to {
-  opacity: 0;
-  transform: translateX(16px);
-}
-.dock-l-enter-from,
-.dock-l-leave-to {
-  opacity: 0;
-  transform: translateX(-16px);
-}
+/* ---------- 过渡：页面切换 / 飞层 / 控制台 ---------- */
+/* 页面交叉淡入：旧页绝对定位覆盖在新页上方淡出，新页轻微上浮淡入 */
 .page-enter-active {
-  transition: opacity 0.18s var(--ease-out);
+  transition: opacity 0.24s var(--ease-out), transform 0.24s var(--ease-out);
 }
 .page-leave-active {
-  transition: opacity 0.12s var(--ease-in);
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: opacity 0.18s var(--ease-in);
 }
-.page-enter-from,
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
 .page-leave-to {
   opacity: 0;
 }
@@ -299,7 +304,7 @@
   transform: translateX(-8px);
 }
 .console-enter-active {
-  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+  transition: opacity 0.3s var(--ease-spring), transform 0.3s var(--ease-spring);
 }
 .console-leave-active {
   transition: opacity var(--dur-fast) var(--ease-in), transform var(--dur-fast) var(--ease-in);
@@ -423,7 +428,7 @@
   bottom: var(--dock-gap);
   width: min(640px, calc(100% - 48px));
   flex: none;
-  transition: height var(--dur-med) var(--ease-out);
+  transition: height 0.3s var(--ease-spring);
 }
 /* 拖拽调高期间跟手，不做高度过渡 */
 .console.dragging {
