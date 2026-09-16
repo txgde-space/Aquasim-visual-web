@@ -86,6 +86,7 @@ export const useLogPanel = ({
     event.stopImmediatePropagation()
 
     playback.focusedPacketId.value = packet.eventId
+    playback.scrubStart()
 
     const startUs = Number(packet.startUs)
     const durationUs = Math.max(1, Number(packet.endUs - startUs))
@@ -127,6 +128,7 @@ export const useLogPanel = ({
       suppressLogClick.value = activeDragEvent.value.eventId
     }
     activeDragEvent.value = null
+    playback.scrubEnd()
   }
 
   return {

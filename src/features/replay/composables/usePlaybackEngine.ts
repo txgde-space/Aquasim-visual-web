@@ -57,8 +57,34 @@ export const usePlaybackEngine = (options: PlaybackEngineOptions) => {
     lastTs = 0
   }
 
+  /* scrub（拖动进度）期间暂停播放循环，松手后若原本在播则恢复——
+     否则 tick 与拖动寻址互相打架，进度条在按住时仍自顾自往前走 */
+  let scrubbing = false
+  let resumeAfterScrub = false
+
+  const scrubStart = () => {
+    if (scrubbing) return
+    scrubbing = true
+    resumeAfterScrub = isPlaying.value
+    if (isPlaying.value) {
+      isPlaying.value = false
+      lastTs = 0
+    }
+  }
+
+  const scrubEnd = () => {
+    if (!scrubbing) return
+    scrubbing = false
+    if (resumeAfterScrub) {
+      resumeAfterScrub = false
+      lastTs = 0
+      isPlaying.value = true
+    }
+  }
+
   const reset = () => {
     isPlaying.value = false
+    resumeAfterScrub = false
     focusedPacketId.value = null
     currentTime.value = 0
     lastTs = 0
@@ -120,6 +146,8 @@ export const usePlaybackEngine = (options: PlaybackEngineOptions) => {
     clampTime,
     seekTime,
     queueSeek,
+    scrubStart,
+    scrubEnd,
     togglePlay,
     pauseForTool,
     reset,

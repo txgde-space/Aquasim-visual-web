@@ -12,6 +12,8 @@ defineProps<{
 
 const emit = defineEmits<{
   seek: [us: number]
+  seekStart: []
+  seekEnd: []
   togglePlay: []
   reset: []
   speedChange: [event: Event]
@@ -59,6 +61,9 @@ const onInput = (event: Event) => {
         :style="{ '--range-progress': rangeProgressStyle }"
         aria-label="回放进度"
         @input="onInput"
+        @pointerdown="emit('seekStart')"
+        @change="emit('seekEnd')"
+        @pointercancel="emit('seekEnd')"
       />
     </label>
     <label class="tp-speed">

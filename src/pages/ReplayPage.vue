@@ -50,6 +50,8 @@ const {
   pauseForTool,
   reset,
   queueSeek,
+  scrubStart,
+  scrubEnd,
   onSpeed,
 } = playback
 
@@ -305,6 +307,8 @@ onBeforeUnmount(() => {
         :is-playing="isPlaying"
         :speed="speed"
         @seek="queueSeek"
+        @seek-start="scrubStart"
+        @seek-end="scrubEnd"
         @toggle-play="togglePlay"
         @reset="reset"
         @speed-change="onSpeed"
