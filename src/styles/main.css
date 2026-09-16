@@ -3,6 +3,7 @@
  * z-index 刻度（现状约定，新增层级时对齐）：
  *   1-2  画布内图层 / 日志内容层（event-track、log-content）
  *   3-5  工作台悬浮件（rail、canvas 工具栏/提示、SplitPane 手柄）
+ *   6    小屏覆盖面板（split-pane/flyout）与弹层菜单（tp-menu）
  *   80   全屏弹层（code-modal-backdrop）
  */
 

@@ -619,7 +619,7 @@ onBeforeUnmount(() => {
 .toolbar-btn.active {
   border-color: color-mix(in srgb, var(--accent, #38bdf8) 68%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #38bdf8) 26%, transparent) inset;
-  color: #f8fafc;
+  color: var(--text, #f8fafc);
 }
 
 .toolbar-btn:hover:not(:disabled) {
@@ -644,8 +644,8 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn.danger {
-  border-color: rgba(248, 113, 113, 0.34);
-  color: #fecaca;
+  border-color: color-mix(in srgb, var(--bad, #f87171) 40%, transparent);
+  color: var(--bad, #fecaca);
 }
 
 .toolbar-help {
@@ -697,13 +697,13 @@ onBeforeUnmount(() => {
 .node-tooltip-title {
   margin: 0;
   font-size: 0.88rem;
-  color: #e2e8f0;
+  color: var(--text, #e2e8f0);
   font-weight: 700;
   line-height: 1.2;
 }
 
 .node-tooltip-role {
-  color: color-mix(in srgb, var(--accent-soft, #93c5fd) 88%, #ffffff 12%);
+  color: color-mix(in srgb, var(--accent-soft, #93c5fd) 88%, var(--text, #ffffff) 12%);
   margin-left: 0.35rem;
   font-size: 0.72rem;
   font-weight: 600;
@@ -718,7 +718,7 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 50%, transparent);
   padding: 0.12rem 0.5rem;
   font-size: 0.68rem;
-  color: #dbeafe;
+  color: var(--accent-soft, #dbeafe);
   background: color-mix(in srgb, var(--accent, #38bdf8) 16%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft, #93c5fd) 16%, transparent);
 }
@@ -744,13 +744,13 @@ onBeforeUnmount(() => {
 }
 
 .node-tooltip-item span {
-  color: color-mix(in srgb, var(--accent-soft, #93c5fd) 76%, #ffffff 24%);
+  color: color-mix(in srgb, var(--accent-soft, #93c5fd) 76%, var(--text, #ffffff) 24%);
   font-size: 0.67rem;
   letter-spacing: 0.03em;
 }
 
 .node-tooltip-item strong {
-  color: #e2e8f0;
+  color: var(--text, #e2e8f0);
   font-size: 0.74rem;
   line-height: 1.22;
   word-break: break-word;
@@ -772,32 +772,32 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 0.1rem 0.44rem;
   font-size: 0.66rem;
-  border: 1px solid rgba(148, 163, 184, 0.38);
-  color: #dbeafe;
+  border: 1px solid color-mix(in srgb, var(--muted, #94a3b8) 40%, transparent);
+  color: var(--text, #dbeafe);
 }
 
 .tooltip-pill.ok {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: rgba(34, 197, 94, 0.15);
-  color: #bbf7d0;
+  border-color: color-mix(in srgb, var(--rx, #22c55e) 45%, transparent);
+  background: color-mix(in srgb, var(--rx, #22c55e) 15%, transparent);
+  color: var(--rx, #bbf7d0);
 }
 
 .tooltip-pill.bad {
-  border-color: rgba(239, 68, 68, 0.48);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
+  border-color: color-mix(in srgb, var(--bad, #ef4444) 48%, transparent);
+  background: color-mix(in srgb, var(--bad, #ef4444) 14%, transparent);
+  color: var(--bad, #fecaca);
 }
 
 .tooltip-pill.warn {
-  border-color: rgba(249, 115, 22, 0.48);
-  background: rgba(249, 115, 22, 0.14);
-  color: #fed7aa;
+  border-color: color-mix(in srgb, var(--tx, #f97316) 48%, transparent);
+  background: color-mix(in srgb, var(--tx, #f97316) 14%, transparent);
+  color: var(--tx, #fed7aa);
 }
 
 .tooltip-pill.mute {
-  border-color: rgba(148, 163, 184, 0.44);
-  background: rgba(148, 163, 184, 0.12);
-  color: #dbeafe;
+  border-color: color-mix(in srgb, var(--muted, #94a3b8) 44%, transparent);
+  background: color-mix(in srgb, var(--muted, #94a3b8) 12%, transparent);
+  color: var(--muted, #dbeafe);
 }
 
 .canvas {

@@ -359,3 +359,54 @@
     display: none;
   }
 }
+
+/* 小屏降级：右侧面板与协议 flyout 覆盖化，不占画布宽度 */
+@media (max-width: 1100px) {
+  .wb {
+    position: relative;
+  }
+  .wb.wb-inspect-open {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .replay-wb.wb-inspect-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wb .split-pane {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    box-shadow: var(--shadow-pop);
+  }
+  .flyout {
+    position: absolute;
+    left: 52px;
+    top: 0;
+    bottom: 0;
+    height: auto;
+    z-index: 6;
+    box-shadow: var(--shadow-pop);
+  }
+}
+
+@media (max-width: 760px) {
+  .wb-stage {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .wb-chrome {
+    flex-wrap: wrap;
+    row-gap: 0.3rem;
+    padding: 0.3rem 0.5rem;
+  }
+  .wb-chrome-mid {
+    display: none;
+  }
+  .wb-timeline {
+    flex-wrap: wrap;
+    row-gap: 0.3rem;
+  }
+  .wb-timeline .range-wrap {
+    min-width: 140px;
+  }
+}
