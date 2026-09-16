@@ -13,7 +13,7 @@ import ReplayToolbar from '@/features/replay/components/ReplayToolbar.vue'
 import TimelineBar from '@/features/replay/components/TimelineBar.vue'
 import LogPanel from '@/features/replay/components/LogPanel.vue'
 
-const NodeScene3D = defineAsyncComponent(() => import('../components/NodeScene3D.vue'))
+const NodeScene3D = defineAsyncComponent(() => import('../features/scene3d/NodeScene3D.vue'))
 
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
