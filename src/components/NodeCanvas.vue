@@ -146,6 +146,8 @@ import { drawWorldGrid } from '@/features/canvas2d/lib/draw/grid'
 import { drawMeasurementLines as drawMeasureLinesView } from '@/features/canvas2d/lib/draw/measure'
 import { useCanvasLoop } from '@/features/canvas2d/composables/useCanvasLoop'
 import { useCanvasView } from '@/features/canvas2d/composables/useCanvasView'
+import { useMeasureTool } from '@/features/canvas2d/composables/useMeasureTool'
+import { TOOL_MODES, usePointerTools } from '@/features/canvas2d/composables/usePointerTools'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -163,14 +165,6 @@ const props = defineProps({
   soundSpeedMps: { type: Number, default: 1500 },
 })
 
-const TOOL_MODES = Object.freeze({
-  PAN: 'pan',
-  MEASURE: 'measure',
-  PLACE: 'place',
-  SELECT: 'select',
-})
-
-
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
 const fxIntensity = computed(() => {
   if (props.fxLevel === 'extreme') return 2.2
@@ -182,13 +176,6 @@ const displayWidth = ref(900)
 const displayHeight = ref(520)
 const hoveredNodeId = ref(null)
 const hoverCursor = ref({ x: 0, y: 0 })
-const hoveredMeasureNode = ref(null)
-const toolMode = ref(TOOL_MODES.PAN)
-const pendingMeasurePoint = ref(null)
-const measurementLines = ref([])
-const measurementHistory = ref([[]])
-const measurementHistoryIndex = ref(0)
-const selectedMeasurementId = ref(null)
 const viewInsets = computed(() => viewInsetsFor(displayWidth.value, displayHeight.value))
 const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)))
 const emit = defineEmits([
@@ -201,12 +188,7 @@ const emit = defineEmits([
   'nodes-move',
   'protocol-drop',
 ])
-const draggingNodeId = ref(null)
-const dragGroup = ref(null)
-const marquee = ref(null)
-const spaceHeld = ref(false)
 let resizeObserver = null
-let activePointerId = null
 
 const liveBounds = computed(() => computeBounds(props.nodes))
 const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
@@ -294,6 +276,87 @@ const pickNodeAt = (sx, sy) => {
 
   return picked
 }
+
+const measure = useMeasureTool({
+  getNodeById: (id) => nodeById.value.get(id),
+  pickNodeAtScreen: pickNodeAt,
+  toWorldFn: toWorld,
+  toScreenFn: toScreen,
+  scheduleDraw,
+  onPauseRequest: () => emit('pause-request'),
+})
+
+let pointer
+
+// Hoisted so they can be injected into usePointerTools below; at call time
+// (pointer events) `pointer` is already assigned.
+function updateMeasureHover (sx, sy) {
+  if (pointer.toolMode.value !== TOOL_MODES.MEASURE) {
+    measure.hoveredMeasureNode.value = null
+    return
+  }
+  measure.hoveredMeasureNode.value = pickNodeAt(sx, sy)
+}
+
+function updateHoveredNode (sx, sy) {
+  if (isPanning.value) {
+    hoveredNodeId.value = null
+    return
+  }
+  const picked = pickNodeAt(sx, sy)
+  hoveredNodeId.value = picked ? picked.node_id : null
+}
+
+pointer = usePointerTools({
+  props,
+  emit,
+  view,
+  measure,
+  scheduleDraw,
+  getCanvasEl: () => canvasEl.value,
+  pickNodeAt,
+  toWorld,
+  getSelectedIdSet: () => selectedIdSet.value,
+  getLiveBounds: () => liveBounds.value,
+  setHoveredNodeId: (id) => { hoveredNodeId.value = id },
+  setHoverCursor: (x, y) => { hoverCursor.value = { x, y } },
+  updateHoveredNode,
+  updateMeasureHover,
+})
+pointer.setNodeScreenInBox((node, left, right, top, bottom) => {
+  const p = toScreen(node.x, node.y)
+  return p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
+})
+
+const {
+  toolMode,
+  spaceHeld,
+  marquee,
+  draggingNodeId,
+  dragGroup,
+  onPointerDown,
+  onPointerMove,
+  onCanvasPointerMove,
+  onCanvasPointerLeave,
+  onPointerUp,
+  onDragOver,
+  onDrop,
+  activatePlaceTool,
+  activateMeasureTool,
+  cancelActiveTool,
+} = pointer
+const {
+  pendingMeasurePoint,
+  measurementLines,
+  selectedMeasurementId,
+  hoveredMeasureNode,
+  canUndo,
+  canRedo,
+  clearMeasurements,
+  undoMeasurement,
+  redoMeasurement,
+  deleteSelectedMeasurement,
+} = measure
 
 const hoveredNode = computed(() => {
   if (!hoveredNodeId.value) return null
@@ -402,107 +465,6 @@ const hoveredTooltipStyle = computed(() => {
   }
 })
 
-const canUndo = computed(() => measurementHistoryIndex.value > 0)
-const canRedo = computed(() => measurementHistoryIndex.value < (measurementHistory.value.length - 1))
-
-const cloneMeasurePoint = (point) => ({
-  x: point.x,
-  y: point.y,
-  ...(Number.isFinite(point.z) ? { z: point.z } : {}),
-  ...(point.nodeId !== undefined && point.nodeId !== null ? { nodeId: point.nodeId } : {}),
-})
-
-const resolveMeasurePoint = (point) => {
-  if (!point) return { x: 0, y: 0, z: 0 }
-  if (point.nodeId !== undefined && point.nodeId !== null) {
-    const node = nodeById.value.get(point.nodeId)
-    if (node) {
-      return {
-        x: node.x,
-        y: node.y,
-        z: node.z ?? 0,
-      }
-    }
-  }
-  return {
-    x: point.x,
-    y: point.y,
-    z: point.z ?? 0,
-  }
-}
-
-const createMeasurePoint = (sx, sy) => {
-  const picked = pickNodeAt(sx, sy)
-  if (picked) {
-    return {
-      nodeId: picked.node_id,
-      x: picked.x,
-      y: picked.y,
-      z: picked.z ?? 0,
-    }
-  }
-  return toWorld(sx, sy)
-}
-
-const distanceByMeasurePoints = (a, b) => {
-  const p1 = resolveMeasurePoint(a)
-  const p2 = resolveMeasurePoint(b)
-  return Math.hypot(p1.x - p2.x, p1.y - p2.y, p1.z - p2.z)
-}
-
-const cloneMeasurements = (items) => items.map((item) => ({
-  id: item.id,
-  start: cloneMeasurePoint(item.start),
-  end: cloneMeasurePoint(item.end),
-  distance: distanceByMeasurePoints(item.start, item.end),
-}))
-
-const applyMeasurementState = (items) => {
-  measurementLines.value = cloneMeasurements(items)
-  if (selectedMeasurementId.value && !measurementLines.value.some((item) => item.id === selectedMeasurementId.value)) {
-    selectedMeasurementId.value = null
-  }
-}
-
-const commitMeasurementState = (items, nextSelectedId = selectedMeasurementId.value) => {
-  const snapshot = cloneMeasurements(items)
-  measurementHistory.value = measurementHistory.value.slice(0, measurementHistoryIndex.value + 1)
-  measurementHistory.value.push(snapshot)
-  measurementHistoryIndex.value = measurementHistory.value.length - 1
-  measurementLines.value = cloneMeasurements(snapshot)
-  selectedMeasurementId.value = nextSelectedId && measurementLines.value.some((item) => item.id === nextSelectedId)
-    ? nextSelectedId
-    : null
-}
-
-const selectMeasurementAt = (sx, sy) => {
-  let picked = null
-  let bestDist = Number.POSITIVE_INFINITY
-
-  for (const item of measurementLines.value) {
-    const start = resolveMeasurePoint(item.start)
-    const end = resolveMeasurePoint(item.end)
-    const a = toScreen(start.x, start.y)
-    const b = toScreen(end.x, end.y)
-    const abx = b.x - a.x
-    const aby = b.y - a.y
-    const ab2 = (abx * abx) + (aby * aby)
-    if (ab2 < 1e-6) continue
-    const t = Math.max(0, Math.min(1, (((sx - a.x) * abx) + ((sy - a.y) * aby)) / ab2))
-    const px = a.x + (abx * t)
-    const py = a.y + (aby * t)
-    const dx = sx - px
-    const dy = sy - py
-    const dist = Math.hypot(dx, dy)
-    if (dist <= 10 && dist < bestDist) {
-      bestDist = dist
-      picked = item
-    }
-  }
-
-  return picked
-}
-
 const drawVisiblePackets = (ctx, profile, phase, fx) => {
   const now = props.currentTime
   for (const packet of props.visiblePackets) {
@@ -527,19 +489,19 @@ const drawVisiblePackets = (ctx, profile, phase, fx) => {
 
 const paintMeasurements = (ctx) => {
   const lines = measurementLines.value.map((item) => {
-    const start = resolveMeasurePoint(item.start)
-    const end = resolveMeasurePoint(item.end)
+    const start = measure.resolveMeasurePoint(item.start)
+    const end = measure.resolveMeasurePoint(item.end)
     return {
       id: item.id,
       start: toScreen(start.x, start.y),
       end: toScreen(end.x, end.y),
-      distanceText: `${distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`,
+      distanceText: `${measure.distanceByMeasurePoints(item.start, item.end).toFixed(0)} m`,
       isSelected: selectedMeasurementId.value === item.id,
     }
   })
   let pendingPoint = null
   if (toolMode.value === TOOL_MODES.MEASURE && pendingMeasurePoint.value) {
-    const pending = resolveMeasurePoint(pendingMeasurePoint.value)
+    const pending = measure.resolveMeasurePoint(pendingMeasurePoint.value)
     pendingPoint = toScreen(pending.x, pending.y)
   }
   drawMeasureLinesView(ctx, lines, pendingPoint, displayWidth.value, displayHeight.value)
@@ -726,472 +688,6 @@ const draw = () => {
   paintMeasurements(ctx)
 }
 
-const nodesInMarquee = (box) => {
-  const left = Math.min(box.x0, box.x1)
-  const right = Math.max(box.x0, box.x1)
-  const top = Math.min(box.y0, box.y1)
-  const bottom = Math.max(box.y0, box.y1)
-  return props.nodes.filter((node) => {
-    const p = toScreen(node.x, node.y)
-    return p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
-  })
-}
-
-const onPointerDown = (event) => {
-  if (event.button !== undefined && event.button !== 0 && event.button !== 1) return
-
-  const canvas = canvasEl.value
-  if (!canvas) return
-  const rect = canvas.getBoundingClientRect()
-  const sx = event.clientX - rect.left
-  const sy = event.clientY - rect.top
-
-  if (event.button === 1 || (spaceHeld.value && toolMode.value !== TOOL_MODES.MEASURE && toolMode.value !== TOOL_MODES.PLACE)) {
-    activePointerId = event.pointerId
-    isPanning.value = true
-    hoveredNodeId.value = null
-    panStart.value = { x: sx, y: sy }
-    panOffsetStart.value = { ...pan.value }
-    hasDragged.value = false
-    try {
-      canvas.setPointerCapture(event.pointerId)
-    } catch {
-      // ignore
-    }
-    return
-  }
-
-  if (toolMode.value === TOOL_MODES.MEASURE) {
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    const point = createMeasurePoint(sx, sy)
-
-    if (!pendingMeasurePoint.value) {
-      const pickedMeasurement = selectMeasurementAt(sx, sy)
-      if (pickedMeasurement) {
-        selectedMeasurementId.value = pickedMeasurement.id
-        scheduleDraw()
-        return
-      }
-      pendingMeasurePoint.value = point
-      selectedMeasurementId.value = null
-      scheduleDraw()
-      return
-    }
-
-    const nextMeasurement = {
-      id: `measure-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-      start: pendingMeasurePoint.value,
-      end: point,
-      distance: distanceByMeasurePoints(point, pendingMeasurePoint.value),
-    }
-    commitMeasurementState([...measurementLines.value, nextMeasurement], nextMeasurement.id)
-    pendingMeasurePoint.value = null
-    scheduleDraw()
-    return
-  }
-
-  if (props.editMode && toolMode.value === TOOL_MODES.PLACE) {
-    const target = pickNodeAt(sx, sy)
-    if (target) {
-      event.preventDefault()
-      draggingNodeId.value = target.node_id
-      dragFrozenBounds.value = { ...liveBounds.value }
-      activePointerId = event.pointerId
-      hasDragged.value = false
-      panStart.value = { x: sx, y: sy }
-      emit('node-select', target)
-      emit('pause-request')
-      try {
-        canvas.setPointerCapture(event.pointerId)
-      } catch {
-        // ignore
-      }
-      scheduleDraw()
-      return
-    }
-    const world = toWorld(sx, sy)
-    emit('node-place', { x: world.x, y: world.y })
-    emit('pause-request')
-    return
-  }
-
-  const forcePan = spaceHeld.value || event.button === 1 || (props.boxSelect && toolMode.value === TOOL_MODES.PAN)
-
-  if (props.editMode && toolMode.value !== TOOL_MODES.MEASURE && !forcePan) {
-    const target = pickNodeAt(sx, sy)
-    if (target) {
-      event.preventDefault()
-      const clickedId = Number(target.node_id)
-      const currentIds = [...selectedIdSet.value]
-      let nextIds
-      if (event.shiftKey || event.ctrlKey || event.metaKey) {
-        nextIds = currentIds.includes(clickedId)
-          ? currentIds.filter((id) => id !== clickedId)
-          : [...currentIds, clickedId]
-      } else if (currentIds.includes(clickedId)) {
-        nextIds = currentIds
-      } else {
-        nextIds = [clickedId]
-      }
-      emit('selection-change', nextIds)
-      emit('node-select', target)
-      const origins = new Map()
-      for (const node of props.nodes) {
-        if (nextIds.includes(Number(node.node_id))) {
-          origins.set(Number(node.node_id), { x: node.x, y: node.y })
-        }
-      }
-      dragGroup.value = {
-        ids: nextIds,
-        start: toWorld(sx, sy),
-        origins,
-      }
-      draggingNodeId.value = target.node_id
-      dragFrozenBounds.value = { ...liveBounds.value }
-      activePointerId = event.pointerId
-      hasDragged.value = false
-      panStart.value = { x: sx, y: sy }
-      emit('pause-request')
-      try {
-        canvas.setPointerCapture(event.pointerId)
-      } catch {
-        // ignore
-      }
-      scheduleDraw()
-      return
-    }
-
-    if (props.boxSelect && (event.shiftKey || event.ctrlKey || event.metaKey)) {
-      event.preventDefault()
-      marquee.value = {
-        x0: sx,
-        y0: sy,
-        x1: sx,
-        y1: sy,
-        additive: event.shiftKey && (event.ctrlKey || event.metaKey),
-      }
-      activePointerId = event.pointerId
-      hasDragged.value = false
-      emit('pause-request')
-      try {
-        canvas.setPointerCapture(event.pointerId)
-      } catch {
-        // ignore
-      }
-      scheduleDraw()
-      return
-    }
-  }
-
-  const pickedMeasurement = selectMeasurementAt(sx, sy)
-  if (pickedMeasurement) {
-    selectedMeasurementId.value = pickedMeasurement.id
-    scheduleDraw()
-    return
-  }
-
-  selectedMeasurementId.value = null
-  activePointerId = event.pointerId
-  isPanning.value = true
-  hoveredNodeId.value = null
-  panStart.value = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
-  }
-  panOffsetStart.value = { ...pan.value }
-  hasDragged.value = false
-
-  try {
-    canvas.setPointerCapture(event.pointerId)
-  } catch {
-    // ignore
-  }
-}
-
-const onPointerMove = (event) => {
-  const canvas = canvasEl.value
-  if (!canvas) return
-
-  const rect = canvas.getBoundingClientRect()
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
-
-  if (marquee.value) {
-    if ((x - marquee.value.x0) ** 2 + (y - marquee.value.y0) ** 2 > 16) hasDragged.value = true
-    marquee.value = { ...marquee.value, x1: x, y1: y }
-    scheduleDraw()
-    return
-  }
-
-  if (dragGroup.value) {
-    if ((x - panStart.value.x) ** 2 + (y - panStart.value.y) ** 2 > 16 || hasDragged.value) {
-      hasDragged.value = true
-    }
-    const world = toWorld(x, y)
-    const dx = world.x - dragGroup.value.start.x
-    const dy = world.y - dragGroup.value.start.y
-    const moves = [...dragGroup.value.origins.entries()].map(([nodeId, origin]) => ({
-      node_id: nodeId,
-      x: origin.x + dx,
-      y: origin.y + dy,
-    }))
-    emit('nodes-move', moves)
-    if (moves.length === 1) {
-      emit('node-move', moves[0])
-    }
-    scheduleDraw()
-    return
-  }
-
-  if (draggingNodeId.value != null) {
-    if ((x - panStart.value.x) ** 2 + (y - panStart.value.y) ** 2 > 16 || hasDragged.value) {
-      hasDragged.value = true
-    }
-    const world = toWorld(x, y)
-    emit('node-move', {
-      node_id: draggingNodeId.value,
-      x: world.x,
-      y: world.y,
-    })
-    scheduleDraw()
-    return
-  }
-
-  if (!isPanning.value) return
-
-  const dx = x - panStart.value.x
-  const dy = y - panStart.value.y
-
-  if ((dx * dx) + (dy * dy) > 16) {
-    hasDragged.value = true
-  }
-
-  pan.value = {
-    x: panOffsetStart.value.x + dx,
-    y: panOffsetStart.value.y + dy,
-  }
-  scheduleDraw()
-}
-
-const updateMeasureHover = (sx, sy) => {
-  if (toolMode.value !== TOOL_MODES.MEASURE) {
-    hoveredMeasureNode.value = null
-    return
-  }
-  hoveredMeasureNode.value = pickNodeAt(sx, sy)
-}
-
-const updateHoveredNode = (sx, sy) => {
-  if (isPanning.value) {
-    hoveredNodeId.value = null
-    return
-  }
-  const picked = pickNodeAt(sx, sy)
-  hoveredNodeId.value = picked ? picked.node_id : null
-}
-
-const onCanvasPointerMove = (event) => {
-  const canvas = canvasEl.value
-  if (!canvas) return
-
-  if (marquee.value || dragGroup.value || draggingNodeId.value != null) {
-    onPointerMove(event)
-    return
-  }
-
-  const rect = canvas.getBoundingClientRect()
-  const sx = event.clientX - rect.left
-  const sy = event.clientY - rect.top
-  hoverCursor.value = { x: sx, y: sy }
-  updateMeasureHover(sx, sy)
-  updateHoveredNode(sx, sy)
-  if (toolMode.value === TOOL_MODES.MEASURE) {
-    scheduleDraw()
-  }
-}
-
-const onCanvasPointerLeave = () => {
-  hoveredNodeId.value = null
-  hoverCursor.value = { x: 0, y: 0 }
-  if (toolMode.value === TOOL_MODES.MEASURE) {
-    hoveredMeasureNode.value = null
-    scheduleDraw()
-  }
-}
-
-const onPointerUp = (event) => {
-  if (marquee.value) {
-    const box = marquee.value
-    const picked = nodesInMarquee(box).map((node) => Number(node.node_id))
-    let nextIds
-    if (!hasDragged.value) {
-      nextIds = []
-    } else if (box.additive) {
-      nextIds = [...new Set([...selectedIdSet.value, ...picked])]
-    } else {
-      nextIds = picked
-    }
-    emit('selection-change', nextIds)
-    if (nextIds.length === 1) {
-      const node = props.nodes.find((item) => Number(item.node_id) === nextIds[0])
-      if (node) emit('node-select', node)
-    }
-    marquee.value = null
-    if (canvasEl.value && activePointerId !== null) {
-      try {
-        canvasEl.value.releasePointerCapture(activePointerId)
-      } catch {
-        // ignore
-      }
-    }
-    activePointerId = null
-    scheduleDraw()
-    return
-  }
-
-  if (dragGroup.value || draggingNodeId.value != null) {
-    emit('node-move-end')
-    dragGroup.value = null
-    draggingNodeId.value = null
-    dragFrozenBounds.value = null
-    if (canvasEl.value && activePointerId !== null) {
-      try {
-        canvasEl.value.releasePointerCapture(activePointerId)
-      } catch {
-        // ignore
-      }
-    }
-    activePointerId = null
-    scheduleDraw()
-    return
-  }
-
-  if (!isPanning.value) return
-
-  if (!hasDragged.value && event) {
-    const canvas = canvasEl.value
-    if (canvas) {
-      const rect = canvas.getBoundingClientRect()
-      const x = event.clientX - rect.left
-      const y = event.clientY - rect.top
-      const target = pickNodeAt(x, y)
-      if (target) {
-        emit('node-select', target)
-      }
-    }
-  }
-
-  isPanning.value = false
-  if (event && canvasEl.value) {
-    const rect = canvasEl.value.getBoundingClientRect()
-    updateHoveredNode(event.clientX - rect.left, event.clientY - rect.top)
-  }
-  if (canvasEl.value && activePointerId !== null) {
-    try {
-      canvasEl.value.releasePointerCapture(activePointerId)
-    } catch {
-      // ignore
-    }
-  }
-  activePointerId = null
-}
-
-const onDragOver = (event) => {
-  if (!props.boxSelect && !props.editMode) return
-  event.dataTransfer.dropEffect = 'copy'
-}
-
-const onDrop = (event) => {
-  const raw = event.dataTransfer?.getData('application/x-aqua-item')
-    || event.dataTransfer?.getData('application/x-aqua-mac')
-    || event.dataTransfer?.getData('text/plain')
-  if (!raw) return
-  let payload = raw
-  try {
-    payload = JSON.parse(raw)
-  } catch {
-    payload = { layer: 'mac', id: raw, typeId: raw, field: 'macId', scope: 'node' }
-  }
-  const canvas = canvasEl.value
-  if (!canvas) return
-  const rect = canvas.getBoundingClientRect()
-  const sx = event.clientX - rect.left
-  const sy = event.clientY - rect.top
-  const target = pickNodeAt(sx, sy)
-  emit('protocol-drop', {
-    ...payload,
-    macId: payload.id || payload.macId,
-    nodeId: target ? Number(target.node_id) : null,
-  })
-}
-
-const activatePlaceTool = () => {
-  if (toolMode.value === TOOL_MODES.PLACE) {
-    toolMode.value = TOOL_MODES.PAN
-    scheduleDraw()
-    return
-  }
-  toolMode.value = TOOL_MODES.PLACE
-  pendingMeasurePoint.value = null
-  scheduleDraw()
-}
-
-const activateMeasureTool = () => {
-  if (toolMode.value === TOOL_MODES.MEASURE) {
-    toolMode.value = TOOL_MODES.PAN
-    pendingMeasurePoint.value = null
-    hoveredMeasureNode.value = null
-  } else {
-    toolMode.value = TOOL_MODES.MEASURE
-    pendingMeasurePoint.value = null
-    hoveredMeasureNode.value = null
-  }
-  emit('pause-request')
-  scheduleDraw()
-}
-
-const cancelActiveTool = () => {
-  if (toolMode.value === TOOL_MODES.PAN && !pendingMeasurePoint.value) return
-  toolMode.value = TOOL_MODES.PAN
-  pendingMeasurePoint.value = null
-  hoveredMeasureNode.value = null
-  scheduleDraw()
-}
-
-const clearMeasurements = () => {
-  if (!measurementLines.value.length) return
-  commitMeasurementState([], null)
-  pendingMeasurePoint.value = null
-  hoveredMeasureNode.value = null
-  emit('pause-request')
-  scheduleDraw()
-}
-
-const undoMeasurement = () => {
-  if (!canUndo.value) return
-  measurementHistoryIndex.value -= 1
-  applyMeasurementState(measurementHistory.value[measurementHistoryIndex.value])
-  pendingMeasurePoint.value = null
-  scheduleDraw()
-}
-
-const redoMeasurement = () => {
-  if (!canRedo.value) return
-  measurementHistoryIndex.value += 1
-  applyMeasurementState(measurementHistory.value[measurementHistoryIndex.value])
-  pendingMeasurePoint.value = null
-  scheduleDraw()
-}
-
-const deleteSelectedMeasurement = () => {
-  if (!selectedMeasurementId.value) return
-  const nextItems = measurementLines.value.filter((item) => item.id !== selectedMeasurementId.value)
-  commitMeasurementState(nextItems, null)
-  pendingMeasurePoint.value = null
-  scheduleDraw()
-}
-
 const updateViewport = () => {
   if (!containerEl.value) return
   const rect = containerEl.value.getBoundingClientRect()
@@ -1207,23 +703,6 @@ watch(
   },
   { deep: true, immediate: true },
 )
-
-watch(() => [props.editMode, props.allowPlaceNode], ([editable, allowPlace]) => {
-  if (!editable || !allowPlace) {
-    if (toolMode.value === TOOL_MODES.PLACE) {
-      toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
-    }
-  }
-})
-
-watch(() => props.boxSelect, (enabled) => {
-  if (enabled && (toolMode.value === TOOL_MODES.PAN || !toolMode.value)) {
-    toolMode.value = TOOL_MODES.SELECT
-  }
-  if (!enabled && toolMode.value === TOOL_MODES.SELECT) {
-    toolMode.value = TOOL_MODES.PAN
-  }
-}, { immediate: true })
 
 watch(() => props.editMode, async (next) => {
   draggingNodeId.value = null
