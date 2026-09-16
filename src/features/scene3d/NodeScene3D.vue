@@ -1,5 +1,5 @@
 <template>
-  <div ref="hostEl" class="scene-host">
+  <div ref="hostEl" class="scene-host" :style="{ background: hostBackground }">
     <canvas ref="canvasEl" class="scene-canvas" />
     <canvas
       ref="axesEl"
@@ -86,6 +86,8 @@ const nodeLabel = (node) => `Node ${node.node_id}`
 const nodeTitle = (node) => node.name ? `${nodeLabel(node)} · ${node.name}` : nodeLabel(node)
 
 const theme3D = computed(() => theme3DFor(props.themeKey))
+/* Babylon 引擎初始化前宿主先垫一层与 clearColor 相同的底色，避免切页闪一帧透明 */
+const hostBackground = computed(() => theme3D.value.clear.toHexString())
 const fx3D = computed(() => (props.fxLevel === 'extreme' ? 1.85 : 1))
 
 let nodeMeshMap = new Map()

@@ -3,6 +3,7 @@
     ref="containerEl"
     class="canvas-host"
     :class="{ 'canvas-host-edit': editMode }"
+    :style="{ background: hostBackground }"
     @wheel.prevent="onWheel"
     @dragover.prevent="onDragOver"
     @drop.prevent="onDrop"
@@ -170,6 +171,12 @@ const props = defineProps({
 })
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['industrial-scada'])
+/* 画布首帧前的垫底背景：与 paintSceneBackdrop 的径向渐变同 stops，
+   避免切页/重挂载时露出一帧 --sunken 底色造成闪烁 */
+const hostBackground = computed(() => {
+  const bg = themeProfile.value.bg
+  return `radial-gradient(circle at 20% 18%, ${bg[0]} 0%, ${bg[1]} 45%, ${bg[2]} 100%)`
+})
 const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
 const canvasEl = ref(null)
 const containerEl = ref(null)
@@ -483,6 +490,8 @@ onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   updateViewport()
+  // 同步补一次首帧绘制，不等 rAF，保证页面第一次 paint 画布就有内容
+  draw()
   resizeObserver = new ResizeObserver(() => {
     updateViewport()
   })
