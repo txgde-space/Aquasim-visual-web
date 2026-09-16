@@ -6,10 +6,12 @@ export const MIN_SIM_TIME_US = 10_000_000
 
 export const SPEED_OPTIONS = Object.freeze([0.05, 0.1, 0.25, 0.5, 1, 2, 4])
 
+/** 画布配色固定为工业监控（industrial-scada），2D/3D 共用同一 key。 */
+export const CANVAS_THEME_KEY = 'industrial-scada'
+
 export const LOCAL_STORAGE_KEYS = Object.freeze({
   fxLevel: 'aquasim_fx_level',
   uiTheme: 'aquasim_ui_theme',
-  canvasTheme: 'aquasim_canvas_theme',
   splitInspect: 'aquasim_split_inspect',
   splitLog: 'aquasim_split_log',
 })

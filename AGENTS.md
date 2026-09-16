@@ -19,12 +19,12 @@ src/
 │   ├── scene3d/   # Babylon.js：NodeScene3D.vue + 场景库（themes3d/factories/worldAxes/useBabylonScene）
 │   ├── replay/    # 回放：lib/ 纯函数（解析/规范化/合并/几何）+ composables + 面板组件
 │   └── experiment/# 实验：lib/（spec/catalog/scratch 生成）+ useTopologyEditor/useRunExperiment
-├── components/    # 跨功能域共享的 Vue 组件（NodeCanvas/ExperimentPanel/ProtocolDrawer/SplitPane/ThemePicker + useUiTheme/useUiPrefs）
+├── components/    # 跨功能域共享的 Vue 组件（NodeCanvas/ExperimentPanel/ProtocolDrawer/SplitPane + useUiTheme）
 ├── shared/        # 准入标准见下
 └── styles/        # 全局 CSS：main.css（令牌/重置）、themes.css（关键帧）、pages/*.css（按域）
 ```
 
-- **功能域单向依赖**：pages → features → shared；features 之间不互相 import（replay 不依赖 experiment，反之亦然）。跨域需求下沉到 `shared/` 或 props/emit。components/ 可引用 features 的 lib（NodeCanvas → canvas2d/themes 为先例）；features 不反向引用 components（跨域 UI 由 pages 组装或经 slot 注入，见 ReplayToolbar 的 ThemePicker 插槽）。
+- **功能域单向依赖**：pages → features → shared；features 之间不互相 import（replay 不依赖 experiment，反之亦然）。跨域需求下沉到 `shared/` 或 props/emit。components/ 可引用 features 的 lib（NodeCanvas → canvas2d/themes 为先例）；features 不反向引用 components（跨域 UI 由 pages 组装）。
 - **组件私有样式**写在 SFC `<style scoped>`；只有跨组件的全局规则才进 `src/styles/`。
 - 删除/新增全局 CSS 规则时，先用 `grep -r` 确认选择器在全仓库（含模板动态 `:class`、模板字符串拼接）无引用。
 
@@ -35,8 +35,9 @@ src/
 - **画布安全边距**：NodeCanvas 的 `viewPadding` prop（额外 px inset，叠加在 `viewInsetsFor` 基础上）用于让默认视图避开浮动岛屿；页面经 SplitPane 的 `update:width` 同步面板宽度传入。
 - **双主题令牌**：`main.css` 定义 dark（默认）/ light 全套令牌，经 `document.documentElement[data-theme]` 切换；`components/useUiTheme.ts` 负责读写与持久化（`aquasim_ui_theme`）。新增颜色一律走令牌，禁止写死色值（canvas 内部绘制颜色由 `features/canvas2d/lib/themes.ts` 主题包管，不受 UI 主题影响）。
 - **tailwind 已移除**：样式全部手写令牌 + 按域 CSS，不要重新引入工具类框架。
-- **画布主题**：8 套主题（THEME_PROFILES）经 `components/ThemePicker.vue`（顶栏右侧）切换，`components/useUiPrefs.ts` 的 `useCanvasTheme()` 跨页共享并持久化（`aquasim_canvas_theme`），默认值 `research-lab`。
+- **画布主题**：固定为工业监控（`industrial-scada`），2D/3D 共用 `shared/constants.ts` 的 `CANVAS_THEME_KEY` 传入 NodeCanvas/NodeScene3D；THEME_PROFILES / THEME_3D 各只保留这一套。主题选择器与 `aquasim_canvas_theme` 持久化已移除。
 - **SplitPane**：右侧岛屿宽度容器（拖拽/双击复位/键盘方向键/localStorage），实验页 `aquasim_split_inspect`、回放页 `aquasim_split_log`；localStorage key 统一登记在 `shared/constants.ts` 的 `LOCAL_STORAGE_KEYS`（`aquasim_*` 前缀）。
+- **面板小耳朵**：右侧面板的开收用右缘竖排拉环 `.panel-ear`（app.css，两页共用），`right` 跟随面板宽度联动，不再在工具栏放开收按钮。
 - **z-index 刻度**：1-2 画布内图层；10 浮动 dock 与画布工具栏；30 弹层菜单；80 全屏弹层。
 - **表单标签规范**：中文主标签 + mono 参数名辅标（`.field-param`），时间类参数接受带单位字符串（如 `30s`）；`txPower` 输入框已移除（生成器从未消费该字段，spec JSON 字段保留勿删）。
 

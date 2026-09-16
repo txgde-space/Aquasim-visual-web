@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import ThemePicker from './components/ThemePicker.vue'
-import { useCanvasTheme } from './components/useUiPrefs'
 import { useUiTheme } from './components/useUiTheme'
 
 const { theme, toggleTheme } = useUiTheme()
-const { canvasTheme } = useCanvasTheme()
 
 const themeToggleLabel = computed(() => (theme.value === 'dark' ? '切换到亮色主题' : '切换到暗色主题'))
 </script>
@@ -23,7 +20,6 @@ const themeToggleLabel = computed(() => (theme.value === 'dark' ? '切换到亮�
         <router-link class="page-tab" to="/replay">回放</router-link>
       </nav>
       <div class="topbar-actions">
-        <ThemePicker v-model="canvasTheme" />
         <button
           class="theme-toggle"
           type="button"

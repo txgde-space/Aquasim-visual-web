@@ -156,7 +156,7 @@ const props = defineProps({
   nodeVisuals: { type: Array, required: true },
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
-  themeKey: { type: String, default: 'ocean-sonar' },
+  themeKey: { type: String, default: 'industrial-scada' },
   fxLevel: { type: String, default: 'standard' },
   editMode: { type: Boolean, default: false },
   allowPlaceNode: { type: Boolean, default: false },
@@ -169,7 +169,7 @@ const props = defineProps({
   viewPadding: { type: Object, default: null },
 })
 
-const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
+const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['industrial-scada'])
 const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
 const canvasEl = ref(null)
 const containerEl = ref(null)

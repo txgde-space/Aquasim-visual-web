@@ -2,9 +2,8 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
-import { useCanvasTheme } from '../components/useUiPrefs'
 import { session } from '../shared/sessionStore'
-import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
+import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
 import { parseLog } from '@/features/replay/lib/logParser'
 import { timeDisplay } from '@/features/replay/lib/format'
 import { LOG_SOURCES } from '@/features/replay/lib/sources'
@@ -54,7 +53,6 @@ const {
   onSpeed,
 } = playback
 
-const { canvasTheme } = useCanvasTheme()
 const logWidth = ref(340)
 
 const {
@@ -195,7 +193,7 @@ onBeforeUnmount(() => {
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
           :current-time="currentTime"
-          :theme-key="canvasTheme"
+          :theme-key="CANVAS_THEME_KEY"
           :fx-level="fxLevel"
           :edit-mode="isEditMode"
           :original-positions="originalEditPositions"
@@ -214,7 +212,7 @@ onBeforeUnmount(() => {
               :node-visuals="nodeVisuals"
               :visible-packets="displayPackets"
               :current-time="currentTime"
-              :theme-key="canvasTheme"
+              :theme-key="CANVAS_THEME_KEY"
               :fx-level="fxLevel"
             />
           </template>

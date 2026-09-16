@@ -65,7 +65,7 @@ const props = defineProps({
   nodeVisuals: { type: Array, required: true },
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
-  themeKey: { type: String, default: 'ocean-sonar' },
+  themeKey: { type: String, default: 'industrial-scada' },
   fxLevel: { type: String, default: 'standard' },
 })
 

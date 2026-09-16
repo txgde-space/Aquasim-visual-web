@@ -5,8 +5,7 @@ import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
 import SplitPane from '../components/SplitPane.vue'
-import { useCanvasTheme } from '../components/useUiPrefs'
-import { LOCAL_STORAGE_KEYS } from '../shared/constants'
+import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS } from '../shared/constants'
 import { session } from '../shared/sessionStore'
 import { buildExperimentSpec, validateExperiment } from '@/features/experiment/lib/experimentSpec'
 import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
@@ -43,7 +42,6 @@ const {
 const copyHint = ref('')
 const inspectOpen = ref(true)
 const inspectWidth = ref(300)
-const { canvasTheme } = useCanvasTheme()
 
 // 底部控制台：可折叠为标题条，拖拽上边缘调高
 const stageEl = ref<HTMLElement | null>(null)
@@ -150,7 +148,7 @@ const copyJson = async () => {
           :node-visuals="nodeVisuals"
           :visible-packets="[]"
           :current-time="0"
-          :theme-key="canvasTheme"
+          :theme-key="CANVAS_THEME_KEY"
           fx-level="standard"
           :edit-mode="true"
           :allow-place-node="true"
@@ -180,11 +178,25 @@ const copyJson = async () => {
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
-        <button class="btn btn-compact" :class="{ active: inspectOpen }" @click="inspectOpen = !inspectOpen">属性</button>
         <button class="run-btn" data-testid="exp-run" :disabled="runStatus === 'running'" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
       </div>
+
+      <button
+        class="panel-ear"
+        :class="{ open: inspectOpen }"
+        :style="{ right: inspectOpen ? inspectWidth + 'px' : '0px' }"
+        :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
+        :aria-label="inspectOpen ? '收起属性面板' : '展开属性面板'"
+        :aria-expanded="inspectOpen"
+        @click="inspectOpen = !inspectOpen"
+      >
+        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+          <path :d="inspectOpen ? 'M1 1l4 4-4 4' : 'M5 1L1 5l4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="ear-label">属性</span>
+      </button>
 
       <SplitPane
         v-show="inspectOpen"
