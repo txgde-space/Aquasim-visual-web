@@ -122,6 +122,16 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { THEME_PROFILES } from '@/features/canvas2d/lib/themes'
+import {
+  computeBounds,
+  computeContentOrigin,
+  computeScale,
+  nodeRadiusFor,
+  toScreenPoint,
+  toWorldPoint,
+  viewInsetsFor,
+} from '@/features/canvas2d/lib/coordinate'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -147,138 +157,6 @@ const TOOL_MODES = Object.freeze({
 })
 
 
-const NODE_RADIUS_BASE = 18
-const THEME_PROFILES = Object.freeze({
-  'ocean-sonar': {
-    effect: 'sonar',
-    bg: ['#16325d', '#0b1628', '#030711'],
-    tx: '#f59e0b',
-    rx: '#22c55e',
-    bad: '#ef4444',
-    idleInner: '#7dd3fc',
-    idleOuter: '#1d4ed8',
-    nodeStroke: 'rgba(186, 230, 253, 0.6)',
-    lane: 'rgba(148, 163, 184, 0.3)',
-    sweep: 'rgba(56, 189, 248, 0.08)',
-    ring: 'rgba(56, 189, 248, 0.22)',
-    particle: 'rgba(125, 211, 252, 0.5)',
-    label: '#dbeafe',
-    depth: 'rgba(191, 219, 254, 0.7)',
-  },
-  'research-lab': {
-    effect: 'grid',
-    bg: ['#1a2338', '#111827', '#0a0f1d'],
-    tx: '#f59e0b',
-    rx: '#34d399',
-    bad: '#f87171',
-    idleInner: '#a5b4fc',
-    idleOuter: '#2563eb',
-    nodeStroke: 'rgba(191, 219, 254, 0.52)',
-    lane: 'rgba(148, 163, 184, 0.28)',
-    sweep: 'rgba(96, 165, 250, 0.07)',
-    ring: 'rgba(147, 197, 253, 0.22)',
-    particle: 'rgba(191, 219, 254, 0.44)',
-    label: '#dbeafe',
-    depth: 'rgba(191, 219, 254, 0.68)',
-  },
-  'tactical-ops': {
-    effect: 'radar',
-    bg: ['#263a1d', '#121f12', '#090f0a'],
-    tx: '#f59e0b',
-    rx: '#4ade80',
-    bad: '#ef4444',
-    idleInner: '#a3e635',
-    idleOuter: '#166534',
-    nodeStroke: 'rgba(187, 247, 208, 0.5)',
-    lane: 'rgba(163, 230, 53, 0.23)',
-    sweep: 'rgba(132, 204, 22, 0.08)',
-    ring: 'rgba(132, 204, 22, 0.24)',
-    particle: 'rgba(190, 242, 100, 0.4)',
-    label: '#dcfce7',
-    depth: 'rgba(187, 247, 208, 0.66)',
-  },
-  'industrial-scada': {
-    effect: 'scanline',
-    bg: ['#1f2937', '#111827', '#0b1220'],
-    tx: '#f97316',
-    rx: '#14b8a6',
-    bad: '#ef4444',
-    idleInner: '#67e8f9',
-    idleOuter: '#0369a1',
-    nodeStroke: 'rgba(165, 243, 252, 0.5)',
-    lane: 'rgba(148, 163, 184, 0.24)',
-    sweep: 'rgba(45, 212, 191, 0.06)',
-    ring: 'rgba(45, 212, 191, 0.22)',
-    particle: 'rgba(153, 246, 228, 0.45)',
-    label: '#ccfbf1',
-    depth: 'rgba(153, 246, 228, 0.62)',
-  },
-  'cyber-neon': {
-    effect: 'neon',
-    bg: ['#2b1244', '#100b22', '#07060f'],
-    tx: '#f97316',
-    rx: '#2dd4bf',
-    bad: '#fb7185',
-    idleInner: '#22d3ee',
-    idleOuter: '#c026d3',
-    nodeStroke: 'rgba(217, 70, 239, 0.52)',
-    lane: 'rgba(217, 70, 239, 0.26)',
-    sweep: 'rgba(236, 72, 153, 0.08)',
-    ring: 'rgba(244, 114, 182, 0.24)',
-    particle: 'rgba(34, 211, 238, 0.42)',
-    label: '#f5d0fe',
-    depth: 'rgba(196, 181, 253, 0.68)',
-  },
-  'light-minimal': {
-    effect: 'minimal',
-    bg: ['#e8f1ff', '#dbeafe', '#cbd5e1'],
-    tx: '#f97316',
-    rx: '#16a34a',
-    bad: '#dc2626',
-    idleInner: '#93c5fd',
-    idleOuter: '#2563eb',
-    nodeStroke: 'rgba(59, 130, 246, 0.4)',
-    lane: 'rgba(71, 85, 105, 0.24)',
-    sweep: 'rgba(56, 189, 248, 0.08)',
-    ring: 'rgba(59, 130, 246, 0.2)',
-    particle: 'rgba(59, 130, 246, 0.36)',
-    label: '#0f172a',
-    depth: 'rgba(30, 41, 59, 0.7)',
-  },
-  'gis-map': {
-    effect: 'terrain',
-    bg: ['#27453c', '#132823', '#0b1714'],
-    tx: '#f59e0b',
-    rx: '#22c55e',
-    bad: '#ef4444',
-    idleInner: '#86efac',
-    idleOuter: '#0f766e',
-    nodeStroke: 'rgba(134, 239, 172, 0.46)',
-    lane: 'rgba(110, 231, 183, 0.26)',
-    sweep: 'rgba(34, 197, 94, 0.07)',
-    ring: 'rgba(34, 197, 94, 0.24)',
-    particle: 'rgba(110, 231, 183, 0.38)',
-    label: '#dcfce7',
-    depth: 'rgba(167, 243, 208, 0.64)',
-  },
-  'timeline-story': {
-    effect: 'timeline',
-    bg: ['#2f1a3d', '#171730', '#0c1221'],
-    tx: '#f59e0b',
-    rx: '#60a5fa',
-    bad: '#f43f5e',
-    idleInner: '#c4b5fd',
-    idleOuter: '#4f46e5',
-    nodeStroke: 'rgba(196, 181, 253, 0.48)',
-    lane: 'rgba(167, 139, 250, 0.26)',
-    sweep: 'rgba(196, 181, 253, 0.08)',
-    ring: 'rgba(196, 181, 253, 0.22)',
-    particle: 'rgba(221, 214, 254, 0.42)',
-    label: '#ede9fe',
-    depth: 'rgba(196, 181, 253, 0.66)',
-  },
-})
-
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['ocean-sonar'])
 const fxIntensity = computed(() => {
   if (props.fxLevel === 'extreme') return 2.2
@@ -303,22 +181,8 @@ const measurementLines = ref([])
 const measurementHistory = ref([[]])
 const measurementHistoryIndex = ref(0)
 const selectedMeasurementId = ref(null)
-const viewInsets = computed(() => {
-  const shortest = Math.min(displayWidth.value, displayHeight.value)
-  const compact = shortest < 640
-  const base = compact ? 22 : 44
-  return {
-    left: base + 6,
-    top: compact ? 26 : 40,
-    right: compact ? 42 : 56,
-    bottom: compact ? 62 : 76,
-  }
-})
-const nodeRadius = computed(() => {
-  const shortest = Math.min(displayWidth.value, displayHeight.value)
-  if (shortest >= 640) return NODE_RADIUS_BASE
-  return Math.max(11, Math.round(11 + (((shortest - 280) * (NODE_RADIUS_BASE - 11)) / 360)))
-})
+const viewInsets = computed(() => viewInsetsFor(displayWidth.value, displayHeight.value))
+const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)))
 const emit = defineEmits([
   'node-select',
   'pause-request',
@@ -338,52 +202,21 @@ const sessionFrozenBounds = ref(null)
 let resizeObserver = null
 let activePointerId = null
 
-const liveBounds = computed(() => {
-  if (!props.nodes.length) {
-    return { minX: 0, maxX: 1, minY: 0, maxY: 1, spanX: 1, spanY: 1 }
-  }
-
-  const xs = props.nodes.map((node) => node.x)
-  const ys = props.nodes.map((node) => node.y)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
-
-  return {
-    minX,
-    maxX,
-    minY,
-    maxY,
-    spanX: Math.max(maxX - minX, 1),
-    spanY: Math.max(maxY - minY, 1),
-  }
-})
+const liveBounds = computed(() => computeBounds(props.nodes))
 const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
 
-const scale = computed(() => {
-  const inset = viewInsets.value
-  const availW = Math.max(1, displayWidth.value - inset.left - inset.right)
-  const availH = Math.max(1, displayHeight.value - inset.top - inset.bottom)
-  const sx = availW / bounds.value.spanX
-  const sy = availH / bounds.value.spanY
-  return Math.min(sx, sy) * 0.86
-})
+const scale = computed(() => computeScale(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value))
 
 const effectiveScale = computed(() => scale.value * zoom.value)
 
-const contentOrigin = computed(() => {
-  const inset = viewInsets.value
-  const s = scale.value
-  const contentW = bounds.value.spanX * s
-  const contentH = bounds.value.spanY * s
-  const availW = displayWidth.value - inset.left - inset.right
-  const availH = displayHeight.value - inset.top - inset.bottom
-  return {
-    x: inset.left + (availW - contentW) / 2,
-    y: inset.top + (availH - contentH) / 2,
-  }
-})
+const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value, scale.value))
+
+const projection = computed(() => ({
+  bounds: bounds.value,
+  origin: contentOrigin.value,
+  scale: effectiveScale.value,
+  pan: pan.value,
+}))
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const originalPoseById = computed(() => new Map((props.originalPositions || []).map((item) => [item.node_id, item])))
@@ -406,24 +239,9 @@ const canvasCursorClass = computed(() => {
   return ''
 })
 
-const toScreen = (x, y) => {
-  const base = bounds.value
-  const origin = contentOrigin.value
-  return {
-    x: origin.x + ((x - base.minX) * effectiveScale.value) + pan.value.x,
-    y: origin.y + ((base.maxY - y) * effectiveScale.value) + pan.value.y,
-  }
-}
+const toScreen = (x, y) => toScreenPoint(x, y, projection.value)
 
-const toWorld = (x, y) => {
-  const base = bounds.value
-  const origin = contentOrigin.value
-  const s = Math.max(effectiveScale.value, 1e-6)
-  return {
-    x: base.minX + ((x - origin.x - pan.value.x) / s),
-    y: base.maxY - ((y - origin.y - pan.value.y) / s),
-  }
-}
+const toWorld = (x, y) => toWorldPoint(x, y, projection.value)
 
 const pickNodeAt = (sx, sy) => {
   let picked = null
