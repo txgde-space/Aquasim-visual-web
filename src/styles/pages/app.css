@@ -235,6 +235,14 @@
   user-select: none;
 }
 
+/* 左侧面板（协议目录）的镜像小耳朵；left 由页面按 dock 实测宽度传入 */
+.panel-ear.ear-left {
+  border-right: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  transition: left 0.2s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
 /* ---------- 协议目录（左 dock 内容） ---------- */
 .rail-wrap {
   display: flex;

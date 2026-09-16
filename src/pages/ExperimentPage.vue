@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
@@ -40,8 +40,24 @@ const {
 } = editor
 
 const copyHint = ref('')
+const protoOpen = ref(true)
 const inspectOpen = ref(true)
 const inspectWidth = ref(300)
+
+// 协议目录宽度随层级开合变化（仅 rail 46px / rail+flyout 256px），实测后驱动左耳位置
+const protoDockEl = ref<HTMLElement | null>(null)
+const protoDockRight = ref(0)
+let protoRO: ResizeObserver | null = null
+onMounted(() => {
+  const el = protoDockEl.value
+  if (!el) return
+  const measure = () => {
+    protoDockRight.value = el.offsetLeft + el.offsetWidth
+  }
+  measure()
+  protoRO = new ResizeObserver(measure)
+  protoRO.observe(el)
+})
 
 // 底部控制台：可折叠为标题条，拖拽上边缘调高
 const stageEl = ref<HTMLElement | null>(null)
@@ -67,6 +83,7 @@ const onConsoleGripDown = (event: PointerEvent) => {
   window.addEventListener('pointerup', onConsoleGripUp, { once: true })
 }
 onBeforeUnmount(() => {
+  protoRO?.disconnect()
   window.removeEventListener('pointermove', onConsoleGripMove)
   document.body.style.userSelect = ''
 })
@@ -157,7 +174,7 @@ const copyJson = async () => {
           :selected-node-id="selectedEditNode?.node_id ?? undefined"
           :selected-node-ids="selectedIds"
           :sound-speed-mps="1500"
-          :view-padding="{ left: 232, top: 24, right: inspectOpen ? inspectWidth : 0, bottom: 0 }"
+          :view-padding="{ left: protoOpen ? 232 : 0, top: 24, right: inspectOpen ? inspectWidth : 0, bottom: 0 }"
           @node-move="onNodeMove"
           @nodes-move="onNodesMove"
           @node-select="onNodeSelect"
@@ -167,9 +184,23 @@ const copyJson = async () => {
         />
       </div>
 
-      <div class="dock dock-left">
+      <div v-show="protoOpen" ref="protoDockEl" class="dock dock-left">
         <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
       </div>
+
+      <button
+        class="panel-ear ear-left"
+        :style="{ left: protoOpen ? protoDockRight + 'px' : '0px' }"
+        :title="protoOpen ? '收起协议目录' : '展开协议目录'"
+        :aria-label="protoOpen ? '收起协议目录' : '展开协议目录'"
+        :aria-expanded="protoOpen"
+        @click="protoOpen = !protoOpen"
+      >
+        <svg viewBox="0 0 6 10" width="6" height="10" aria-hidden="true">
+          <path :d="protoOpen ? 'M5 1L1 5l4 4' : 'M1 1l4 4-4 4'" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="ear-label">协议</span>
+      </button>
 
       <div class="dock dock-top cmd-bar">
         <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>

@@ -37,7 +37,7 @@ src/
 - **tailwind 已移除**：样式全部手写令牌 + 按域 CSS，不要重新引入工具类框架。
 - **画布主题**：固定为工业监控（`industrial-scada`），2D/3D 共用 `shared/constants.ts` 的 `CANVAS_THEME_KEY` 传入 NodeCanvas/NodeScene3D；THEME_PROFILES / THEME_3D 各只保留这一套。主题选择器与 `aquasim_canvas_theme` 持久化已移除。
 - **SplitPane**：右侧岛屿宽度容器（拖拽/双击复位/键盘方向键/localStorage），实验页 `aquasim_split_inspect`、回放页 `aquasim_split_log`；localStorage key 统一登记在 `shared/constants.ts` 的 `LOCAL_STORAGE_KEYS`（`aquasim_*` 前缀）。
-- **面板小耳朵**：右侧面板的开收用右缘竖排拉环 `.panel-ear`（app.css，两页共用），`right` 跟随面板宽度联动，不再在工具栏放开收按钮。
+- **面板小耳朵**：两侧浮动面板的开收用边缘竖排拉环 `.panel-ear`（app.css，两页共用），右侧用 `right`、左侧协议目录用镜像变体 `.ear-left`（`left`，页面实测 dock 宽度传入），不再在工具栏放开收按钮。
 - **z-index 刻度**：1-2 画布内图层；10 浮动 dock 与画布工具栏；30 弹层菜单；80 全屏弹层。
 - **表单标签规范**：中文主标签 + mono 参数名辅标（`.field-param`），时间类参数接受带单位字符串（如 `30s`）；`txPower` 输入框已移除（生成器从未消费该字段，spec JSON 字段保留勿删）。
 
