@@ -12,7 +12,6 @@ const props = defineProps({
   selectedMacId: { type: String, default: '' },
   selectedSummary: { type: String, default: '' },
   runStatus: { type: String, default: 'idle' },
-  runLog: { type: String, default: '' },
 })
 
 const emit = defineEmits([
@@ -81,7 +80,6 @@ const onNumberField = (key, event) => {
       <button class="btn btn-compact" @click="emit('sync-from-replay')">同步回放</button>
       <button class="btn btn-compact" @click="emit('apply-to-replay')">应用到回放</button>
     </div>
-    <pre v-if="runLog" class="run-log">{{ runLog }}</pre>
 
     <div class="control-fields-grid">
       <label class="field field-compact">
