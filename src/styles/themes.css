@@ -1,0 +1,189 @@
+/* 主题：8 套 page-wrap 主题 + fx-extreme + 动画关键帧 */
+.page-wrap.theme-ocean-sonar {
+  --app-bg: radial-gradient(circle at 12% 14%, #0d2e55 0%, #061429 45%, #020914 100%);
+  --panel: rgba(10, 28, 50, 0.9);
+  --card: #08223d;
+  --text: #e6f3ff;
+  --muted: #9cc3df;
+  --line: rgba(120, 174, 214, 0.28);
+  --accent: #38bdf8;
+  --accent-soft: #9ad8ff;
+  --btn-top: #1d3a63;
+  --btn-bottom: #102743;
+}
+.page-wrap.theme-research-lab {
+  --app-bg: linear-gradient(180deg, #0f172a 0%, #0a1020 100%);
+  --panel: rgba(16, 24, 40, 0.92);
+  --card: #101d33;
+  --text: #ecf2ff;
+  --muted: #a8b5cb;
+  --line: rgba(148, 163, 184, 0.3);
+  --accent: #60a5fa;
+  --accent-soft: #bfd8ff;
+  --btn-top: #243754;
+  --btn-bottom: #18253d;
+}
+.page-wrap.theme-tactical-ops {
+  --app-bg: radial-gradient(circle at 18% 20%, #1f2b17 0%, #0a1208 55%, #060a05 100%);
+  --panel: rgba(17, 28, 14, 0.9);
+  --card: #13250f;
+  --text: #ecf4e6;
+  --muted: #9fb393;
+  --line: rgba(145, 179, 130, 0.3);
+  --accent: #7ddc6f;
+  --accent-soft: #b6efad;
+  --btn-top: #2f4a29;
+  --btn-bottom: #1b3017;
+}
+.page-wrap.theme-industrial-scada {
+  --app-bg: linear-gradient(180deg, #141920 0%, #0e1319 100%);
+  --panel: rgba(24, 32, 43, 0.94);
+  --card: #1a2635;
+  --text: #edf3fa;
+  --muted: #a9b4bf;
+  --line: rgba(132, 151, 170, 0.33);
+  --accent: #4fd1c5;
+  --accent-soft: #9de6de;
+  --btn-top: #2a3b4f;
+  --btn-bottom: #1d2a3a;
+}
+.page-wrap.theme-cyber-neon {
+  --app-bg: radial-gradient(circle at 14% 18%, #2a1040 0%, #0a061a 52%, #04040a 100%);
+  --panel: rgba(23, 10, 37, 0.92);
+  --card: #1a0f2d;
+  --text: #f6eaff;
+  --muted: #caa8df;
+  --line: rgba(210, 122, 255, 0.28);
+  --accent: #ff66d8;
+  --accent-soft: #6ae8ff;
+  --btn-top: #3e1f62;
+  --btn-bottom: #24123f;
+}
+.page-wrap.theme-light-minimal {
+  --app-bg: linear-gradient(180deg, #f4f8ff 0%, #e9f0fb 100%);
+  --panel: rgba(255, 255, 255, 0.92);
+  --card: #f8fbff;
+  --text: #0f1c2d;
+  --muted: #5f7288;
+  --line: rgba(124, 146, 171, 0.36);
+  --accent: #2b7fff;
+  --accent-soft: #477ec8;
+  --btn-top: #dae6f8;
+  --btn-bottom: #c7d8f0;
+}
+.page-wrap.theme-gis-map {
+  --app-bg: radial-gradient(circle at 15% 15%, #24433a 0%, #0e211f 55%, #081412 100%);
+  --panel: rgba(17, 33, 30, 0.92);
+  --card: #14312d;
+  --text: #e7f6ed;
+  --muted: #9bbfad;
+  --line: rgba(132, 175, 147, 0.3);
+  --accent: #73d1a8;
+  --accent-soft: #b6e8cd;
+  --btn-top: #275041;
+  --btn-bottom: #19392f;
+}
+.page-wrap.theme-timeline-story {
+  --app-bg: linear-gradient(180deg, #1c1120 0%, #0f101f 48%, #0a1424 100%);
+  --panel: rgba(24, 20, 41, 0.9);
+  --card: #1a2240;
+  --text: #f1ebff;
+  --muted: #baaed4;
+  --line: rgba(165, 155, 210, 0.3);
+  --accent: #ffb86b;
+  --accent-soft: #c8b4ff;
+  --btn-top: #3f315a;
+  --btn-bottom: #2a2145;
+}
+.page-wrap.fx-extreme {
+  --shadow: 0 18px 54px rgba(0, 0, 0, 0.6);
+}
+.page-wrap.fx-extreme .panel,
+.page-wrap.fx-extreme .card {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--accent-soft) 34%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent) inset,
+    0 20px 56px rgba(2, 6, 23, 0.65),
+    0 0 38px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.page-wrap.fx-extreme .card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 26%);
+}
+.page-wrap.fx-extreme .btn {
+  border-color: color-mix(in srgb, var(--accent-soft) 48%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent) inset,
+    0 0 18px color-mix(in srgb, var(--accent) 22%, transparent);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--accent-soft) 20%, transparent);
+}
+.page-wrap.fx-extreme .btn.primary {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-soft) 24%, transparent) inset,
+    0 0 24px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.page-wrap.fx-extreme .event-band {
+  animation: band-pulse 0.95s ease-in-out infinite;
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--accent) 35%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 30%, transparent);
+}
+.page-wrap.fx-extreme .view-switch,
+.page-wrap.fx-extreme .log-list {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+@keyframes pulse-core {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.72;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+@keyframes hud-sheen {
+  0% {
+    transform: translateX(-36%);
+    opacity: 0.3;
+  }
+  45% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateX(42%);
+    opacity: 0.24;
+  }
+}
+@keyframes band-pulse {
+  0%,
+  100% {
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    filter: saturate(1.25) brightness(1.14);
+  }
+}

@@ -1,0 +1,9 @@
+/* 2D 画布宿主（NodeCanvas 挂载点） */
+.wb-canvas {
+  position: relative;
+  min-height: 0;
+  background: #0c0d10;
+}
+.wb-canvas .canvas-host {
+  height: 100%;
+}

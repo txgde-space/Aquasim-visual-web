@@ -1,0 +1,111 @@
+/* 基础层：tailwind、设计令牌、重置、全局元素 */
+@import "tailwindcss";
+:root {
+  --bg: #101114;
+  --app-bg: #101114;
+  --panel: #16171c;
+  --card: #16171c;
+  --raised: #1c1d24;
+  --text: #ececef;
+  --muted: #8b8d97;
+  --line: rgba(255, 255, 255, 0.07);
+  --accent: #5b8def;
+  --accent-soft: #8eb0f5;
+  --btn-top: #23242c;
+  --btn-bottom: #1c1d24;
+  --idle: #7aa2f7;
+  --tx: #f0a14a;
+  --rx: #3dd68c;
+  --bad: #f07178;
+  --warn: #e6b450;
+  --shadow: none;
+  --page-pad: 0;
+  --page-gap: 0;
+  --panel-pad: 0.85rem;
+  --card-pad: 0.85rem;
+  --title-size: 1.05rem;
+  --ui-font-size: 13.5px;
+  --ui-line: 1.45;
+  --sidebar-min: 300px;
+  --card-grid-cols: minmax(0, 1fr) minmax(var(--sidebar-min), 320px);
+  --btn-h: 34px;
+  --btn-compact-h: 30px;
+  --select-h: 30px;
+  --card-radius: 0;
+  --panel-radius: 0;
+  --eyebrow-size: 0.68rem;
+  --meta-size: 0.8rem;
+  --legend-size: 0.78rem;
+  --stat-size: 0.78rem;
+  --log-item-pad-y: 0.4rem;
+  --log-item-pad-x: 0.55rem;
+  --view-switch-w: 52px;
+  --view-switch-h: 28px;
+  --nav-h: 46px;
+}
+*,
+::before,
+::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--text);
+  font: var(--ui-font-size)/var(--ui-line) var(--font-ui, "IBM Plex Sans", "Segoe UI", sans-serif);
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+#app {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  background: var(--app-bg);
+  overflow: hidden;
+}
+
+@media (max-width: 1680px), (max-height: 980px) {
+    :root {
+      --page-pad: 0.5rem;
+      --page-gap: 0.45rem;
+      --panel-pad: 0.5rem;
+      --card-pad: 0.5rem;
+      --title-size: 1.5rem;
+      --ui-font-size: 13px;
+      --ui-line: 1.4;
+      --sidebar-min: 280px;
+      --card-grid-cols: minmax(0, 1fr) minmax(260px, min(320px, 34vw));
+      --btn-h: 30px;
+      --btn-compact-h: 28px;
+      --select-h: 26px;
+      --card-radius: 10px;
+      --panel-radius: 10px;
+      --eyebrow-size: 0.66rem;
+      --meta-size: 0.78rem;
+      --legend-size: 0.74rem;
+      --stat-size: 0.74rem;
+      --log-item-pad-y: 0.32rem;
+      --log-item-pad-x: 0.48rem;
+      --view-switch-w: 46px;
+      --view-switch-h: 26px;
+    }
+}
+
+@media (max-height: 760px) {
+    :root {
+      --page-pad: 0.32rem;
+      --page-gap: 0.3rem;
+      --panel-pad: 0.38rem;
+      --card-pad: 0.38rem;
+      --title-size: 1.32rem;
+      --btn-compact-h: 26px;
+      --select-h: 24px;
+    }
+}
