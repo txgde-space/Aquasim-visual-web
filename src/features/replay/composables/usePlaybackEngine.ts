@@ -19,9 +19,28 @@ export const usePlaybackEngine = (options: PlaybackEngineOptions) => {
 
   const rangeProgressStyle = computed(() => `${((currentTime.value / Math.max(1, options.getCycleEndUs())) * 100).toFixed(2)}%`)
 
+  /* 拖动/滑杆等高频输入的寻址合并：一帧最多落一次，避免每个 pointermove/input
+     事件都同步触发全量派生重建（packetEntries → 面板列表重渲染）造成卡顿 */
+  let seekRaf = 0
+  let pendingSeekUs: number | null = null
+
   const seekTime = (us: number) => {
+    pendingSeekUs = null // 离散跳转优先，作废未落的拖动寻址
     currentTime.value = clampTime(us)
     lastTs = 0
+  }
+
+  const queueSeek = (us: number) => {
+    pendingSeekUs = us
+    if (seekRaf) return
+    seekRaf = requestAnimationFrame(() => {
+      seekRaf = 0
+      if (pendingSeekUs != null) {
+        const target = pendingSeekUs
+        pendingSeekUs = null
+        seekTime(target)
+      }
+    })
   }
 
   const togglePlay = () => {
@@ -87,6 +106,9 @@ export const usePlaybackEngine = (options: PlaybackEngineOptions) => {
   const dispose = () => {
     if (raf) cancelAnimationFrame(raf)
     raf = 0
+    if (seekRaf) cancelAnimationFrame(seekRaf)
+    seekRaf = 0
+    pendingSeekUs = null
   }
 
   return {
@@ -97,6 +119,7 @@ export const usePlaybackEngine = (options: PlaybackEngineOptions) => {
     rangeProgressStyle,
     clampTime,
     seekTime,
+    queueSeek,
     togglePlay,
     pauseForTool,
     reset,

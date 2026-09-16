@@ -49,7 +49,7 @@ const {
   togglePlay,
   pauseForTool,
   reset,
-  seekTime,
+  queueSeek,
   onSpeed,
 } = playback
 
@@ -304,7 +304,7 @@ onBeforeUnmount(() => {
         :range-progress-style="rangeProgressStyle"
         :is-playing="isPlaying"
         :speed="speed"
-        @seek="seekTime"
+        @seek="queueSeek"
         @toggle-play="togglePlay"
         @reset="reset"
         @speed-change="onSpeed"

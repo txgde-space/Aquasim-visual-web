@@ -118,7 +118,7 @@ export const useLogPanel = ({
 
     const durationUs = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
     const ratio = clampRatio((event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width)
-    playback.seekTime(activeDragEvent.value.minUs + (durationUs * ratio))
+    playback.queueSeek(activeDragEvent.value.minUs + (durationUs * ratio))
   }
 
   const onGlobalPointerUp = () => {
