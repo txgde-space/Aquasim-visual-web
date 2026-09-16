@@ -144,6 +144,8 @@ import {
 import { drawPacketRect } from '@/features/canvas2d/lib/draw/packets'
 import { drawWorldGrid } from '@/features/canvas2d/lib/draw/grid'
 import { drawMeasurementLines as drawMeasureLinesView } from '@/features/canvas2d/lib/draw/measure'
+import { useCanvasLoop } from '@/features/canvas2d/composables/useCanvasLoop'
+import { useCanvasView } from '@/features/canvas2d/composables/useCanvasView'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -178,12 +180,6 @@ const canvasEl = ref(null)
 const containerEl = ref(null)
 const displayWidth = ref(900)
 const displayHeight = ref(520)
-const pan = ref({ x: 0, y: 0 })
-const isPanning = ref(false)
-const panStart = ref({ x: 0, y: 0 })
-const panOffsetStart = ref({ x: 0, y: 0 })
-const zoom = ref(1)
-const hasDragged = ref(false)
 const hoveredNodeId = ref(null)
 const hoverCursor = ref({ x: 0, y: 0 })
 const hoveredMeasureNode = ref(null)
@@ -209,8 +205,6 @@ const draggingNodeId = ref(null)
 const dragGroup = ref(null)
 const marquee = ref(null)
 const spaceHeld = ref(false)
-const dragFrozenBounds = ref(null)
-const sessionFrozenBounds = ref(null)
 let resizeObserver = null
 let activePointerId = null
 
@@ -229,6 +223,32 @@ const projection = computed(() => ({
   scale: effectiveScale.value,
   pan: pan.value,
 }))
+
+const loop = useCanvasLoop(() => draw)
+const { scheduleDraw } = loop
+
+const view = useCanvasView({
+  getProjection: () => projection.value,
+  getDraw: () => draw,
+  getCanvasEl: () => canvasEl.value,
+})
+const {
+  pan,
+  isPanning,
+  panStart,
+  panOffsetStart,
+  zoom,
+  hasDragged,
+  dragFrozenBounds,
+  sessionFrozenBounds,
+  onWheel,
+} = view
+
+const resetView = () => {
+  view.resetView()
+  hoveredNodeId.value = null
+  scheduleDraw()
+}
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const originalPoseById = computed(() => new Map((props.originalPositions || []).map((item) => [item.node_id, item])))
@@ -750,12 +770,12 @@ const onPointerDown = (event) => {
       const pickedMeasurement = selectMeasurementAt(sx, sy)
       if (pickedMeasurement) {
         selectedMeasurementId.value = pickedMeasurement.id
-        requestAnimationFrame(draw)
+        scheduleDraw()
         return
       }
       pendingMeasurePoint.value = point
       selectedMeasurementId.value = null
-      requestAnimationFrame(draw)
+      scheduleDraw()
       return
     }
 
@@ -767,7 +787,7 @@ const onPointerDown = (event) => {
     }
     commitMeasurementState([...measurementLines.value, nextMeasurement], nextMeasurement.id)
     pendingMeasurePoint.value = null
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -787,7 +807,7 @@ const onPointerDown = (event) => {
       } catch {
         // ignore
       }
-      requestAnimationFrame(draw)
+      scheduleDraw()
       return
     }
     const world = toWorld(sx, sy)
@@ -838,7 +858,7 @@ const onPointerDown = (event) => {
       } catch {
         // ignore
       }
-      requestAnimationFrame(draw)
+      scheduleDraw()
       return
     }
 
@@ -859,7 +879,7 @@ const onPointerDown = (event) => {
       } catch {
         // ignore
       }
-      requestAnimationFrame(draw)
+      scheduleDraw()
       return
     }
   }
@@ -867,7 +887,7 @@ const onPointerDown = (event) => {
   const pickedMeasurement = selectMeasurementAt(sx, sy)
   if (pickedMeasurement) {
     selectedMeasurementId.value = pickedMeasurement.id
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -900,7 +920,7 @@ const onPointerMove = (event) => {
   if (marquee.value) {
     if ((x - marquee.value.x0) ** 2 + (y - marquee.value.y0) ** 2 > 16) hasDragged.value = true
     marquee.value = { ...marquee.value, x1: x, y1: y }
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -920,7 +940,7 @@ const onPointerMove = (event) => {
     if (moves.length === 1) {
       emit('node-move', moves[0])
     }
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -934,7 +954,7 @@ const onPointerMove = (event) => {
       x: world.x,
       y: world.y,
     })
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -951,7 +971,7 @@ const onPointerMove = (event) => {
     x: panOffsetStart.value.x + dx,
     y: panOffsetStart.value.y + dy,
   }
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const updateMeasureHover = (sx, sy) => {
@@ -987,7 +1007,7 @@ const onCanvasPointerMove = (event) => {
   updateMeasureHover(sx, sy)
   updateHoveredNode(sx, sy)
   if (toolMode.value === TOOL_MODES.MEASURE) {
-    requestAnimationFrame(draw)
+    scheduleDraw()
   }
 }
 
@@ -996,7 +1016,7 @@ const onCanvasPointerLeave = () => {
   hoverCursor.value = { x: 0, y: 0 }
   if (toolMode.value === TOOL_MODES.MEASURE) {
     hoveredMeasureNode.value = null
-    requestAnimationFrame(draw)
+    scheduleDraw()
   }
 }
 
@@ -1026,7 +1046,7 @@ const onPointerUp = (event) => {
       }
     }
     activePointerId = null
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -1043,7 +1063,7 @@ const onPointerUp = (event) => {
       }
     }
     activePointerId = null
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
 
@@ -1109,12 +1129,12 @@ const onDrop = (event) => {
 const activatePlaceTool = () => {
   if (toolMode.value === TOOL_MODES.PLACE) {
     toolMode.value = TOOL_MODES.PAN
-    requestAnimationFrame(draw)
+    scheduleDraw()
     return
   }
   toolMode.value = TOOL_MODES.PLACE
   pendingMeasurePoint.value = null
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const activateMeasureTool = () => {
@@ -1128,7 +1148,7 @@ const activateMeasureTool = () => {
     hoveredMeasureNode.value = null
   }
   emit('pause-request')
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const cancelActiveTool = () => {
@@ -1136,7 +1156,7 @@ const cancelActiveTool = () => {
   toolMode.value = TOOL_MODES.PAN
   pendingMeasurePoint.value = null
   hoveredMeasureNode.value = null
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const clearMeasurements = () => {
@@ -1145,14 +1165,7 @@ const clearMeasurements = () => {
   pendingMeasurePoint.value = null
   hoveredMeasureNode.value = null
   emit('pause-request')
-  requestAnimationFrame(draw)
-}
-
-const resetView = () => {
-  pan.value = { x: 0, y: 0 }
-  zoom.value = 1
-  hoveredNodeId.value = null
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const undoMeasurement = () => {
@@ -1160,7 +1173,7 @@ const undoMeasurement = () => {
   measurementHistoryIndex.value -= 1
   applyMeasurementState(measurementHistory.value[measurementHistoryIndex.value])
   pendingMeasurePoint.value = null
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const redoMeasurement = () => {
@@ -1168,7 +1181,7 @@ const redoMeasurement = () => {
   measurementHistoryIndex.value += 1
   applyMeasurementState(measurementHistory.value[measurementHistoryIndex.value])
   pendingMeasurePoint.value = null
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 const deleteSelectedMeasurement = () => {
@@ -1176,34 +1189,7 @@ const deleteSelectedMeasurement = () => {
   const nextItems = measurementLines.value.filter((item) => item.id !== selectedMeasurementId.value)
   commitMeasurementState(nextItems, null)
   pendingMeasurePoint.value = null
-  requestAnimationFrame(draw)
-}
-
-const onWheel = (event) => {
-  const canvas = canvasEl.value
-  if (!canvas) return
-
-  const rect = canvas.getBoundingClientRect()
-  const cx = event.clientX - rect.left
-  const cy = event.clientY - rect.top
-  const beforeZoom = zoom.value
-  const zoomFactor = Math.exp(-event.deltaY * 0.0015)
-  const nextZoom = Math.max(0.25, Math.min(4, beforeZoom * zoomFactor))
-  if (nextZoom === beforeZoom) return
-
-  const anchorWorld = toWorld(cx, cy)
-  zoom.value = nextZoom
-
-  requestAnimationFrame(() => {
-    const base = bounds.value
-    const s = effectiveScale.value
-    const origin = contentOrigin.value
-    pan.value = {
-      x: cx - ((anchorWorld.x - base.minX) * s) - origin.x,
-      y: cy - ((base.maxY - anchorWorld.y) * s) - origin.y,
-    }
-    requestAnimationFrame(draw)
-  })
+  scheduleDraw()
 }
 
 const updateViewport = () => {
@@ -1211,13 +1197,13 @@ const updateViewport = () => {
   const rect = containerEl.value.getBoundingClientRect()
   displayWidth.value = Math.max(160, rect.width - 2)
   displayHeight.value = Math.max(120, Math.round((rect.height || 0) - 2))
-  requestAnimationFrame(draw)
+  scheduleDraw()
 }
 
 watch(
   () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.originalPositions, props.selectedNodeId, props.selectedNodeIds],
   () => {
-    requestAnimationFrame(draw)
+    scheduleDraw()
   },
   { deep: true, immediate: true },
 )
@@ -1279,6 +1265,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  loop.dispose()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('pointermove', onPointerMove)
