@@ -1,4 +1,3 @@
-import { type Ref } from 'vue'
 import {
   MAX_LOG_FILES,
   sanitizeFileName,
@@ -18,17 +17,11 @@ type ImportedLogFile =
 export const useLogImport = ({
   state,
   applyParsedLog,
-  logFileInput,
-  nodeLogFileInput,
 }: {
   state: ReplayStateApi
   /** Bound apply that also exits edit mode (wired in ReplayPage). */
   applyParsedLog: (parsed: ParsedLog) => void
-  /** Template refs owned by the page component (declared with useTemplateRef). */
-  logFileInput: Ref<HTMLInputElement | null>
-  nodeLogFileInput: Ref<HTMLInputElement | null>
 }) => {
-
   const loadSampleLog = (key: string) => {
     const source = LOG_SOURCES[key] || LOG_SOURCES.default
     state.logSourceKey.value = LOG_SOURCES[key] ? key : 'default'
@@ -39,14 +32,6 @@ export const useLogImport = ({
     const key = (event.target as HTMLSelectElement).value
     if (!LOG_SOURCES[key]) return
     loadSampleLog(key)
-  }
-
-  const openLogFilePicker = () => {
-    logFileInput.value?.click()
-  }
-
-  const openNodeLogFilePicker = () => {
-    nodeLogFileInput.value?.click()
   }
 
   const importLogFile = async (file: File): Promise<ImportedLogFile> => {
@@ -102,8 +87,6 @@ export const useLogImport = ({
   return {
     loadSampleLog,
     onSampleLogChange,
-    openLogFilePicker,
-    openNodeLogFilePicker,
     onLogFileChange,
     onNodeLogFilesChange,
   }

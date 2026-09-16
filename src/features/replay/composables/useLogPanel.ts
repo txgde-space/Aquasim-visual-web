@@ -1,4 +1,4 @@
-import { nextTick, ref, watch, type Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import type { LifecycleStage, PacketEntry } from '@/shared/types/replay'
 import { clampRatio } from '../lib/format'
 import type { ReplayStateApi } from './useReplayState'
@@ -12,7 +12,7 @@ interface DragEventState {
   width: number
 }
 
-/** Minimal shape needed to seek by dragging an event track (template builds this for lifecycle stages). */
+/** Minimal shape needed to seek by dragging an event track (LogPanel builds this for lifecycle stages). */
 export interface PacketTrackTarget {
   eventId: string
   startUs: number
@@ -23,14 +23,9 @@ export interface PacketTrackTarget {
 export const useLogPanel = ({
   state,
   playback,
-  globalLogListEl,
-  lifecycleLogListEl,
 }: {
   state: ReplayStateApi
   playback: PlaybackEngine
-  /** Template refs owned by the page component (declared with useTemplateRef). */
-  globalLogListEl: Ref<HTMLElement | null>
-  lifecycleLogListEl: Ref<HTMLElement | null>
 }) => {
   const logPanelOpen: Ref<boolean> = ref(false)
   const visualMode: Ref<string> = ref('2d')
@@ -121,39 +116,6 @@ export const useLogPanel = ({
     activeDragEvent.value = null
   }
 
-  const scrollLogItemIntoView = (listEl: HTMLElement | null, eventId: string | null) => {
-    if (!listEl || !eventId) return
-    const target = [...listEl.querySelectorAll<HTMLElement>('.log-item')]
-      .find((item) => item.dataset.eventId === eventId)
-    if (!target) return
-
-    const listRect = listEl.getBoundingClientRect()
-    const targetRect = target.getBoundingClientRect()
-    const outOfViewTop = targetRect.top < listRect.top
-    const outOfViewBottom = targetRect.bottom > listRect.bottom
-    if (!outOfViewTop && !outOfViewBottom) return
-
-    target.scrollIntoView({
-      block: 'nearest',
-      inline: 'nearest',
-      behavior: playback.isPlaying.value ? 'smooth' : 'auto',
-    })
-  }
-
-  watch([state.replayMode, state.globalActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-    if (mode !== 'global' || !eventId) return
-    if (mode === prevMode && eventId === prevEventId) return
-    await nextTick()
-    scrollLogItemIntoView(globalLogListEl.value, eventId)
-  })
-
-  watch([state.replayMode, state.lifecycleActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-    if (mode !== 'lifecycle' || !eventId) return
-    if (mode === prevMode && eventId === prevEventId) return
-    await nextTick()
-    scrollLogItemIntoView(lifecycleLogListEl.value, eventId)
-  })
-
   return {
     logPanelOpen,
     visualMode,
@@ -167,7 +129,6 @@ export const useLogPanel = ({
     onEventTrackPointerDown,
     onGlobalPointerMove,
     onGlobalPointerUp,
-    scrollLogItemIntoView,
   }
 }
 
