@@ -52,12 +52,8 @@ const AXIS_LABEL_OFFSET_FACTOR = 2.35
 
 /**
  * Build or update the world axis lines, tips, ticks and DynamicTexture labels
- * for the current node set.
- *
- * NOTE: preserved as-is from the pre-refactor component, where this function
- * was defined but never wired into the refresh path (worldAxesMap therefore
- * stays empty). Decide separately whether to wire it into refreshScene or
- * delete it.
+ * for the current node set. Called from the component only when the node
+ * bounds signature changes, so the label textures are not redrawn per frame.
  */
 export const syncWorldAxes = (
   scene: Scene,

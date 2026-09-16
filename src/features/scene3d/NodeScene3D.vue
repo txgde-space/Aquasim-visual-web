@@ -56,6 +56,7 @@ import {
 import {
   disposeWorldAxisEntry,
   drawAxesWidget,
+  syncWorldAxes,
 } from '@/features/scene3d/lib/worldAxes'
 import { useBabylonScene } from '@/features/scene3d/lib/useBabylonScene'
 
@@ -338,9 +339,35 @@ const updateCameraTarget = () => {
   babylon.focusCamera(center)
 }
 
+// World axes only depend on node bounds; skip the rebuild (which redraws a
+// dozen DynamicTexture labels) while bounds stay unchanged during playback.
+let worldAxesSignature = ''
+
+const syncWorldAxesIfNeeded = () => {
+  const scene = babylon.getScene()
+  if (!scene) return
+  if (!props.nodes.length) {
+    worldAxesSignature = ''
+    return
+  }
+  const xs = props.nodes.map((node) => node.x)
+  const ys = props.nodes.map((node) => node.y)
+  const zs = props.nodes.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
+  const signature = [
+    props.nodes.length,
+    Math.min(...xs), Math.max(...xs),
+    Math.min(...zs), Math.max(...zs),
+    Math.min(...ys), Math.max(...ys),
+  ].map((value) => Math.round(value * 10) / 10).join(',')
+  if (signature === worldAxesSignature) return
+  worldAxesSignature = signature
+  syncWorldAxes(scene, props.nodes, worldAxesMap)
+}
+
 const refreshScene = () => {
   if (!babylon.getScene()) return
   updateCameraTarget()
+  syncWorldAxesIfNeeded()
   buildNodes()
   buildPackets()
   syncSelectedNodePos()
