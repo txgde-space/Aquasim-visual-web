@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
-import { ns3RunPlugin } from './server/ns3RunPlugin.js'
+import { ns3RunPlugin } from './server/ns3RunPlugin'
 
 const securityHeaders = {
   'X-Content-Type-Options': 'nosniff',
