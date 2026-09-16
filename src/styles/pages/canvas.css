@@ -2,7 +2,7 @@
 .wb-canvas {
   position: relative;
   min-height: 0;
-  background: #0c0d10;
+  background: var(--sunken);
 }
 .wb-canvas .canvas-host {
   height: 100%;

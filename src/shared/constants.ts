@@ -8,4 +8,5 @@ export const SPEED_OPTIONS = Object.freeze([0.05, 0.1, 0.25, 0.5, 1, 2, 4])
 
 export const LOCAL_STORAGE_KEYS = Object.freeze({
   fxLevel: 'aquasim_fx_level',
+  uiTheme: 'aquasim_ui_theme',
 })

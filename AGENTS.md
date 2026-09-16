@@ -42,7 +42,7 @@ src/
 
 - 包管理只用 Yarn v1，只保留 `yarn.lock`。
 - Composable / lib / 新页面用 TypeScript（`<script setup lang="ts">`）。
-- 遗留 JS SFC（尚未迁 TS，改它们时不要写 TS 语法）：`App.vue`、`components/NodeCanvas.vue`、`components/ExperimentPanel.vue`、`components/ProtocolDrawer.vue`、`features/scene3d/NodeScene3D.vue`、`main.js`、`router.js`。server/ 为 TS。
+- 遗留 JS SFC（尚未迁 TS，改它们时不要写 TS 语法）：`components/NodeCanvas.vue`、`components/ExperimentPanel.vue`、`components/ProtocolDrawer.vue`、`features/scene3d/NodeScene3D.vue`、`main.js`、`router.js`。server/ 为 TS。
 - 提交用 conventional commit（`refactor(scope): ...` / `feat(server): ...` 风格），每阶段/每逻辑单元独立提交。
 
 ## 已知风险与现状（有意保留）

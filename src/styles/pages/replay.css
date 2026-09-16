@@ -55,8 +55,8 @@
   position: relative;
   padding: 3px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(8, 15, 28, 0.76);
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--sunken) 88%, transparent);
   overflow: hidden;
 }
 .view-switch-indicator {
@@ -85,7 +85,7 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #93c5fd;
+  color: var(--muted);
   cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
@@ -94,10 +94,10 @@
   transition: transform 130ms ease, color 200ms ease, text-shadow 200ms ease;
 }
 .view-switch-btn:hover {
-  color: #cfe8ff;
+  color: var(--text);
 }
 .view-switch-btn.active {
-  color: #f8fafc;
+  color: var(--text);
   text-shadow: 0 0 10px color-mix(in srgb, var(--accent-soft) 32%, transparent);
 }
 .view-switch-btn:active {
@@ -118,14 +118,14 @@
 }
 .visual-timeline {
   margin-top: 0.45rem;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  border-top: 1px solid var(--line);
   padding-top: 0.35rem;
   flex-shrink: 0;
 }
 .side-controls {
   margin-bottom: 0.45rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 .control-btn-row {
@@ -205,8 +205,8 @@
   transform: translateY(-1px) scale(1.01);
 }
 .field-compact .select option {
-  color: #dbeafe;
-  background-color: color-mix(in srgb, var(--card) 92%, #020617 8%);
+  color: var(--text);
+  background-color: var(--overlay);
 }
 .visual-loading {
   flex: 1;

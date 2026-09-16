@@ -1,24 +1,43 @@
-/* 基础层：tailwind、设计令牌、重置、全局元素 */
-@import "tailwindcss";
-:root {
+/* 基础层：设计令牌（亮/暗双主题）、重置、全局元素 */
+/*
+ * z-index 刻度（现状约定，新增层级时对齐）：
+ *   1-2  画布内图层 / 日志内容层（event-track、log-content）
+ *   3-5  工作台悬浮件（wb-transport、rail、canvas 工具栏/提示）
+ *   80   全屏弹层（code-modal-backdrop）
+ */
+
+/* ---------- 暗色主题（默认） ---------- */
+:root,
+[data-theme="dark"] {
+  /* surface */
   --bg: #101114;
   --app-bg: #101114;
   --panel: #16171c;
   --card: #16171c;
   --raised: #1c1d24;
+  --sunken: #0c0d10; /* 最深层背景：工作台/画布/控制台 */
+  --overlay: #1e2028; /* 弹层表面 */
+  /* 文本 */
   --text: #ececef;
   --muted: #8b8d97;
-  --line: rgba(255, 255, 255, 0.07);
+  --faint: #6b6e78; /* 比 muted 更弱：辅助说明 */
+  /* 语义色 */
   --accent: #5b8def;
   --accent-soft: #8eb0f5;
-  --btn-top: #23242c;
-  --btn-bottom: #1c1d24;
   --idle: #7aa2f7;
   --tx: #f0a14a;
   --rx: #3dd68c;
   --bad: #f07178;
   --warn: #e6b450;
+  --on-accent: #ffffff;
+  /* 控件与效果 */
+  --btn-top: #23242c;
+  --btn-bottom: #1c1d24;
+  --line: rgba(255, 255, 255, 0.07);
   --shadow: none;
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.5);
+  /* 尺寸 */
   --page-pad: 0;
   --page-gap: 0;
   --panel-pad: 0.85rem;
@@ -43,11 +62,91 @@
   --view-switch-h: 28px;
   --nav-h: 46px;
 }
+
+/* ---------- 亮色主题 ---------- */
+[data-theme="light"] {
+  --bg: #f5f6f8;
+  --app-bg: #f5f6f8;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --raised: #eef0f4;
+  --sunken: #e7e9ee;
+  --overlay: #ffffff;
+  --text: #1a1c22;
+  --muted: #5d6472;
+  --faint: #9aa1ad;
+  --accent: #2f6bde;
+  --accent-soft: #2456b8;
+  --idle: #3b6fd4;
+  --tx: #c26d1a;
+  --rx: #1a9e63;
+  --bad: #d64550;
+  --warn: #b07d1e;
+  --on-accent: #ffffff;
+  --btn-top: #ffffff;
+  --btn-bottom: #eef0f4;
+  --line: rgba(0, 0, 0, 0.1);
+  --shadow: 0 1px 2px rgba(16, 17, 20, 0.06);
+  --shadow-pop: 0 18px 48px rgba(16, 24, 40, 0.18);
+}
+
+/* ---------- 重置（原 tailwind preflight 覆盖部分） ---------- */
 *,
 ::before,
 ::after {
   box-sizing: border-box;
 }
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+img,
+svg,
+canvas {
+  display: block;
+}
+/* canvas 尺寸由 CSS/JS 控制（NodeCanvas/NodeScene3D），不加 max-width */
+img,
+svg {
+  max-width: 100%;
+}
+a {
+  color: inherit;
+}
+/* 现状基线：项目内 ul/ol 均不依赖原生列表样式（含 .experiment-warnings） */
+ul,
+ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 html,
 body {
   margin: 0;
