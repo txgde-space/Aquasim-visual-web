@@ -206,7 +206,8 @@
 
 /* ---------- 面板边缘拉环（小耳朵，两页共用） ----------
    与面板一体：背景/模糊同面板、无独立阴影、连接侧无边框并内嵌 1px；
-   位置不做 transition——面板开收是瞬时的，耳朵滑动会显得脱节
+   面板开收时耳朵随面板滑入滑出（时长/缓动与 dock 过渡一致）；
+   拖拽 SplitPane 调宽时取消除位置过渡，耳朵跟手不拖影
    （右侧：right = 面板宽 + dock-gap - 1；左侧：left = dock 实测右缘 - 1） */
 .panel-ear {
   position: absolute;
@@ -224,7 +225,10 @@
   background: var(--panel);
   backdrop-filter: blur(10px);
   color: var(--muted);
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition:
+    right var(--dur-med) var(--ease-out),
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
 }
 .panel-ear:hover {
   color: var(--accent-soft);
@@ -242,6 +246,69 @@
   border-right: 1px solid var(--line);
   border-left: 0;
   border-radius: 0 10px 10px 0;
+  transition:
+    left var(--dur-med) var(--ease-out),
+    top var(--dur-med) var(--ease-out),
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+/* 拖拽分栏调宽期间：耳朵跟手，不做位置过渡 */
+.deck:has(.split-pane.dragging) .panel-ear {
+  transition-property: color, border-color;
+}
+
+/* ---------- 过渡：面板开收 / 页面切换 / 飞层 / 控制台 ---------- */
+.dock-r-enter-active,
+.dock-l-enter-active {
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+}
+.dock-r-leave-active,
+.dock-l-leave-active {
+  transition: opacity var(--dur-fast) var(--ease-in), transform var(--dur-fast) var(--ease-in);
+}
+.dock-r-enter-from,
+.dock-r-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+.dock-l-enter-from,
+.dock-l-leave-to {
+  opacity: 0;
+  transform: translateX(-16px);
+}
+.page-enter-active {
+  transition: opacity 0.18s var(--ease-out);
+}
+.page-leave-active {
+  transition: opacity 0.12s var(--ease-in);
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+.flyout-enter-active {
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.flyout-leave-active {
+  transition: opacity 0.1s var(--ease-in), transform 0.1s var(--ease-in);
+}
+.flyout-enter-from,
+.flyout-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+.console-enter-active {
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+}
+.console-leave-active {
+  transition: opacity var(--dur-fast) var(--ease-in), transform var(--dur-fast) var(--ease-in);
+}
+/* .console 基础定位带 translateX(-50%)，过渡中必须保留 */
+.console-enter-from,
+.console-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 10px);
 }
 
 /* ---------- 协议目录（左 dock 内容） ---------- */
@@ -356,6 +423,11 @@
   bottom: var(--dock-gap);
   width: min(640px, calc(100% - 48px));
   flex: none;
+  transition: height var(--dur-med) var(--ease-out);
+}
+/* 拖拽调高期间跟手，不做高度过渡 */
+.console.dragging {
+  transition: none;
 }
 .console.collapsed {
   height: 28px;

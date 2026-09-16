@@ -66,6 +66,7 @@ onMounted(() => {
 const stageEl = ref<HTMLElement | null>(null)
 const consoleOpen = ref(false)
 const consoleHeight = ref(180)
+const consoleDragging = ref(false)
 let consoleDragY = 0
 let consoleDragH = 0
 
@@ -74,11 +75,13 @@ const onConsoleGripMove = (event: PointerEvent) => {
   consoleHeight.value = Math.min(maxH, Math.max(120, consoleDragH + (consoleDragY - event.clientY)))
 }
 const onConsoleGripUp = () => {
+  consoleDragging.value = false
   window.removeEventListener('pointermove', onConsoleGripMove)
   document.body.style.userSelect = ''
 }
 const onConsoleGripDown = (event: PointerEvent) => {
   if (event.button !== 0) return
+  consoleDragging.value = true
   consoleDragY = event.clientY
   consoleDragH = consoleHeight.value
   document.body.style.userSelect = 'none'
@@ -187,9 +190,11 @@ const copyJson = async () => {
         />
       </div>
 
-      <div v-show="protoOpen" ref="protoDockEl" class="dock dock-left">
-        <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
-      </div>
+      <Transition name="dock-l">
+        <div v-show="protoOpen" ref="protoDockEl" class="dock dock-left">
+          <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
+        </div>
+      </Transition>
 
       <button
         class="panel-ear ear-left"
@@ -232,15 +237,16 @@ const copyJson = async () => {
         <span class="ear-label">属性</span>
       </button>
 
-      <SplitPane
-        v-show="inspectOpen"
-        class="dock-right"
-        :default-width="300"
-        :min="240"
-        :max="480"
-        :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
-        @update:width="inspectWidth = $event"
-      >
+      <Transition name="dock-r">
+        <SplitPane
+          v-show="inspectOpen"
+          class="dock-right"
+          :default-width="300"
+          :min="240"
+          :max="480"
+          :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
+          @update:width="inspectWidth = $event"
+        >
         <aside class="dock-body">
           <div class="stack-board">
             <div class="stack-board-title">协议架构</div>
@@ -288,12 +294,14 @@ const copyJson = async () => {
             @copy="copyJson"
           />
         </aside>
-      </SplitPane>
+        </SplitPane>
+      </Transition>
 
+      <Transition name="console">
       <footer
         v-if="consoleVisible"
         class="dock console"
-        :class="{ collapsed: !consoleOpen }"
+        :class="{ collapsed: !consoleOpen, dragging: consoleDragging }"
         :style="consoleOpen ? { height: consoleHeight + 'px' } : undefined"
       >
         <div
@@ -316,6 +324,7 @@ const copyJson = async () => {
         </div>
         <pre v-show="consoleOpen" class="run-log">{{ runLog }}</pre>
       </footer>
+      </Transition>
     </div>
 
     <footer class="statusbar">

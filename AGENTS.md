@@ -37,7 +37,8 @@ src/
 - **tailwind 已移除**：样式全部手写令牌 + 按域 CSS，不要重新引入工具类框架。
 - **画布主题**：固定为工业监控（`industrial-scada`），2D/3D 共用 `shared/constants.ts` 的 `CANVAS_THEME_KEY` 传入 NodeCanvas/NodeScene3D；THEME_PROFILES / THEME_3D 各只保留这一套。主题选择器与 `aquasim_canvas_theme` 持久化已移除。
 - **SplitPane**：右侧岛屿宽度容器（拖拽/双击复位/键盘方向键/localStorage），实验页 `aquasim_split_inspect`、回放页 `aquasim_split_log`；localStorage key 统一登记在 `shared/constants.ts` 的 `LOCAL_STORAGE_KEYS`（`aquasim_*` 前缀）。
-- **面板小耳朵**：两侧浮动面板的开收用边缘竖排拉环 `.panel-ear`（app.css，两页共用），右侧用 `right`、左侧协议目录用镜像变体 `.ear-left`（`left`/`top` 由页面实测 dock 几何传入，垂直居中到卡片而非 deck）。耳朵与面板一体：同背景/模糊、无独立阴影、内嵌面板边缘 1px、位置不加 transition（面板开收瞬时完成，耳朵滑动会脱节）。不再在工具栏放开收按钮。
+- **面板小耳朵**：两侧浮动面板的开收用边缘竖排拉环 `.panel-ear`（app.css，两页共用），右侧用 `right`、左侧协议目录用镜像变体 `.ear-left`（`left`/`top` 由页面实测 dock 几何传入，垂直居中到卡片而非 deck）。耳朵与面板一体：同背景/模糊、无独立阴影、内嵌面板边缘 1px；开收时随面板滑入滑出（时长/缓动与 dock 过渡一致），拖拽调宽时经 `.deck:has(.split-pane.dragging)` 取消位置过渡保持跟手。不再在工具栏放开收按钮。
+- **动效约定**：时长/缓动走 main.css 令牌（`--dur-fast/--dur-med/--ease-out/--ease-in`）；面板开收用 `<Transition name="dock-r"/"dock-l">`（v-show 触发），路由切换用 `page`（out-in 淡入淡出），协议 flyout 用 `flyout`，控制台用 `console`（基础定位含 translateX(-50%)，过渡帧里必须保留）；拖拽调宽/调高的容器带 `.dragging` 类并关闭对应 transition。新增动效不得脱离这套时长与缓动。
 - **z-index 刻度**：1-2 画布内图层；10 浮动 dock 与画布工具栏；30 弹层菜单；80 全屏弹层。
 - **表单标签规范**：中文主标签 + mono 参数名辅标（`.field-param`），时间类参数接受带单位字符串（如 `30s`）；`txPower` 输入框已移除（生成器从未消费该字段，spec JSON 字段保留勿删）。
 

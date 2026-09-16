@@ -65,6 +65,11 @@
   --log-item-pad-x: 0.55rem;
   --view-switch-w: 52px;
   --view-switch-h: 28px;
+  /* 动效 */
+  --dur-fast: 0.15s;
+  --dur-med: 0.22s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 }
 
 /* ---------- 亮色主题：实验报告纸面 ---------- */
@@ -225,5 +230,16 @@ body {
   :root {
     --btn-compact-h: 26px;
     --select-h: 24px;
+  }
+}
+
+/* ---------- 减弱动效偏好 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

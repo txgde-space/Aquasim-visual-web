@@ -251,15 +251,16 @@ onBeforeUnmount(() => {
         <span class="ear-label">日志</span>
       </button>
 
-      <SplitPane
-        v-show="logPanelOpen"
-        class="dock-right"
-        :default-width="340"
-        :min="280"
-        :max="520"
-        :storage-key="LOCAL_STORAGE_KEYS.splitLog"
-        @update:width="logWidth = $event"
-      >
+      <Transition name="dock-r">
+        <SplitPane
+          v-show="logPanelOpen"
+          class="dock-right"
+          :default-width="340"
+          :min="280"
+          :max="520"
+          :storage-key="LOCAL_STORAGE_KEYS.splitLog"
+          @update:width="logWidth = $event"
+        >
         <LogPanel
           :show-all-active-packets="showAllActivePackets"
           :is-playing="isPlaying"
@@ -300,7 +301,8 @@ onBeforeUnmount(() => {
           @stage-select="onLifecycleStageSelect"
           @track-pointer-down="onEventTrackPointerDown"
         />
-      </SplitPane>
+        </SplitPane>
+      </Transition>
 
       <TimelineBar
         :current-time="currentTime"

@@ -62,6 +62,7 @@ const shortLabel = (id) => ({
         {{ shortLabel(layer.id) }}
       </button>
     </nav>
+    <Transition name="flyout">
     <section v-if="currentLayer" class="flyout">
       <header class="flyout-head">{{ currentLayer.label }}</header>
       <div class="flyout-list">
@@ -83,6 +84,7 @@ const shortLabel = (id) => ({
         </button>
       </div>
     </section>
+    </Transition>
   </div>
 </template>
 
