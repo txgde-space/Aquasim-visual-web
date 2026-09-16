@@ -175,7 +175,7 @@ const copyJson = async () => {
 
       <div class="dock dock-top cmd-bar">
         <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
-        <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除</button>
+        <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除选中</button>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>

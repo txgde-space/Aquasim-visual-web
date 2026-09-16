@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
 import { useCanvasTheme } from '../components/useUiPrefs'
@@ -7,6 +7,7 @@ import { session } from '../shared/sessionStore'
 import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
 import { parseLog } from '@/features/replay/lib/logParser'
 import { timeDisplay } from '@/features/replay/lib/format'
+import { LOG_SOURCES } from '@/features/replay/lib/sources'
 import { usePlaybackEngine } from '@/features/replay/composables/usePlaybackEngine'
 import { useReplayState } from '@/features/replay/composables/useReplayState'
 import { useLogPanel } from '@/features/replay/composables/useLogPanel'
@@ -134,6 +135,12 @@ const onToggleLogPanel = () => {
 const onShowAllActiveChange = (value: boolean) => {
   state.showAllActivePackets.value = value
 }
+
+const logSourceLabel = computed(() =>
+  isCustomLog.value
+    ? customLogSelectLabel.value
+    : (LOG_SOURCES[logSourceKey.value]?.label ?? '示例'),
+)
 
 watch(nodesState, (nodes) => {
   if (isEditMode.value) return
@@ -311,7 +318,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="statusbar">
-      <span class="sb-item">{{ replayMode === 'lifecycle' ? '生命周期' : '全局' }} · {{ isCustomLog ? customLogSelectLabel : '示例日志' }}</span>
+      <span class="sb-item">{{ replayMode === 'lifecycle' ? '单包生命周期' : '全局' }} · {{ logSourceLabel }}</span>
       <span class="sb-item">成功 <b>{{ summary.okReceivers }}</b></span>
       <span class="sb-item">rx-rx <b>{{ summary.rxrxCollisions }}</b></span>
       <span class="sb-item">rx-tx <b>{{ summary.rxtxCollisions }}</b></span>

@@ -120,7 +120,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
         </div>
         <label class="field field-compact">
           <div class="field-head">
-            <span>示例日志</span>
+            <span>日志来源</span>
             <span v-if="isCustomLog" class="field-chip">已导入</span>
           </div>
           <select class="select" :value="logSourceKey" @change="emit('sampleLogChange', $event)">
@@ -138,12 +138,12 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
           <label class="field field-compact">
             <div class="field-head"><span>回放模式</span></div>
             <select class="select" :value="replayMode" @change="emit('replayModeChange', $event)">
-              <option value="global">全局模式</option>
-              <option value="lifecycle">生命周期模式</option>
+              <option value="global">全局</option>
+              <option value="lifecycle">单包生命周期</option>
             </select>
           </label>
           <label class="field field-compact">
-            <div class="field-head"><span>可视化质量</span></div>
+            <div class="field-head"><span>渲染质量</span></div>
             <select class="select" :value="fxLevel" @change="emit('fxLevelChange', $event)">
               <option
                 v-for="item in fxLevelOptions"
@@ -179,7 +179,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
           :class="{ active: showAllActivePackets }"
           @click="toggleShowAllActive"
         >
-          {{ showAllActivePackets ? '显示全部活跃传播' : '仅显示聚焦/当前包' }}
+          {{ showAllActivePackets ? '显示全部传播' : '仅显示聚焦包' }}
         </button>
       </details>
       <details v-if="isEditMode && selectedEditNode" class="panel-section" open>

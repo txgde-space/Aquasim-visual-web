@@ -14,7 +14,19 @@ const current = computed<ThemeProfile>(
   () => THEME_PROFILES[props.modelValue] ?? THEME_PROFILES['ocean-sonar'],
 )
 
+const THEME_NAMES: Record<string, string> = {
+  'ocean-sonar': '海洋声呐',
+  'research-lab': '研究实验室',
+  'tactical-ops': '战术指挥',
+  'industrial-scada': '工业监控',
+  'cyber-neon': '赛博霓虹',
+  'light-minimal': '浅色简约',
+  'gis-map': '地形地图',
+  'timeline-story': '时间线',
+}
+
 const prettyName = (key: string) =>
+  THEME_NAMES[key] ??
   key
     .split('-')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

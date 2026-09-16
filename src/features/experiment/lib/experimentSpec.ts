@@ -36,9 +36,9 @@ export const MAC_PRESETS: MacPreset[] = (TYPEID_LAYERS.find((layer) => layer.id 
 }))
 
 export const TRAFFIC_PRESETS = Object.freeze([
-  { id: 'none', label: '无' },
-  { id: 'onoff-to', label: 'OnOff' },
-  { id: 'periodic', label: '周期' },
+  { id: 'none', label: '无流量' },
+  { id: 'onoff-to', label: 'OnOff 突发' },
+  { id: 'periodic', label: '周期发送' },
 ])
 
 export const createDefaultTopology = (count = 5, spacing = 1000): TopologyNode[] => (

@@ -118,18 +118,18 @@ const onNumberField = (key, event) => {
       <li v-for="item in warnings" :key="item">{{ item }}</li>
     </ul>
 
-    <div class="dock-title">规格文件</div>
+    <div class="dock-title">规格与代码</div>
     <div class="control-btn-row">
-      <button class="btn btn-compact" @click="openViewer('json')">JSON</button>
-      <button class="btn btn-compact" @click="openViewer('cc')">CC</button>
-      <button class="btn btn-compact" @click="emit('download')">导出</button>
-      <button class="btn btn-compact" @click="emit('copy')">复制</button>
+      <button class="btn btn-compact" title="查看实验规格 JSON" @click="openViewer('json')">预览 JSON</button>
+      <button class="btn btn-compact" title="查看生成的 ns-3 仿真代码" @click="openViewer('cc')">预览代码</button>
+      <button class="btn btn-compact" title="下载 experiment.json" @click="emit('download')">下载 JSON</button>
+      <button class="btn btn-compact" title="复制实验规格 JSON 到剪贴板" @click="emit('copy')">复制 JSON</button>
     </div>
 
     <div class="dock-title">回放联动</div>
     <div class="control-btn-row">
-      <button class="btn btn-compact" title="从回放页读取节点拓扑" @click="emit('sync-from-replay')">同步回放</button>
-      <button class="btn btn-compact" title="将当前拓扑发送到回放页" @click="emit('apply-to-replay')">应用到回放</button>
+      <button class="btn btn-compact" title="从回放页读取节点拓扑" @click="emit('sync-from-replay')">从回放导入</button>
+      <button class="btn btn-compact" title="将当前拓扑发送到回放页" @click="emit('apply-to-replay')">发送到回放</button>
     </div>
 
     <Teleport to="body">
