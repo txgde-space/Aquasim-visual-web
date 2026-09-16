@@ -204,7 +204,10 @@
   backdrop-filter: blur(10px) saturate(1.05);
 }
 
-/* ---------- 面板边缘拉环（小耳朵，两页共用） ---------- */
+/* ---------- 面板边缘拉环（小耳朵，两页共用） ----------
+   与面板一体：背景/模糊同面板、无独立阴影、连接侧无边框并内嵌 1px；
+   位置不做 transition——面板开收是瞬时的，耳朵滑动会显得脱节
+   （右侧：right = 面板宽 + dock-gap - 1；左侧：left = dock 实测右缘 - 1） */
 .panel-ear {
   position: absolute;
   top: 50%;
@@ -220,9 +223,8 @@
   border-radius: 10px 0 0 10px;
   background: var(--panel);
   backdrop-filter: blur(10px);
-  box-shadow: var(--shadow-island);
   color: var(--muted);
-  transition: right 0.2s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 .panel-ear:hover {
   color: var(--accent-soft);
@@ -235,12 +237,11 @@
   user-select: none;
 }
 
-/* 左侧面板（协议目录）的镜像小耳朵；left 由页面按 dock 实测宽度传入 */
+/* 左侧面板（协议目录）的镜像小耳朵；left/top 由页面按 dock 实测几何传入 */
 .panel-ear.ear-left {
   border-right: 1px solid var(--line);
   border-left: 0;
   border-radius: 0 10px 10px 0;
-  transition: left 0.2s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 /* ---------- 协议目录（左 dock 内容） ---------- */

@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
           :original-positions="originalEditPositions"
           :selected-node-id="selectedEditNodeId ?? undefined"
           :sound-speed-mps="editSoundSpeed"
-          :view-padding="{ top: 24, right: logPanelOpen ? logWidth : 0 }"
+          :view-padding="{ top: 24, right: 340 }"
           @pause-request="pauseForTool"
           @node-move="onEditNodeMove"
           @node-move-end="onEditNodeMoveEnd"
@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
       <button
         class="panel-ear"
         :class="{ open: logPanelOpen }"
-        :style="{ right: logPanelOpen ? logWidth + 'px' : '0px' }"
+        :style="{ right: logPanelOpen ? logWidth + 11 + 'px' : '0px' }"
         :title="logPanelOpen ? '收起日志面板' : '展开日志面板'"
         :aria-label="logPanelOpen ? '收起日志面板' : '展开日志面板'"
         :aria-expanded="logPanelOpen"

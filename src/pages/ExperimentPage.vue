@@ -44,15 +44,18 @@ const protoOpen = ref(true)
 const inspectOpen = ref(true)
 const inspectWidth = ref(300)
 
-// 协议目录宽度随层级开合变化（仅 rail 46px / rail+flyout 256px），实测后驱动左耳位置
+// 协议目录宽度/高度随层级开合变化（仅 rail / rail+flyout），实测驱动左耳位置与垂直居中
 const protoDockEl = ref<HTMLElement | null>(null)
 const protoDockRight = ref(0)
+const protoDockMidY = ref(0)
 let protoRO: ResizeObserver | null = null
 onMounted(() => {
   const el = protoDockEl.value
   if (!el) return
   const measure = () => {
+    if (!el.offsetWidth) return // 收起时保持上次位置，耳朵留在卡片原高度
     protoDockRight.value = el.offsetLeft + el.offsetWidth
+    protoDockMidY.value = el.offsetTop + el.offsetHeight / 2
   }
   measure()
   protoRO = new ResizeObserver(measure)
@@ -174,7 +177,7 @@ const copyJson = async () => {
           :selected-node-id="selectedEditNode?.node_id ?? undefined"
           :selected-node-ids="selectedIds"
           :sound-speed-mps="1500"
-          :view-padding="{ left: protoOpen ? 232 : 0, top: 24, right: inspectOpen ? inspectWidth : 0, bottom: 0 }"
+          :view-padding="{ left: 232, top: 24, right: 300, bottom: 0 }"
           @node-move="onNodeMove"
           @nodes-move="onNodesMove"
           @node-select="onNodeSelect"
@@ -190,7 +193,7 @@ const copyJson = async () => {
 
       <button
         class="panel-ear ear-left"
-        :style="{ left: protoOpen ? protoDockRight + 'px' : '0px' }"
+        :style="{ left: protoOpen ? protoDockRight - 1 + 'px' : '0px', top: protoDockMidY + 'px' }"
         :title="protoOpen ? '收起协议目录' : '展开协议目录'"
         :aria-label="protoOpen ? '收起协议目录' : '展开协议目录'"
         :aria-expanded="protoOpen"
@@ -217,7 +220,7 @@ const copyJson = async () => {
       <button
         class="panel-ear"
         :class="{ open: inspectOpen }"
-        :style="{ right: inspectOpen ? inspectWidth + 'px' : '0px' }"
+        :style="{ right: inspectOpen ? inspectWidth + 11 + 'px' : '0px' }"
         :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
         :aria-label="inspectOpen ? '收起属性面板' : '展开属性面板'"
         :aria-expanded="inspectOpen"
