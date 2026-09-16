@@ -10,8 +10,8 @@
       title="重置 3D 视角"
     />
     <div class="scene-help" @pointerdown.stop>
-      <span>Babylon 3D 视图</span>
-      <span>左键拖动旋转</span>
+      <span>3D 视图</span>
+      <span>拖动旋转</span>
       <span>滚轮缩放</span>
       <span>点击节点查看</span>
     </div>
@@ -486,7 +486,6 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border-radius: 12px;
 }
 
 .scene-canvas {
@@ -503,6 +502,11 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: 84px;
   height: 84px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  background: var(--panel, rgba(17, 23, 34, 0.88));
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-island, 0 14px 40px rgba(0, 0, 0, 0.5));
   cursor: pointer;
   transition: transform 130ms ease, filter 170ms ease;
 }
@@ -522,45 +526,55 @@ onBeforeUnmount(() => {
   display: inline-flex;
   gap: 0.55rem;
   align-items: center;
-  padding: 0.42rem 0.6rem;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 22%, transparent);
-  background: color-mix(in srgb, var(--card, #0b1a2d) 88%, #020617 12%);
-  backdrop-filter: blur(6px);
-  color: var(--accent-soft, #bfdbfe);
-  font-size: 0.76rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  background: var(--panel, rgba(17, 23, 34, 0.88));
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-island, 0 14px 40px rgba(0, 0, 0, 0.5));
+  color: var(--muted, #8b93a5);
+  font-size: 0.74rem;
+}
+
+.scene-help span:first-child {
+  color: var(--accent-soft, #8fd9ff);
+  font-weight: 600;
 }
 
 .scene-tooltip {
   position: absolute;
   transform: translate(14px, -50%);
   z-index: 2;
-  background: color-mix(in srgb, var(--card, #0b1a2d) 94%, #020617 6%);
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 26%, transparent);
-  border-radius: 10px;
-  padding: 0.45rem 0.65rem;
+  background: var(--panel, rgba(17, 23, 34, 0.88));
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: var(--r-md, 10px);
+  padding: 0.5rem 0.65rem;
   min-width: 200px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.55));
   pointer-events: none;
 }
 
 .scene-tooltip-title {
   margin: 0;
-  font-size: 0.9rem;
-  color: #e2e8f0;
+  font-size: 0.88rem;
+  color: var(--text, #e8ecf3);
   font-weight: 700;
 }
 
 .scene-tooltip-role {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   margin-left: 0.35rem;
-  color: var(--accent-soft, #93c5fd);
+  color: var(--accent-soft, #8fd9ff);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .scene-tooltip-row {
   margin: 0.18rem 0 0;
-  color: #cbd5e1;
-  font-size: 0.78rem;
+  color: var(--muted, #8b93a5);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 1680px), (max-height: 980px) {

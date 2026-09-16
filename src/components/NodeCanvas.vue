@@ -536,15 +536,15 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.45rem;
   padding: 0.42rem 0.52rem;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 24%, transparent);
-  background: color-mix(in srgb, var(--card, #0b1a2d) 90%, #020617 10%);
-  backdrop-filter: blur(6px);
+  border-radius: var(--r-lg, 14px);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  background: var(--panel, rgba(17, 23, 34, 0.88));
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-island, 0 14px 40px rgba(0, 0, 0, 0.5));
 }
 
 .toolbar-group-history {
-  border-color: color-mix(in srgb, var(--warn, #f59e0b) 30%, transparent);
-  background: color-mix(in srgb, var(--card, #0b1a2d) 92%, #020617 8%);
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 26%, var(--line, transparent));
 }
 
 .toolbar-btn {
@@ -622,20 +622,15 @@ onBeforeUnmount(() => {
 .node-tooltip {
   position: absolute;
   z-index: 5;
-  background:
-    linear-gradient(160deg, color-mix(in srgb, var(--card, #0b1a2d) 86%, #020617 14%), color-mix(in srgb, var(--card, #0b1a2d) 94%, #020617 6%)),
-    repeating-linear-gradient(120deg, rgba(148, 230, 255, 0.06) 0 2px, transparent 2px 12px);
-  border: 1px solid color-mix(in srgb, var(--accent-soft, #93c5fd) 36%, transparent);
-  border-radius: 12px;
+  background: var(--panel, rgba(17, 23, 34, 0.88));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: var(--r-md, 10px);
   padding: 0.55rem 0.65rem;
   width: min(360px, calc(100% - 16px));
   max-width: min(360px, calc(100vw - 18px));
-  box-shadow:
-    0 12px 28px rgba(0, 0, 0, 0.42),
-    0 0 22px color-mix(in srgb, var(--accent, #38bdf8) 24%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent-soft, #93c5fd) 16%, transparent);
+  box-shadow: var(--shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.55));
   pointer-events: none;
-  backdrop-filter: blur(8px) saturate(1.08);
+  backdrop-filter: blur(10px) saturate(1.05);
   animation: tooltip-pop 140ms ease-out;
 }
 
