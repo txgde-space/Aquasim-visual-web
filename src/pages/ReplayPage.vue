@@ -63,8 +63,6 @@ const {
   selectedLifecyclePacketId,
   showAllActivePackets,
   editSoundSpeed,
-  baseNodesState,
-  nodeMovementRows,
   parseErrors,
   cycleEndUs,
   nodesState,
@@ -152,12 +150,10 @@ onMounted(() => {
     state.applyParsedLog(parseLog(session.pendingReplayLog), editMode.exitEditMode)
     session.pendingReplayLog = null
     session.pendingReplayName = ''
-  }
-  if (Array.isArray(session.pendingReplayApply) && session.pendingReplayApply.length) {
-    baseNodesState.value = session.pendingReplayApply.map(cloneNode)
-    nodeMovementRows.value = []
     session.pendingReplayApply = null
-    session.replayNodes = baseNodesState.value.map(cloneNode)
+  } else if (Array.isArray(session.pendingReplayApply)) {
+    state.applyTopology(session.pendingReplayApply, editMode.exitEditMode)
+    session.pendingReplayApply = null
   }
   try {
     const savedFx = localStorage.getItem(LOCAL_STORAGE_KEYS.fxLevel)

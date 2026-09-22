@@ -11,9 +11,16 @@ import { buildExperimentSpec, validateExperiment } from '@/features/experiment/l
 import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
 import { cloneNode, useTopologyEditor } from '@/features/experiment/composables/useTopologyEditor'
 import { useRunExperiment } from '@/features/experiment/composables/useRunExperiment'
+import { useSimulatorSettings } from '@/features/experiment/composables/useSimulatorSettings'
+import { useExperimentFiles } from '@/features/experiment/composables/useExperimentFiles'
+import ExperimentFiles from '@/features/experiment/components/ExperimentFiles.vue'
+import NodeProtocolDetails from '@/features/experiment/components/NodeProtocolDetails.vue'
+import ProtocolAttributes from '@/features/experiment/components/ProtocolAttributes.vue'
+import SimulatorSettings from '@/features/experiment/components/SimulatorSettings.vue'
 
 const router = useRouter()
-const editor = useTopologyEditor()
+const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, resetDirectory, selectDirectory } = useSimulatorSettings()
+const editor = useTopologyEditor(catalog)
 const {
   editNodes,
   selectedIds,
@@ -37,6 +44,8 @@ const {
   onProtocolDrop,
   replaceTopology,
   setField,
+  setProtocolAttribute,
+  setNodeDestination,
 } = editor
 
 const copyHint = ref('')
@@ -74,12 +83,15 @@ onBeforeUnmount(() => {
   document.body.style.userSelect = ''
 })
 
-const experimentSpec = computed(() => buildExperimentSpec(experimentForm.value, editNodes.value))
+const experimentSpec = computed(() => buildExperimentSpec(experimentForm.value, editNodes.value, catalog.value))
 const experimentWarnings = computed(() => validateExperiment(experimentSpec.value))
-const experimentSpecJson = computed(() => JSON.stringify(experimentSpec.value, null, 2))
-const generatedScratch = computed(() => generateAquaVisualCc(experimentSpec.value))
+const generatedScratch = computed(() => {
+  try { return generateAquaVisualCc(experimentSpec.value, catalog.value) }
+  catch (error) { return `// ${error instanceof Error ? error.message : String(error)}` }
+})
 
 const onRunSuccess = (log: string, logName: string) => {
+  session.pendingReplayApply = null
   session.pendingReplayLog = log
   session.pendingReplayName = logName
   router.push('/replay')
@@ -87,6 +99,7 @@ const onRunSuccess = (log: string, logName: string) => {
 
 const { runStatus, runLog, runExperiment } = useRunExperiment({
   getSpec: () => experimentSpec.value,
+  getAquaSimHome: () => aquaSimHome.value,
   onSuccess: onRunSuccess,
 })
 
@@ -96,6 +109,7 @@ const runStatusLabel = computed(
 )
 
 const onRun = async () => {
+  if (editNodes.value.length < 2 || !catalogReady.value || buildStatus.value === 'building') return
   await runExperiment()
   consoleOpen.value = true
 }
@@ -116,22 +130,21 @@ const syncFromReplay = () => {
 
 const applyToReplay = () => {
   session.pendingReplayApply = editNodes.value.map(cloneNode) as unknown as typeof session.replayNodes
+  session.pendingReplayLog = null
+  session.pendingReplayName = ''
   router.push('/replay')
 }
 
-const downloadJson = () => {
-  const blob = new Blob([experimentSpecJson.value], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'experiment.json'
-  link.click()
-  URL.revokeObjectURL(url)
-}
+const files = useExperimentFiles(editor, catalog, aquaSimHome, selectDirectory, () => {
+  runStatus.value = 'idle'
+  runLog.value = ''
+  consoleOpen.value = false
+})
+const { documentJson, message: fileMessage, failed: fileFailed, importing, previous, newExperiment, restorePrevious, importFile, exportFile } = files
 
 const copyJson = async () => {
   try {
-    await navigator.clipboard.writeText(experimentSpecJson.value)
+    await navigator.clipboard.writeText(documentJson.value)
     copyHint.value = '已复制'
   } catch {
     copyHint.value = '失败'
@@ -167,12 +180,25 @@ const copyJson = async () => {
           @node-place="addNode"
           @selection-change="onSelectionChange"
           @protocol-drop="onProtocolDrop"
-        />
+        >
+          <template #node-details="{ node }">
+            <NodeProtocolDetails
+              :node-id="node.node_id" :nodes="editNodes" :form="experimentForm" :layers="catalog" :ready="catalogReady"
+              :disabled="runStatus === 'running' || buildStatus === 'building'"
+              @application="(nodeId, id) => assignItem({ layer: 'app', id }, [nodeId])"
+              @attribute="setProtocolAttribute" @destination="setNodeDestination"
+            />
+          </template>
+        </NodeCanvas>
       </div>
 
       <div class="dock-unit dock-unit-l" :class="{ closed: !protoOpen }">
         <div class="dock dock-left">
-          <ProtocolDrawer :active-id="activeCatalogId" @assign="assignItem" />
+          <ProtocolDrawer :layers="catalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem">
+            <template #protocol-settings="{ layerId }">
+              <ProtocolAttributes embedded scope="scene" :layer-id="layerId" :layers="catalog" :form="experimentForm" :node="null" :ready="catalogReady" @change="setProtocolAttribute" />
+            </template>
+          </ProtocolDrawer>
         </div>
         <button
           class="panel-ear ear-left"
@@ -190,12 +216,12 @@ const copyJson = async () => {
 
       <div class="dock dock-top cmd-bar">
         <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
-        <button class="btn btn-compact" :disabled="selectedIds.length === 0 || editNodes.length - selectedIds.length < 2" @click="removeSelected">删除选中</button>
+        <button class="btn btn-compact" :disabled="selectedIds.length === 0" @click="removeSelected">删除选中</button>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
-        <button class="run-btn" data-testid="exp-run" :disabled="runStatus === 'running'" @click="onRun">
+        <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || buildStatus === 'building'" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
       </div>
@@ -222,35 +248,43 @@ const copyJson = async () => {
           :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
         >
         <aside class="dock-body">
-          <div class="stack-board">
-            <div class="stack-board-title">协议架构</div>
-            <ol class="stack-list">
-              <li v-for="row in protocolStack" :key="row.key" class="stack-row">
-                <span class="stack-layer">{{ row.layer }}</span>
-                <span class="stack-name">{{ row.name }}</span>
-                <span class="stack-tid">{{ row.typeId }}</span>
-                <span v-if="row.source" class="stack-src">{{ row.source }}</span>
-              </li>
-            </ol>
-          </div>
+          <ExperimentFiles
+            :disabled="runStatus === 'running' || buildStatus === 'building'"
+            :message="fileMessage" :failed="fileFailed" :importing="importing" :can-restore="!!previous"
+            @new="newExperiment" @import="importFile" @export="exportFile" @restore="restorePrevious"
+          />
+          <SimulatorSettings
+            v-model="aquaSimHome"
+            :default-home="defaultHome"
+            :checking="checking"
+            :disabled="runStatus === 'running' || buildStatus === 'building'"
+            :build-status="buildStatus"
+            :build-log="buildLog"
+            :build-error="buildError"
+            :storage-error="storageError"
+            :result="simulatorResult"
+            @precompile="precompile"
+            @reset="resetDirectory"
+            @select="selectDirectory"
+          />
           <div class="dock-title">{{ selectedSummary }}</div>
           <div v-if="selectedEditNode" class="coord-grid">
             <label class="field field-compact">
               <div class="field-head"><span>X (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="onCoordChange('x', $event)" />
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.x" @input="onCoordChange('x', $event)" />
             </label>
             <label class="field field-compact">
               <div class="field-head"><span>Y (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="onCoordChange('y', $event)" />
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.y" @input="onCoordChange('y', $event)" />
             </label>
             <label class="field field-compact">
               <div class="field-head"><span>Z (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="onCoordChange('z', $event)" />
+              <input class="select" type="number" step="0.01" :value="selectedEditNode.z ?? 0" @input="onCoordChange('z', $event)" />
             </label>
           </div>
           <ExperimentPanel
             :form="experimentForm"
-            :spec-json="experimentSpecJson"
+            :spec-json="documentJson"
             :scratch-cc="generatedScratch"
             :warnings="experimentWarnings"
             :node-count="editNodes.length"
@@ -264,7 +298,7 @@ const copyJson = async () => {
             @apply-to-replay="applyToReplay"
             @add-node="() => addNode()"
             @remove-node="removeSelected"
-            @download="downloadJson"
+            @download="exportFile"
             @copy="copyJson"
           />
         </aside>

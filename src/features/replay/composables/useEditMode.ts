@@ -90,8 +90,7 @@ export const useEditMode = ({
   }
 
   const onEditNodeSelect = (node: ReplayNode | null) => {
-    if (!node) return
-    state.selectedEditNodeId.value = node.node_id
+    state.selectedEditNodeId.value = node?.node_id ?? null
   }
 
   const restoreSelectedEditNode = () => {

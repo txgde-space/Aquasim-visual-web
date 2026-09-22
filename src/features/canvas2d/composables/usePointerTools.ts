@@ -24,7 +24,7 @@ interface PointerToolsDeps {
   pickNodeAt: (sx: number, sy: number) => { node_id: number; x: number; y: number } | null
   toWorld: (sx: number, sy: number) => { x: number; y: number }
   getSelectedIdSet: () => Set<number>
-  getLiveBounds: () => { minX: number; maxX: number; minY: number; maxY: number; spanX: number; spanY: number }
+  getViewBounds: () => { minX: number; maxX: number; minY: number; maxY: number; spanX: number; spanY: number }
   setHoveredNodeId: (nodeId: number | null) => void
   setHoverCursor: (x: number, y: number) => void
   updateHoveredNode: (sx: number, sy: number) => void
@@ -46,7 +46,7 @@ export const usePointerTools = ({
   pickNodeAt,
   toWorld,
   getSelectedIdSet,
-  getLiveBounds,
+  getViewBounds,
   setHoveredNodeId,
   setHoverCursor,
   updateHoveredNode,
@@ -154,7 +154,7 @@ export const usePointerTools = ({
       if (target) {
         event.preventDefault()
         draggingNodeId.value = target.node_id
-        view.dragFrozenBounds.value = { ...getLiveBounds() }
+        view.dragFrozenBounds.value = { ...getViewBounds() }
         activePointerId = event.pointerId
         view.hasDragged.value = false
         view.panStart.value = { x: sx, y: sy }
@@ -203,7 +203,7 @@ export const usePointerTools = ({
           origins,
         }
         draggingNodeId.value = target.node_id
-        view.dragFrozenBounds.value = { ...getLiveBounds() }
+        view.dragFrozenBounds.value = { ...getViewBounds() }
         activePointerId = event.pointerId
         view.hasDragged.value = false
         view.panStart.value = { x: sx, y: sy }
@@ -361,7 +361,7 @@ export const usePointerTools = ({
 
     if (!view.isPanning.value) return
 
-    if (!view.hasDragged.value && event) {
+    if (!view.hasDragged.value && event?.button === 0 && event.type !== 'pointercancel') {
       const canvas = getCanvasEl()
       if (canvas) {
         const rect = canvas.getBoundingClientRect()
@@ -370,6 +370,9 @@ export const usePointerTools = ({
         const target = pickNodeAt(x, y)
         if (target) {
           emit('node-select', target)
+        } else if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
+          emit('selection-change', [])
+          emit('node-select', null)
         }
       }
     }
@@ -435,7 +438,14 @@ export const usePointerTools = ({
   }
 
   const cancelActiveTool = () => {
-    if (toolMode.value === TOOL_MODES.PAN && !measure.pendingMeasurePoint.value) return
+    if (dragGroup.value || draggingNodeId.value != null) emit('node-move-end')
+    dragGroup.value = null
+    draggingNodeId.value = null
+    marquee.value = null
+    view.dragFrozenBounds.value = null
+    view.isPanning.value = false
+    spaceHeld.value = false
+    releasePointer()
     toolMode.value = TOOL_MODES.PAN
     measure.resetTransient()
     scheduleDraw()

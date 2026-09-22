@@ -1,8 +1,8 @@
-import { toScreenPoint, toWorldPoint, type Projection } from '../coordinate'
+import { GRID_TARGET_PX, MIN_GRID_STEP_METERS, toScreenPoint, toWorldPoint, type Projection } from '../coordinate'
 
 export const pickWorldGridStep = (pxPerMeter: number): number => {
-  const raw = 56 / Math.max(pxPerMeter, 1e-9)
-  const nice = [5, 10, 20, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000]
+  const raw = GRID_TARGET_PX / Math.max(pxPerMeter, 1e-9)
+  const nice = [MIN_GRID_STEP_METERS, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000]
   for (const value of nice) {
     if (value >= raw * 0.85) return value
   }

@@ -30,6 +30,11 @@ export const NODE_RADIUS_BASE = 18
 /** Fraction of the fitted viewport actually used, leaving breathing room. */
 export const SCALE_FIT_FACTOR = 0.86
 
+/** At maximum magnification, a 100 m grid cell occupies 56 screen pixels. */
+export const MIN_GRID_STEP_METERS = 100
+export const GRID_TARGET_PX = 56
+export const MAX_VIEW_SCALE = GRID_TARGET_PX / MIN_GRID_STEP_METERS
+
 /** Smallest canvas edge that still counts as a roomy layout. */
 export const COMPACT_VIEWPORT_THRESHOLD_PX = 640
 
@@ -77,6 +82,20 @@ export const computeBounds = (nodes: Array<Pick<ReplayNode, 'x' | 'y'>>): Bounds
   }
 }
 
+/** A blank or single-node editor needs room to place nodes without refitting. */
+export const computeEditBounds = (nodes: Array<Pick<ReplayNode, 'x' | 'y'>>): Bounds => {
+  if (nodes.length > 1) return computeBounds(nodes)
+  const { x = 0, y = 0 } = nodes[0] ?? {}
+  return {
+    minX: x - 2000,
+    maxX: x + 2000,
+    minY: y - 2000,
+    maxY: y + 2000,
+    spanX: 4000,
+    spanY: 4000,
+  }
+}
+
 export const computeScale = (
   width: number,
   height: number,
@@ -87,7 +106,7 @@ export const computeScale = (
   const availH = Math.max(1, height - insets.top - insets.bottom)
   const sx = availW / bounds.spanX
   const sy = availH / bounds.spanY
-  return Math.min(sx, sy) * SCALE_FIT_FACTOR
+  return Math.min(Math.min(sx, sy) * SCALE_FIT_FACTOR, MAX_VIEW_SCALE)
 }
 
 export const computeContentOrigin = (

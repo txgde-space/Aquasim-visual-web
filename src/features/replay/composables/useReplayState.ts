@@ -16,7 +16,7 @@ import { LOG_SOURCES } from '../lib/sources'
 import { clampRatio, normalizeTime, reasonLabel } from '../lib/format'
 import { resolveMovingNodes } from '../lib/logNormalize'
 import { normalizePacketsFromParsed } from '../lib/logMerge'
-import { parseLog } from '../lib/logParser'
+import { createEmptyParsedLog, parseLog } from '../lib/logParser'
 import { enforceMinGap, summarizePackets } from '../lib/geometry'
 import {
   buildLifecycleGroups,
@@ -57,8 +57,9 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const selectedEditNodeId: Ref<number | null> = ref(null)
 
   const isEditMode: ComputedRef<boolean> = computed(() => interactionMode.value === 'edit')
-  const isCustomLog: ComputedRef<boolean> = computed(() => logSourceKey.value === 'upload' || logSourceKey.value === 'node-upload')
+  const isCustomLog: ComputedRef<boolean> = computed(() => ['upload', 'node-upload', 'topology'].includes(logSourceKey.value))
   const activeLogName: ComputedRef<string> = computed(() => {
+    if (logSourceKey.value === 'topology') return '实验拓扑（尚未仿真）'
     if (logSourceKey.value === 'upload' && uploadedLogName.value) return uploadedLogName.value
     if (logSourceKey.value === 'node-upload' && uploadedNodeLogNames.value.length) {
       const names = uploadedNodeLogNames.value
@@ -68,6 +69,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     return (LOG_SOURCES[logSourceKey.value] || LOG_SOURCES.default).fileName
   })
   const customLogSelectLabel: ComputedRef<string> = computed(() => {
+    if (logSourceKey.value === 'topology') return '实验拓扑（尚未仿真）'
     if (logSourceKey.value === 'upload') return `已导入：${uploadedLogName.value || '自定义日志'}`
     if (logSourceKey.value === 'node-upload') return `已导入：${activeLogName.value}`
     return ''
@@ -384,6 +386,18 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     playback.isPlaying.value = false
   }
 
+  const applyTopology = (nodes: ReplayNode[], exitEdit: () => void = () => {}) => {
+    const parsed = createEmptyParsedLog()
+    parsed.nodes = nodes.map((node) => ({
+      type: 'node', node_id: node.node_id, name: node.name || `Node-${node.node_id}`,
+      role: node.role || 'node', x: node.x, y: node.y, z: node.z ?? 0,
+    }))
+    logSourceKey.value = 'topology'
+    uploadedLogName.value = ''
+    uploadedNodeLogNames.value = []
+    applyParsedLog(parsed, exitEdit)
+  }
+
   const rejectImportedLog = (message: string) => {
     parseErrors.value = [sanitizeDisplayText(message, 120)]
   }
@@ -456,6 +470,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     summary,
     nodeVisuals,
     applyParsedLog,
+    applyTopology,
     rejectImportedLog,
   }
 }

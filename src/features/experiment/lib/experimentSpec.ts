@@ -6,7 +6,7 @@ import type {
   TopologyNode,
   ValidationWarning,
 } from '../../../shared/types/experiment'
-import { catalogItemById, TYPEID_LAYERS } from './typeIdCatalog'
+import { catalogItemById, TYPEID_LAYERS, type CatalogLayer } from './typeIdCatalog'
 
 type ActiveTraffic = Exclude<ExperimentTraffic, { preset: 'none' }>
 
@@ -25,21 +25,13 @@ export interface MacPreset {
   id: string
   type: string
   label: string
-  trafficDefault: string
 }
 
 export const MAC_PRESETS: MacPreset[] = (TYPEID_LAYERS.find((layer) => layer.id === 'mac')?.items || []).map((item) => ({
   id: item.id,
   type: item.typeId,
   label: item.label,
-  trafficDefault: item.id === 'swarm' ? 'none' : 'onoff-to',
 }))
-
-export const TRAFFIC_PRESETS = Object.freeze([
-  { id: 'none', label: '无流量' },
-  { id: 'onoff-to', label: 'OnOff 突发' },
-  { id: 'periodic', label: '周期发送' },
-])
 
 export const createDefaultTopology = (count = 5, spacing = 1000): TopologyNode[] => (
   Array.from({ length: count }, (_, index) => ({
@@ -85,7 +77,7 @@ const roundCoord = (value: unknown): number => Math.round((Number(value) || 0) *
 
 export const macAttrsFor = (form: ExperimentForm, macId: string, nodeCount: number): Record<string, unknown> => {
   const attrs: Record<string, unknown> = {}
-  if (macId === 'swarm') {
+  if (macId === 'swarm' || /Swar[mM]/.test(macId)) {
     attrs.NodeCount = nodeCount
     attrs.InitialRoundDelay = form.initialRoundDelay
   }
@@ -96,10 +88,10 @@ export const macAttrsFor = (form: ExperimentForm, macId: string, nodeCount: numb
   return attrs
 }
 
-const typeOf = (layerId: string, itemId: string, fallback: string): string =>
-  catalogItemById(layerId, itemId)?.typeId || fallback
+const typeOf = (layerId: string, itemId: string, fallback: string, layers = TYPEID_LAYERS): string =>
+  catalogItemById(layerId, itemId, layers)?.typeId ?? fallback
 
-export const nodesToSpec = (nodes: TopologyNode[] | undefined): ExperimentNodeSpec[] => (
+export const nodesToSpec = (nodes: TopologyNode[] | undefined, layers = TYPEID_LAYERS): ExperimentNodeSpec[] => (
   (nodes || []).map((node) => ({
     id: Number(node.node_id),
     name: node.name || `Node-${node.node_id}`,
@@ -107,49 +99,42 @@ export const nodesToSpec = (nodes: TopologyNode[] | undefined): ExperimentNodeSp
     y: roundCoord(node.y),
     z: roundCoord(node.z),
     role: node.role || 'node',
-    app: typeOf('app', node.appId || 'none', ''),
+    app: typeOf('app', node.appId || 'none', node.appId || '', layers),
+    appAttrs: node.appAttrs,
+    appDestination: node.appDestination,
   }))
 )
 
-export const buildExperimentSpec = (form: ExperimentForm, nodes: TopologyNode[]): ExperimentSpec => {
-  const nodeList = nodesToSpec(nodes)
+export const buildExperimentSpec = (form: ExperimentForm, nodes: TopologyNode[], layers: CatalogLayer[] = TYPEID_LAYERS): ExperimentSpec => {
+  const nodeList = nodesToSpec(nodes, layers)
   const macId = form.macId || 'swarm'
   const phyId = form.phyId || 'phy-fdm'
   const routingId = form.routingId || 'static'
 
   return {
     schema: 'aqua-sim-experiment/v0',
+    protocolAttributes: form.protocolAttributes || {},
     simStop: form.simStop,
     channel: {
-      type: typeOf('channel', form.channelId || 'channel', CHANNEL_TYPE),
-      propagation: typeOf('channel', form.propagationId || 'range', 'ns3::AquaSimRangePropagation'),
+      type: typeOf('channel', form.channelId || 'channel', form.channelId.startsWith('ns3::') ? form.channelId : CHANNEL_TYPE, layers),
+      propagation: typeOf('channel', form.propagationId || 'range', form.propagationId.startsWith('ns3::') ? form.propagationId : 'ns3::AquaSimRangePropagation', layers),
     },
     stack: {
       phy: {
-        type: typeOf('phy', phyId, PHY_TYPE),
+        type: typeOf('phy', phyId, phyId.startsWith('ns3::') ? phyId : PHY_TYPE, layers),
         attrs: {
           transRange: Number(form.transRange) || 0,
           txPower: Number(form.txPower) || 0,
         },
       },
       mac: {
-        type: typeOf('mac', macId, macPresetById(macId).type),
+        type: typeOf('mac', macId, macId.startsWith('ns3::') ? macId : macPresetById(macId).type, layers),
         attrs: macAttrsFor(form, macId, nodeList.length),
       },
-      routing: { type: typeOf('routing', routingId, ROUTING_TYPE) },
+      routing: { type: typeOf('routing', routingId, routingId.startsWith('ns3::') ? routingId : ROUTING_TYPE, layers) },
     },
     nodes: nodeList,
-    traffic: form.trafficId === 'none'
-      ? { preset: 'none' }
-      : {
-          preset: form.trafficId,
-          src: Number(form.trafficSrc) || 1,
-          dst: Number(form.trafficDst) || 1,
-          rate_bps: Number(form.trafficRateBps) || 80,
-          pkt: Number(form.trafficPkt) || 50,
-          start: form.trafficStart,
-          stop: form.trafficStop,
-        },
+    traffic: { preset: 'none' },
   }
 }
 
@@ -174,11 +159,15 @@ export const validateExperiment = (spec: ExperimentSpec): ValidationWarning[] =>
   const range = Number(spec.stack?.phy?.attrs?.transRange)
   if (!(range > 0)) warnings.push('transRange 必须大于 0')
 
-  if (isActiveTraffic(spec.traffic)) {
-    const srcOk = ids.includes(Number(spec.traffic.src))
-    const dstOk = spec.traffic.preset === 'periodic' || ids.includes(Number(spec.traffic.dst))
-    if (!srcOk) warnings.push('流量源不在拓扑中')
-    if (!dstOk) warnings.push('流量目的不在拓扑中')
+  const traffic = spec.traffic
+  const active = isActiveTraffic(traffic)
+  if (active && !ids.includes(Number(traffic.src))) warnings.push('流量源不在拓扑中')
+  const defaultDestination = active ? Number(traffic.dst) : undefined
+  for (const node of nodes) {
+    if (!node.app && !(active && node.id === Number(traffic.src))) continue
+    const destination = node.appDestination ?? defaultDestination
+    if (destination === undefined) warnings.push(`请为节点 ${node.id} 的应用选择目的节点`)
+    else if (!ids.includes(destination)) warnings.push(`节点 ${node.id} 的应用目的节点不在拓扑中`)
   }
 
   return warnings

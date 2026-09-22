@@ -1,8 +1,7 @@
 import { ref, type Ref } from 'vue'
-import { toWorldPoint, type Projection } from '../lib/coordinate'
+import { MAX_VIEW_SCALE, toWorldPoint, type Projection } from '../lib/coordinate'
 
 export const ZOOM_MIN = 0.25
-export const ZOOM_MAX = 4
 /** Exponential zoom factor per wheel delta unit. */
 export const ZOOM_WHEEL_SENSITIVITY = 0.0015
 /** Squared pixel distance before a press counts as a drag. */
@@ -10,6 +9,7 @@ export const DRAG_THRESHOLD_PX_SQ = 16
 
 export interface CanvasViewOptions {
   getProjection: () => Projection
+  getBaseScale: () => number
   getDraw: () => (() => void)
   getCanvasEl: () => HTMLCanvasElement | null
 }
@@ -21,7 +21,7 @@ export interface CanvasViewOptions {
  * - sessionFrozenBounds: pinned for the whole edit session so the view stays
  *   stable while the user rearranges the topology.
  */
-export const useCanvasView = ({ getProjection, getDraw, getCanvasEl }: CanvasViewOptions) => {
+export const useCanvasView = ({ getProjection, getBaseScale, getDraw, getCanvasEl }: CanvasViewOptions) => {
   const pan: Ref<{ x: number; y: number }> = ref({ x: 0, y: 0 })
   const isPanning: Ref<boolean> = ref(false)
   const panStart: Ref<{ x: number; y: number }> = ref({ x: 0, y: 0 })
@@ -55,29 +55,31 @@ export const useCanvasView = ({ getProjection, getDraw, getCanvasEl }: CanvasVie
     zoom.value = 1
   }
 
-  /** Zoom keeping the world point under the cursor anchored on screen. */
-  const onWheel = (event: WheelEvent) => {
-    const canvas = getCanvasEl()
-    if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    const cx = event.clientX - rect.left
-    const cy = event.clientY - rect.top
-    const beforeZoom = zoom.value
-    const zoomFactor = Math.exp(-event.deltaY * ZOOM_WHEEL_SENSITIVITY)
-    const nextZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, beforeZoom * zoomFactor))
-    if (nextZoom === beforeZoom) return
+  /** Wheel and slider share the same limits and screen anchor calculation. */
+  const setZoomAt = (value: number, cx: number, cy: number) => {
+    if (!Number.isFinite(value)) return
+    const maxZoom = MAX_VIEW_SCALE / getBaseScale()
+    const nextZoom = Math.max(ZOOM_MIN, Math.min(maxZoom, value))
+    if (nextZoom === zoom.value) return
 
     const anchorWorld = toWorldPoint(cx, cy, getProjection())
     zoom.value = nextZoom
 
-    requestAnimationFrame(() => {
-      const proj = getProjection()
-      pan.value = {
-        x: cx - ((anchorWorld.x - proj.bounds.minX) * proj.scale) - proj.origin.x,
-        y: cy - ((proj.bounds.maxY - anchorWorld.y) * proj.scale) - proj.origin.y,
-      }
-      requestAnimationFrame(() => getDraw()())
-    })
+    // Apply scale and anchor together, including consecutive wheel events in one frame.
+    const proj = getProjection()
+    pan.value = {
+      x: cx - ((anchorWorld.x - proj.bounds.minX) * proj.scale) - proj.origin.x,
+      y: cy - ((proj.bounds.maxY - anchorWorld.y) * proj.scale) - proj.origin.y,
+    }
+    requestAnimationFrame(() => getDraw()())
+  }
+
+  const onWheel = (event: WheelEvent) => {
+    const canvas = getCanvasEl()
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const currentZoom = Math.min(zoom.value, MAX_VIEW_SCALE / getBaseScale())
+    setZoomAt(currentZoom * Math.exp(-event.deltaY * ZOOM_WHEEL_SENSITIVITY), event.clientX - rect.left, event.clientY - rect.top)
   }
 
   return {
@@ -92,6 +94,7 @@ export const useCanvasView = ({ getProjection, getDraw, getCanvasEl }: CanvasVie
     beginPan,
     updatePan,
     resetView,
+    setZoomAt,
     onWheel,
   }
 }

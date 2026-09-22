@@ -66,6 +66,8 @@ interface NodeTooltipDeps {
   displayWidth: Ref<number>
   displayHeight: Ref<number>
   hoverCursor: Ref<{ x: number; y: number }>
+  tooltipSize?: Ref<{ width: number; height: number }>
+  getInsets?: () => { left?: number; right?: number; top?: number; bottom?: number } | null
 }
 
 export const useNodeTooltip = ({
@@ -77,9 +79,11 @@ export const useNodeTooltip = ({
   displayWidth,
   displayHeight,
   hoverCursor,
+  tooltipSize,
+  getInsets,
 }: NodeTooltipDeps) => {
   const hoveredNode: ComputedRef<TooltipNode | null> = computed(() => {
-    if (!hoveredNodeId.value) return null
+    if (hoveredNodeId.value == null) return null
     return nodeById.value.get(hoveredNodeId.value) || null
   })
 
@@ -149,27 +153,21 @@ export const useNodeTooltip = ({
   const hoveredTooltipStyle: ComputedRef<{ left: string; top: string } | null> = computed(() => {
     if (!hoveredNodePos.value) return null
     const compact = displayWidth.value < COMPACT_TOOLTIP_MAX_WIDTH_PX || displayHeight.value < COMPACT_TOOLTIP_MAX_HEIGHT_PX
-    const estimatedWidth = compact ? TOOLTIP_COMPACT_WIDTH_PX : TOOLTIP_WIDTH_PX
-    const estimatedHeight = compact ? TOOLTIP_COMPACT_HEIGHT_PX : TOOLTIP_HEIGHT_PX
+    const estimatedWidth = tooltipSize?.value.width ?? (compact ? TOOLTIP_COMPACT_WIDTH_PX : TOOLTIP_WIDTH_PX)
+    const estimatedHeight = tooltipSize?.value.height ?? (compact ? TOOLTIP_COMPACT_HEIGHT_PX : TOOLTIP_HEIGHT_PX)
     const margin = TOOLTIP_MARGIN_PX
     const gap = TOOLTIP_CURSOR_GAP_PX
+    const insets = getInsets?.()
+    let left = Math.max(margin, insets?.left || 0)
+    let right = displayWidth.value - Math.max(margin, insets?.right || 0)
+    // On narrow screens prioritize fitting the card inside the viewport.
+    if (right - left < estimatedWidth) { left = margin; right = displayWidth.value - margin }
     const cursorX = hoverCursor.value.x
     const cursorY = hoverCursor.value.y
     let x = cursorX + gap
-    let y = cursorY - (estimatedHeight * TOOLTIP_ANCHOR_FRACTION)
-
-    if (x + estimatedWidth > (displayWidth.value - margin)) {
-      x = cursorX - estimatedWidth - gap
-    }
-    if (x < margin) {
-      x = margin
-    }
-    if (y + estimatedHeight > (displayHeight.value - margin)) {
-      y = displayHeight.value - estimatedHeight - margin
-    }
-    if (y < margin) {
-      y = margin
-    }
+    const y = Math.max(margin, Math.min(cursorY - estimatedHeight * TOOLTIP_ANCHOR_FRACTION, displayHeight.value - estimatedHeight - margin))
+    if (x + estimatedWidth > right) x = cursorX - estimatedWidth - gap
+    x = Math.max(left, Math.min(x, right - estimatedWidth))
 
     return {
       left: `${x}px`,

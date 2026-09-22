@@ -97,9 +97,8 @@ const LABEL_DEPTH_OFFSET_EXTRA_PX = 16
 const GHOST_CIRCLE_RADIUS_PX = 8
 const GHOST_STROKE_STYLE = 'rgba(245, 158, 11, 0.78)'
 const GHOST_FILL_STYLE = 'rgba(245, 158, 11, 0.12)'
-/** Radius of the selection ring drawn around selected nodes in edit mode. */
-const SELECTED_RING_RADIUS_PX = 22
-const SELECTED_RING_LINE_WIDTH_PX = 2.1
+/** Selected nodes thicken their existing outer ring rather than adding a ring. */
+const SELECTED_OUTER_RING_LINE_WIDTH_PX = 3.5
 const MARQUEE_FILL_STYLE = 'rgba(56, 189, 248, 0.12)'
 const MARQUEE_STROKE_STYLE = 'rgba(125, 211, 252, 0.9)'
 /** Left margin of the HUD text block. */
@@ -226,6 +225,7 @@ export const drawNodeBody = (
   fx: number,
   radius: number,
   p: ScreenPoint,
+  selected = false,
 ): void => {
   const r = radius
   const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, r + IDLE_GRADIENT_OUTER_EXTRA_PX)
@@ -237,7 +237,7 @@ export const drawNodeBody = (
   strokeCircle(ctx, p.x, p.y, r, profile.nodeStroke, 1.4, 0.9)
 
   const pulse = 0.5 + (Math.sin((phase * (4.2 + (fx * 0.8))) + (node.node_id * 0.6)) * 0.5)
-  strokeCircle(ctx, p.x, p.y, r + PULSE_RING_BASE_EXTRA_PX + (pulse * PULSE_RING_PULSE_EXTRA_PX), profile.ring, 1, 0.35 + (pulse * 0.3))
+  strokeCircle(ctx, p.x, p.y, r + PULSE_RING_BASE_EXTRA_PX + (pulse * PULSE_RING_PULSE_EXTRA_PX), profile.ring, selected ? SELECTED_OUTER_RING_LINE_WIDTH_PX : 1, 0.35 + (pulse * 0.3))
   if (fx > 1) {
     strokeCircle(ctx, p.x, p.y, r + FX_RING_BASE_EXTRA_PX + (pulse * FX_RING_PULSE_EXTRA_PX), profile.ring, 1.2, 0.3)
   }
@@ -302,15 +302,6 @@ export const drawNodeBody = (
   ctx.font = DEPTH_FONT
   ctx.fillText(`z ${Number(node.z ?? 0).toFixed(2)}m`, p.x + labelOffset, p.y + LABEL_DEPTH_OFFSET_EXTRA_PX)
   ctx.restore()
-}
-
-/** Selection ring drawn around a selected node in edit mode. */
-export const drawSelectionRing = (
-  ctx: CanvasRenderingContext2D,
-  p: ScreenPoint,
-  profile: ThemeProfile,
-): void => {
-  strokeCircle(ctx, p.x, p.y, SELECTED_RING_RADIUS_PX, profile.idleInner, SELECTED_RING_LINE_WIDTH_PX, 0.95)
 }
 
 /** Box-select marquee rectangle. */

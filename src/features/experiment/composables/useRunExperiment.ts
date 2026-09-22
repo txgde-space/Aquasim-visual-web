@@ -13,11 +13,12 @@ interface RunResponse {
 
 interface RunExperimentDeps {
   getSpec: () => ExperimentSpec
+  getAquaSimHome: () => string
   /** Called with the produced ns-3 log when the run succeeds. */
   onSuccess: (log: string, logName: string) => void
 }
 
-export const useRunExperiment = ({ getSpec, onSuccess }: RunExperimentDeps) => {
+export const useRunExperiment = ({ getSpec, getAquaSimHome, onSuccess }: RunExperimentDeps) => {
   const runStatus: Ref<RunStatus> = ref('idle')
   const runLog: Ref<string> = ref('')
 
@@ -29,7 +30,7 @@ export const useRunExperiment = ({ getSpec, onSuccess }: RunExperimentDeps) => {
       const response = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(getSpec()),
+        body: JSON.stringify({ spec: getSpec(), aquaSimHome: getAquaSimHome().trim() }),
       })
       const data = await response.json() as RunResponse
       runLog.value = data.stdout || data.error || ''

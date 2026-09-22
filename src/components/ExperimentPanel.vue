@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { TRAFFIC_PRESETS, macPresetById } from '@/features/experiment/lib/experimentSpec'
+import { macPresetById } from '@/features/experiment/lib/experimentSpec'
 
 const props = defineProps({
   form: { type: Object, required: true },
@@ -74,44 +74,24 @@ const onNumberField = (key, event) => {
     <div class="control-fields-grid">
       <label class="field field-compact" title="仿真停止时间，如 30s">
         <div class="field-head"><span>仿真时长</span><span class="field-param">simStop</span></div>
-        <input class="select" :value="form.simStop" @change="onField('simStop', $event)" />
+        <input class="select" :value="form.simStop" @input="onField('simStop', $event)" />
       </label>
       <label class="field field-compact" title="传输距离（米）">
         <div class="field-head"><span>传输距离 m</span><span class="field-param">transRange</span></div>
-        <input class="select" type="number" min="1" step="10" :value="form.transRange" @change="onNumberField('transRange', $event)" />
+        <input class="select" type="number" min="1" step="10" :value="form.transRange" @input="onNumberField('transRange', $event)" />
       </label>
       <label v-if="selectedMac?.id === 'swarm'" class="field field-compact" title="首轮延迟，如 1s">
         <div class="field-head"><span>首轮延迟</span><span class="field-param">InitialRoundDelay</span></div>
-        <input class="select" :value="form.initialRoundDelay" @change="onField('initialRoundDelay', $event)" />
+        <input class="select" :value="form.initialRoundDelay" @input="onField('initialRoundDelay', $event)" />
       </label>
       <label v-if="selectedMac?.id === 'tdma'" class="field field-compact">
         <div class="field-head"><span>时隙数</span><span class="field-param">SlotNum</span></div>
-        <input class="select" type="number" min="1" max="8" :value="form.slotNum" @change="onNumberField('slotNum', $event)" />
+        <input class="select" type="number" min="1" max="8" :value="form.slotNum" @input="onNumberField('slotNum', $event)" />
       </label>
       <label v-if="selectedMac?.id === 'tdma'" class="field field-compact" title="时隙长度，如 5s">
         <div class="field-head"><span>时隙长度</span><span class="field-param">SlotLen</span></div>
-        <input class="select" :value="form.slotLen" @change="onField('slotLen', $event)" />
+        <input class="select" :value="form.slotLen" @input="onField('slotLen', $event)" />
       </label>
-      <label class="field field-compact">
-        <div class="field-head"><span>流量模式</span></div>
-        <select class="select" data-testid="exp-traffic" :value="form.trafficId" @change="onField('trafficId', $event.target.value)">
-          <option v-for="item in TRAFFIC_PRESETS" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-      </label>
-      <template v-if="form.trafficId !== 'none'">
-        <label class="field field-compact">
-          <div class="field-head"><span>源节点</span><span class="field-param">src</span></div>
-          <input class="select" type="number" min="1" :value="form.trafficSrc" @change="onNumberField('trafficSrc', $event)" />
-        </label>
-        <label v-if="form.trafficId === 'onoff-to'" class="field field-compact">
-          <div class="field-head"><span>目的节点</span><span class="field-param">dst</span></div>
-          <input class="select" type="number" min="1" :value="form.trafficDst" @change="onNumberField('trafficDst', $event)" />
-        </label>
-        <label class="field field-compact">
-          <div class="field-head"><span>速率 bps</span></div>
-          <input class="select" type="number" min="1" :value="form.trafficRateBps" @change="onNumberField('trafficRateBps', $event)" />
-        </label>
-      </template>
     </div>
 
     <ul v-if="warnings.length" class="experiment-warnings">

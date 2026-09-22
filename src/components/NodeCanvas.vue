@@ -8,11 +8,12 @@
     @dragover.prevent="onDragOver"
     @drop.prevent="onDrop"
   >
-    <div class="canvas-toolbar" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
+    <div class="canvas-toolbar" :class="{ 'zoom-open': zoomPanelOpen }" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
       <div class="toolbar-group">
         <button
           class="toolbar-btn"
           :class="{ active: toolMode === 'measure' }"
+          title="测量节点间距离，Esc 取消"
           @click="activateMeasureTool"
         >
           测距工具
@@ -21,13 +22,34 @@
           v-if="allowPlaceNode"
           class="toolbar-btn"
           :class="{ active: toolMode === 'place' }"
-          title="在画布上点击放置新节点"
+          title="在画布上点击放置新节点，Esc 取消"
           @click="activatePlaceTool"
         >
           放置节点
         </button>
 
 
+      </div>
+
+      <div ref="zoomControlEl" class="toolbar-group toolbar-zoom" @wheel.stop>
+        <button class="toolbar-btn" :class="{ active: zoomPanelOpen }" :aria-expanded="zoomPanelOpen"
+          aria-haspopup="dialog" @click="zoomPanelOpen = !zoomPanelOpen">缩放调节</button>
+        <Transition name="zoom-pop">
+        <div v-if="zoomPanelOpen" class="zoom-panel" role="dialog" aria-label="缩放设置">
+          <label class="zoom-column">
+            <span>画布</span>
+            <input v-model.number="canvasZoomPosition" class="zoom-range" type="range" min="0" max="100" step="0.1"
+              aria-label="画布缩放" :aria-valuetext="`每格 ${scaleBar.label}`" />
+            <output>{{ scaleBar.label }}</output>
+          </label>
+          <label class="zoom-column">
+            <span>节点</span>
+            <input v-model.number="nodeSizeScale" class="zoom-range" type="range" :min="NODE_SIZE_MIN" :max="NODE_SIZE_MAX"
+              :step="NODE_SIZE_STEP" aria-label="节点大小" />
+            <output>{{ nodeSizeScale.toFixed(1) }}×</output>
+          </label>
+        </div>
+        </Transition>
       </div>
 
       <div class="toolbar-group toolbar-group-history">
@@ -74,6 +96,10 @@
           </svg>
         </button>
       </div>
+      <div class="canvas-scale" role="img" :aria-label="`比例尺 ${scaleBar.label}`" :style="{ width: `${scaleBar.width}px` }">
+        <span>{{ scaleBar.label }}</span>
+        <span class="canvas-scale-line" aria-hidden="true"></span>
+      </div>
     </div>
 
     <canvas
@@ -81,7 +107,7 @@
       class="canvas"
       :class="canvasCursorClass"
       :aria-label="`acoustic-node-canvas-${Math.round(displayWidth)}x${Math.round(displayHeight)}`"
-      @pointerdown="onPointerDown"
+      @pointerdown="onCanvasPointerDown"
       @pointermove="onCanvasPointerMove"
       @pointerup="onPointerUp"
       @pointerleave="onCanvasPointerLeave"
@@ -89,17 +115,27 @@
 
     <div
       v-if="hoveredNodePos && hoveredNode && hoveredNodeStats"
+      ref="nodeCardEl"
       class="node-tooltip"
-      :style="hoveredTooltipStyle"
+      role="dialog"
+      :aria-label="`节点 ${hoveredNode.node_id} 详情`"
+      :data-pinned="card.pinned.value"
+      :style="{ ...hoveredTooltipStyle, maxHeight: `${displayHeight - 16}px` }"
+      @pointerdown.stop
+      @wheel.stop
+      @dragover.stop
+      @drop.stop
     >
       <div class="node-tooltip-head">
         <p class="node-tooltip-title">
           {{ nodeTitle(hoveredNode) }}
           <span class="node-tooltip-role">{{ hoveredNode.role || 'relay' }}</span>
         </p>
-        <span class="node-tooltip-chip">{{ hoveredNodeStats.modeLabel }}</span>
+        <span class="node-tooltip-chip">{{ card.pinned.value ? '已固定' : hoveredNodeStats.modeLabel }}</span>
+        <button class="node-card-close" aria-label="关闭节点卡片" @click.stop="card.close">×</button>
       </div>
 
+      <slot name="node-details" :node="hoveredNode" :pinned="card.pinned.value">
       <div class="node-tooltip-grid">
         <p class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(2) }} / y {{ hoveredNode.y.toFixed(2) }} / z {{ Number(hoveredNode.z ?? 0).toFixed(2) }} m</strong></p>
         <p class="node-tooltip-item"><span>仿真时刻</span><strong>{{ (props.currentTime / 1000).toFixed(1) }} ms</strong></p>
@@ -118,38 +154,43 @@
         <p class="node-tooltip-item"><span>活跃包列表</span><strong>{{ hoveredNodeStats.packetListText }}</strong></p>
         <p class="node-tooltip-item"><span>冲突成因</span><strong>{{ hoveredNodeStats.reasonText }}</strong></p>
       </div>
+      </slot>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { THEME_PROFILES } from '@/features/canvas2d/lib/themes'
+import { LOCAL_STORAGE_KEYS } from '@/shared/constants'
 import {
   computeBounds,
+  computeEditBounds,
   computeContentOrigin,
   computeScale,
+  MAX_VIEW_SCALE,
   NODE_HIT_EXTRA_PX,
   nodeRadiusFor,
   toScreenPoint,
   toWorldPoint,
   viewInsetsFor,
 } from '@/features/canvas2d/lib/coordinate'
+import { pickWorldGridStep } from '@/features/canvas2d/lib/draw/grid'
 import {
   drawEditGhosts,
   drawHudText,
   drawMarqueeBox,
   drawNodeBody,
-  drawSelectionRing,
   drawVisiblePacketSet,
   paintMeasurementOverlay,
   paintSceneBackdrop,
   syncCanvasContext,
 } from '@/features/canvas2d/lib/draw/scene'
 import { useCanvasLoop } from '@/features/canvas2d/composables/useCanvasLoop'
-import { useCanvasView } from '@/features/canvas2d/composables/useCanvasView'
+import { useCanvasView, ZOOM_MIN } from '@/features/canvas2d/composables/useCanvasView'
 import { useMeasureTool } from '@/features/canvas2d/composables/useMeasureTool'
 import { TOOL_MODES, usePointerTools } from '@/features/canvas2d/composables/usePointerTools'
+import { useNodeCard } from '@/features/canvas2d/composables/useNodeCard'
 import { useNodeTooltip } from '@/features/canvas2d/composables/useNodeTooltip'
 
 const props = defineProps({
@@ -169,6 +210,24 @@ const props = defineProps({
   /* 额外安全边距（px），为浮动 dock 留出默认视图空间：{ left, top, right, bottom } */
   viewPadding: { type: Object, default: null },
 })
+
+const NODE_SIZE_MIN = 0.5
+const NODE_SIZE_MAX = 2
+const NODE_SIZE_STEP = 0.1
+const NODE_SIZE_DEFAULT = 0.7
+
+const clampNodeSize = (value) => {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return NODE_SIZE_DEFAULT
+  return Math.min(NODE_SIZE_MAX, Math.max(NODE_SIZE_MIN, num))
+}
+
+const nodeSizeScale = ref(NODE_SIZE_DEFAULT)
+const zoomControlEl = ref(null)
+const zoomPanelOpen = ref(false)
+const onZoomOutside = (event) => {
+  if (!zoomControlEl.value?.contains(event.target)) zoomPanelOpen.value = false
+}
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['industrial-scada'])
 /* 画布首帧前的垫底背景：与 paintSceneBackdrop 的径向渐变同 stops，
@@ -195,7 +254,7 @@ const viewInsets = computed(() => {
     bottom: base.bottom + (Number(extra.bottom) || 0),
   }
 })
-const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)))
+const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)) * nodeSizeScale.value)
 const emit = defineEmits([
   'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
   'protocol-drop',
@@ -207,7 +266,11 @@ const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.valu
 
 const scale = computed(() => computeScale(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value))
 
-const effectiveScale = computed(() => scale.value * zoom.value)
+const effectiveScale = computed(() => Math.min(scale.value * zoom.value, MAX_VIEW_SCALE))
+const scaleBar = computed(() => {
+  const meters = pickWorldGridStep(effectiveScale.value)
+  return { width: meters * effectiveScale.value, label: meters >= 1000 ? `${meters / 1000} km` : `${meters} m` }
+})
 
 const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value, scale.value))
 
@@ -218,6 +281,7 @@ const { scheduleDraw } = loop
 
 const view = useCanvasView({
   getProjection: () => projection.value,
+  getBaseScale: () => scale.value,
   getDraw: () => draw,
   getCanvasEl: () => canvasEl.value,
 })
@@ -233,7 +297,24 @@ const {
   onWheel,
 } = view
 
+const canvasZoomPosition = computed({
+  get: () => {
+    const minScale = scale.value * ZOOM_MIN
+    return Math.max(0, Math.min(100, Math.log(effectiveScale.value / minScale) / Math.log(MAX_VIEW_SCALE / minScale) * 100))
+  },
+  set: (position) => {
+    const minScale = scale.value * ZOOM_MIN
+    const targetScale = minScale * (MAX_VIEW_SCALE / minScale) ** (Number(position) / 100)
+    const inset = viewInsets.value
+    view.setZoomAt(targetScale / scale.value,
+      (inset.left + displayWidth.value - inset.right) / 2,
+      (inset.top + displayHeight.value - inset.bottom) / 2)
+  },
+})
+
 const resetView = () => {
+  dragFrozenBounds.value = null
+  if (props.editMode) sessionFrozenBounds.value = computeEditBounds(props.nodes)
   view.resetView()
   hoveredNodeId.value = null
   scheduleDraw()
@@ -324,7 +405,7 @@ pointer = usePointerTools({
   pickNodeAt,
   toWorld,
   getSelectedIdSet: () => selectedIdSet.value,
-  getLiveBounds: () => liveBounds.value,
+  getViewBounds: () => bounds.value,
   setHoveredNodeId: (id) => { hoveredNodeId.value = id },
   setHoverCursor: (x, y) => { hoverCursor.value = { x, y } },
   updateHoveredNode,
@@ -365,6 +446,23 @@ const {
   deleteSelectedMeasurement,
 } = measure
 
+const nodeCardEl = ref(null)
+const card = useNodeCard({
+  nodeIds: () => props.nodes.map((node) => node.node_id),
+  canvas: canvasEl,
+  element: nodeCardEl,
+  pick: pickNodeAt,
+  allowClick: () => toolMode.value !== TOOL_MODES.MEASURE && !spaceHeld.value,
+})
+const onCanvasPointerDown = (event) => {
+  card.beginClick(event)
+  onPointerDown(event)
+}
+const cardAnchor = computed(() => {
+  const node = nodeById.value.get(card.nodeId.value)
+  return node ? toScreen(node.x, node.y) : { x: 0, y: 0 }
+})
+
 const {
   hoveredNode,
   hoveredNodePos,
@@ -373,14 +471,16 @@ const {
   nodeLabel,
   nodeTitle,
 } = useNodeTooltip({
-  hoveredNodeId,
+  hoveredNodeId: card.nodeId,
   nodeById,
   nodeVisualById,
   toScreenFn: toScreen,
   getVisiblePackets: () => props.visiblePackets,
   displayWidth,
   displayHeight,
-  hoverCursor,
+  hoverCursor: cardAnchor,
+  tooltipSize: card.size,
+  getInsets: () => props.viewPadding,
 })
 
 const paintMeasurements = (ctx) => {
@@ -422,6 +522,9 @@ const draw = () => {
     drawEditGhosts(ctx, props.originalPositions, (id) => nodeById.value.get(id), toScreen)
   }
 
+  // Keep measurement endpoints below node bodies and their ID labels.
+  paintMeasurements(ctx)
+
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id) || {
       node_id: node.node_id,
@@ -432,11 +535,8 @@ const draw = () => {
       statusText: '空闲',
       packetId: null,
     }
-    drawNodeBody(ctx, node, visual, profile, phase, fx, nodeRadius.value, toScreen(node.x, node.y))
     const selected = selectedIdSet.value.has(Number(node.node_id)) || props.selectedNodeId === node.node_id
-    if (props.editMode && selected) {
-      drawSelectionRing(ctx, toScreen(node.x, node.y), profile)
-    }
+    drawNodeBody(ctx, node, visual, profile, phase, fx, nodeRadius.value, toScreen(node.x, node.y), props.editMode && selected)
   }
 
   if (marquee.value) {
@@ -444,13 +544,14 @@ const draw = () => {
   }
 
   drawHudText(ctx, profile, props.currentTime, props.visiblePackets)
-
-  paintMeasurements(ctx)
 }
 
 const updateViewport = () => {
   if (!containerEl.value) return
   const rect = containerEl.value.getBoundingClientRect()
+  /* 视图常驻（v-show）隐藏时宿主尺寸归零：保持既有视口与 backing store，
+     重新显示时无需重设 canvas 尺寸，切换无缝 */
+  if (rect.width < 2 || rect.height < 2) return
   displayWidth.value = Math.max(160, rect.width - 2)
   displayHeight.value = Math.max(120, Math.round((rect.height || 0) - 2))
   scheduleDraw()
@@ -464,18 +565,32 @@ watch(
   { deep: true, immediate: true },
 )
 
-watch(() => props.editMode, async (next) => {
-  draggingNodeId.value = null
-  dragFrozenBounds.value = null
-  if (!next) {
-    sessionFrozenBounds.value = null
-    return
+watch(nodeSizeScale, (next) => {
+  nodeSizeScale.value = clampNodeSize(next)
+  try {
+    localStorage.setItem(LOCAL_STORAGE_KEYS.nodeSize, String(nodeSizeScale.value))
+  } catch {
+    // ignore persistence errors
   }
-  await nextTick()
-  sessionFrozenBounds.value = { ...liveBounds.value }
+  scheduleDraw()
 })
 
+watch(() => props.editMode, (next, previous) => {
+  // Freeze on initial mount too; entering edit mode preserves the current view.
+  const editBounds = next
+    ? { ...(previous === undefined ? computeEditBounds(props.nodes) : bounds.value) }
+    : null
+  draggingNodeId.value = null
+  dragFrozenBounds.value = null
+  sessionFrozenBounds.value = editBounds
+}, { immediate: true })
+
 const onKeyDown = (event) => {
+  if (event.key === 'Escape') {
+    zoomPanelOpen.value = false
+    cancelActiveTool()
+    return
+  }
   if (event.code !== 'Space') return
   if (event.target && /^(INPUT|TEXTAREA|SELECT)$/i.test(event.target.tagName)) return
   event.preventDefault()
@@ -487,8 +602,15 @@ const onKeyUp = (event) => {
 }
 
 onMounted(() => {
+  try {
+    const savedNodeSize = localStorage.getItem(LOCAL_STORAGE_KEYS.nodeSize)
+    if (savedNodeSize !== null) nodeSizeScale.value = clampNodeSize(savedNodeSize)
+  } catch {
+    // ignore persistence errors
+  }
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  document.addEventListener('pointerdown', onZoomOutside, true)
   updateViewport()
   // 同步补一次首帧绘制，不等 rAF，保证页面第一次 paint 画布就有内容
   draw()
@@ -509,6 +631,7 @@ onBeforeUnmount(() => {
   loop.dispose()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  document.removeEventListener('pointerdown', onZoomOutside, true)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
@@ -532,7 +655,7 @@ onBeforeUnmount(() => {
 
 .canvas-toolbar {
   position: absolute;
-  z-index: 4;
+  z-index: 10;
   bottom: 12px;
   left: 12px;
   display: inline-flex;
@@ -555,6 +678,50 @@ onBeforeUnmount(() => {
 .toolbar-group-history {
   border-color: color-mix(in srgb, var(--warn, #f59e0b) 26%, var(--line, transparent));
 }
+
+.canvas-toolbar.zoom-open { z-index: 30; }
+.toolbar-zoom { position: relative; }
+.zoom-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  transform-origin: center bottom;
+  z-index: 30;
+  display: flex;
+  gap: 16px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(10px);
+}
+.zoom-panel::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: translateX(-50%) rotate(45deg);
+  pointer-events: none;
+}
+.zoom-pop-enter-active,
+.zoom-pop-leave-active {
+  transition: transform var(--dur-med) var(--ease-spring), opacity var(--dur-fast) var(--ease-out);
+}
+.zoom-pop-leave-active { transition-timing-function: var(--ease-in); }
+.zoom-pop-enter-from,
+.zoom-pop-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.94); }
+.zoom-column { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 52px; color: var(--text); font-size: 12px; }
+.zoom-range { writing-mode: vertical-lr; direction: rtl; width: 20px; height: 120px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.zoom-column output { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
+.canvas-scale { display: flex; flex-direction: column; align-items: center; gap: 3px; margin: 0 8px; color: var(--muted); font: 10px var(--font-mono); white-space: nowrap; flex-shrink: 0; pointer-events: none; }
+.canvas-scale-line { width: 100%; height: 6px; border: 1px solid currentColor; border-top: 0; }
 
 .toolbar-btn {
   border-radius: 999px;
@@ -630,7 +797,7 @@ onBeforeUnmount(() => {
 
 .node-tooltip {
   position: absolute;
-  z-index: 5;
+  z-index: 30;
   background: var(--panel, rgba(17, 23, 34, 0.88));
   border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
   border-radius: var(--r-md, 10px);
@@ -638,21 +805,23 @@ onBeforeUnmount(() => {
   width: min(360px, calc(100% - 16px));
   max-width: min(360px, calc(100vw - 18px));
   box-shadow: var(--shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.55));
-  pointer-events: none;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   backdrop-filter: blur(10px) saturate(1.05);
-  animation: tooltip-pop 140ms ease-out;
+  animation: tooltip-pop var(--dur-fast) var(--ease-out);
 }
 
-.node-tooltip::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(110deg, transparent 0%, rgba(125, 211, 252, 0.16) 45%, transparent 72%);
-  background-size: 230% 100%;
-  animation: tooltip-sheen 2.3s linear infinite;
+.node-card-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 20px;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
 }
+.node-card-close:hover { color: var(--text); background: var(--panel); }
 
 .node-tooltip-head {
   position: relative;
@@ -822,15 +991,6 @@ onBeforeUnmount(() => {
     opacity: 1;
     transform: scale(1);
     filter: brightness(1);
-  }
-}
-
-@keyframes tooltip-sheen {
-  0% {
-    background-position: -120% 0;
-  }
-  100% {
-    background-position: 180% 0;
   }
 }
 

@@ -2,17 +2,18 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { IncomingMessage } from 'node:http'
 import type { ExperimentSpec } from '../src/shared/types/experiment'
 import { generateAquaVisualCc } from '../src/features/experiment/lib/generateScratch'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+import { inspectSimulator } from './simulatorConfig'
+import { checkProtocolRequirements } from './protocolRequirements'
+import { cachedCatalog, catalogProbe, saveCatalog } from './protocolCatalog'
 
 /** POST /api/run request body limit (1 MB). */
 export const BODY_LIMIT_BYTES = 1_000_000
 const RUN_TIMEOUT_MS = 180_000
 const CONFIGURE_TIMEOUT_MS = 900_000
+const BUILD_TIMEOUT_MS = 900_000
 /** Grace period after SIGTERM before escalating to SIGKILL. */
 const SIGKILL_GRACE_MS = 5_000
 /** Keep at most the tail of child output to bound memory. */
@@ -23,26 +24,30 @@ export interface RunOutcome {
   payload: Record<string, unknown>
 }
 
-export const resolveAquaHome = (): string | null => {
-  const candidates = [
-    process.env.AQUA_SIM_HOME,
-    path.resolve(root, '../aqua-sim-dev'),
-  ].filter((dir): dir is string => Boolean(dir))
-  return candidates.find((dir) => fs.existsSync(path.join(dir, 'ns3'))) || null
-}
-
 const isConfigured = (cwd: string): boolean => (
   fs.existsSync(path.join(cwd, 'cmake-cache'))
   || fs.existsSync(path.join(cwd, 'build', 'CMakeCache.txt'))
   || fs.existsSync(path.join(cwd, 'cmake-cache.txt'))
 )
 
+const warningsAsErrors = (cwd: string): boolean => {
+  for (const relative of ['cmake-cache/CMakeCache.txt', 'build/CMakeCache.txt', 'cmake-cache.txt']) {
+    try {
+      const cache = fs.readFileSync(path.join(cwd, relative), 'utf8')
+      return /^NS3_WARNINGS_AS_ERRORS:BOOL=(ON|TRUE|YES|1)\s*$/mi.test(cache)
+    } catch {
+      // Try the other cache locations supported by this runner.
+    }
+  }
+  return false
+}
+
 /**
  * Collect net.* logs produced by THIS run only: files whose mtime is newer
  * than the run start. Falls back to nothing (instead of stale files) when
  * the simulation produced no fresh log.
  */
-const collectRunLog = (cwd: string, sinceMs: number): { log: string | null; logName: string } => {
+const collectRunLog = (cwd: string, sinceMs: number, fallbackName: string): { log: string | null; logName: string } => {
   const hits: Array<{ full: string; name: string; mtimeMs: number }> = []
   for (const dir of [cwd, path.join(cwd, 'scratch')]) {
     let entries: fs.Dirent[]
@@ -53,6 +58,7 @@ const collectRunLog = (cwd: string, sinceMs: number): { log: string | null; logN
     }
     for (const entry of entries) {
       if (!entry.isFile() || !/^net\..+/.test(entry.name)) continue
+      if (entry.name.startsWith('net.aqua-visual-') && entry.name !== fallbackName) continue
       const full = path.join(dir, entry.name)
       let mtimeMs: number
       try {
@@ -65,7 +71,7 @@ const collectRunLog = (cwd: string, sinceMs: number): { log: string | null; logN
     }
   }
   if (!hits.length) return { log: null, logName: '' }
-  hits.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  hits.sort((a, b) => Number(a.name === fallbackName) - Number(b.name === fallbackName) || b.mtimeMs - a.mtimeMs)
   return { log: fs.readFileSync(hits[0].full, 'utf8'), logName: hits[0].name }
 }
 
@@ -82,6 +88,11 @@ const runProcess = (
   }
   child.stdout.on('data', onData)
   child.stderr.on('data', onData)
+  child.on('error', (error) => {
+    clearTimeout(termTimer)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
+    resolve({ code: -1, stdout: `${stdout}\n${error.message}` })
+  })
 
   let sigkillTimer: NodeJS.Timeout | null = null
   const termTimer = setTimeout(() => {
@@ -99,24 +110,26 @@ const runProcess = (
 })
 
 const ensureConfigured = async (cwd: string): Promise<{ ok: boolean; stdout: string }> => {
-  if (isConfigured(cwd)) return { ok: true, stdout: '' }
+  const configured = isConfigured(cwd)
+  if (configured && !warningsAsErrors(cwd)) return { ok: true, stdout: '' }
   const ns3 = path.join(cwd, 'ns3')
   const result = await runProcess(cwd, [
     ns3,
     'configure',
-    '--build-profile=debug',
-    '--enable-examples',
+    // Existing checkouts keep their profile, modules, and other cached options.
+    ...(!configured ? ['--build-profile=debug', '--enable-examples'] : []),
+    '--disable-werror',
   ], CONFIGURE_TIMEOUT_MS)
   return {
-    ok: result.code === 0 && isConfigured(cwd),
+    ok: result.code === 0 && isConfigured(cwd) && !warningsAsErrors(cwd),
     stdout: result.stdout,
   }
 }
 
-const runNs3 = async (cwd: string, program: string, sinceMs: number) => {
+const runNs3 = async (cwd: string, program: string, sinceMs: number, logName: string) => {
   const ns3 = path.join(cwd, 'ns3')
   const result = await runProcess(cwd, [ns3, 'run', program], RUN_TIMEOUT_MS)
-  const files = collectRunLog(cwd, sinceMs)
+  const files = collectRunLog(cwd, sinceMs, logName)
   return {
     ok: result.code === 0,
     code: result.code,
@@ -126,13 +139,57 @@ const runNs3 = async (cwd: string, program: string, sinceMs: number) => {
   }
 }
 
-let activeRun: Promise<RunOutcome> | null = null
+let activeTask: Promise<RunOutcome> | null = null
 
-const doRunExperiment = async (spec: unknown): Promise<RunOutcome> => {
-  const home = resolveAquaHome()
-  if (!home) {
-    return { status: 400, payload: { ok: false, error: '找不到 aqua-sim-dev' } }
+const discoverCatalog = async (home: string) => {
+  const name = `aqua-visual-catalog-${randomUUID().slice(0, 8)}`
+  const scratch = path.join(home, 'scratch', `${name}.cc`)
+  try {
+    fs.mkdirSync(path.dirname(scratch), { recursive: true })
+    fs.writeFileSync(scratch, catalogProbe)
+    const result = await runProcess(home, [path.join(home, 'ns3'), 'run', name], BUILD_TIMEOUT_MS)
+    if (result.code !== 0) throw new Error(`读取注册协议失败：\n${result.stdout}`)
+    return saveCatalog(home, result.stdout)
+  } finally {
+    fs.rmSync(scratch, { force: true })
   }
+}
+
+const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
+  const config = inspectSimulator(aquaSimHome)
+  if (!config.ok) return { status: 400, payload: config }
+  const setup = await ensureConfigured(config.home)
+  if (!setup.ok) {
+    return {
+      status: 500,
+      payload: { ok: false, phase: 'configure', error: '预编译配置失败', stdout: setup.stdout, home: config.home },
+    }
+  }
+  const build = await runProcess(config.home, [path.join(config.home, 'ns3'), 'build'], BUILD_TIMEOUT_MS)
+  const ok = build.code === 0
+  let catalog
+  if (ok) {
+    try { catalog = await discoverCatalog(config.home) }
+    catch (error) { return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: build.stdout } } }
+  }
+  return {
+    status: ok ? 200 : 500,
+    payload: {
+      ok, phase: 'build', home: config.home, code: build.code,
+      command: './ns3 build',
+      catalog,
+      error: ok ? '' : '预编译失败，请查看编译输出',
+      stdout: [setup.stdout, build.stdout].filter(Boolean).join('\n'),
+    },
+  }
+}
+
+const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<RunOutcome> => {
+  const config = inspectSimulator(aquaSimHome)
+  if (!config.ok) {
+    return { status: 400, payload: config }
+  }
+  const home = config.home
 
   // Per-run scratch file: concurrent/extra runs can no longer overwrite each
   // other's aqua-visual.cc or pick up each other's logs.
@@ -140,12 +197,10 @@ const doRunExperiment = async (spec: unknown): Promise<RunOutcome> => {
   const scratchName = `aqua-visual-${runId}`
   const scratchRel = path.join('scratch', `${scratchName}.cc`)
   const scratchAbs = path.join(home, scratchRel)
+  const fallbackLog = `net.aqua-visual-${runId}.json`
   const startedAt = Date.now()
 
   try {
-    fs.mkdirSync(path.dirname(scratchAbs), { recursive: true })
-    fs.writeFileSync(scratchAbs, generateAquaVisualCc(spec as ExperimentSpec))
-
     const setup = await ensureConfigured(home)
     if (!setup.ok) {
       return {
@@ -159,9 +214,15 @@ const doRunExperiment = async (spec: unknown): Promise<RunOutcome> => {
       }
     }
 
-    const result = await runNs3(home, scratchName, startedAt)
+    const catalog = cachedCatalog(home) || await discoverCatalog(home)
+    fs.mkdirSync(path.dirname(scratchAbs), { recursive: true })
+    const code = generateAquaVisualCc(spec as ExperimentSpec, catalog, fallbackLog)
+    checkProtocolRequirements(home, spec as ExperimentSpec)
+    fs.writeFileSync(scratchAbs, code)
+
+    const result = await runNs3(home, scratchName, startedAt, fallbackLog)
     let stdout = setup.stdout ? `${setup.stdout}\n${result.stdout}` : result.stdout
-    const payload: Record<string, unknown> = { ...result, scratch: scratchRel }
+    const payload: Record<string, unknown> = { ...result, stdout, scratch: scratchRel }
     if (result.ok && !result.log) {
       stdout += '\n[警告] 仿真成功但未找到本次运行新生成的 net.* 日志文件，请检查仿真配置'
       payload.stdout = stdout
@@ -175,29 +236,35 @@ const doRunExperiment = async (spec: unknown): Promise<RunOutcome> => {
     } catch {
       // scratch cleanup is best-effort
     }
+    fs.rmSync(path.join(home, fallbackLog), { force: true })
   }
 }
 
 /**
- * Single-flight guard: only one /api/run at a time. A second request while a
- * run is in flight gets 409 instead of queueing onto the same scratch file.
+ * Precompilation and simulation share a lock because both mutate the ns-3 build tree.
  */
-export const runExperimentGuarded = (spec: unknown): Promise<RunOutcome> => {
-  if (activeRun) {
+const runExclusive = (start: () => Promise<RunOutcome>): Promise<RunOutcome> => {
+  if (activeTask) {
     return Promise.resolve({
       status: 409,
-      payload: { ok: false, error: '已有仿真任务进行中，请等待当前任务完成后再试' },
+      payload: { ok: false, error: '已有预编译或仿真任务进行中，请等待当前任务完成后再试' },
     })
   }
-  const task = doRunExperiment(spec)
-  activeRun = task
+  const task = start()
+  activeTask = task
   task
     .catch(() => {})
     .finally(() => {
-      if (activeRun === task) activeRun = null
+      if (activeTask === task) activeTask = null
     })
   return task
 }
+
+export const runExperimentGuarded = (spec: unknown, aquaSimHome: unknown = ''): Promise<RunOutcome> =>
+  runExclusive(() => doRunExperiment(spec, aquaSimHome))
+
+export const precompileSimulatorGuarded = (aquaSimHome: unknown = ''): Promise<RunOutcome> =>
+  runExclusive(() => doPrecompile(aquaSimHome))
 
 /** Read a JSON request body, rejecting payloads over the size limit. */
 export const readJsonBody = (req: IncomingMessage, limit = BODY_LIMIT_BYTES): Promise<unknown> => new Promise((resolve, reject) => {

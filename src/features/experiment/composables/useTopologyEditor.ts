@@ -1,12 +1,7 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, type ComputedRef, type Ref } from 'vue'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
-import {
-  MIN_NODE_COUNT,
-  createDefaultExperimentForm,
-  createDefaultTopology,
-  macPresetById,
-} from '../lib/experimentSpec'
-import { catalogItemById } from '../lib/typeIdCatalog'
+import { experimentDraft } from './experimentDraft'
+import { catalogItemById, type CatalogLayer } from '../lib/typeIdCatalog'
 
 /** Normalise any node-like object (replay node, canvas node) into a TopologyNode. */
 export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): TopologyNode => ({
@@ -20,6 +15,8 @@ export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): To
   macId: node.macId || 'swarm',
   routingId: node.routingId || 'static',
   appId: node.appId || 'none',
+  appAttrs: { ...node.appAttrs },
+  appDestination: node.appDestination,
 })
 
 export interface AssignPayload {
@@ -34,11 +31,8 @@ export interface AssignPayload {
 
 const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
 
-export const useTopologyEditor = () => {
-  const editNodes: Ref<TopologyNode[]> = ref(createDefaultTopology())
-  const selectedIds: Ref<number[]> = ref([1])
-  const experimentForm: Ref<ExperimentForm> = ref(createDefaultExperimentForm())
-  const activeCatalogId: Ref<string> = ref('mac:swarm')
+export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
+  const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId } = experimentDraft
 
   const selectedNodes: ComputedRef<TopologyNode[]> = computed(() => (
     editNodes.value.filter((node) => selectedIds.value.includes(Number(node.node_id)))
@@ -63,12 +57,12 @@ export const useTopologyEditor = () => {
     mode: 'idle',
     fillProgress: 0,
     fade: 1,
-    statusText: macPresetById(experimentForm.value.macId || 'swarm').label,
+    statusText: catalogItemById('mac', experimentForm.value.macId, layers.value)?.label || experimentForm.value.macId,
     packetId: null,
   })))
 
   const stackLayer = (layerId: string, itemId: string) => {
-    const item = catalogItemById(layerId, itemId)
+    const item = catalogItemById(layerId, itemId, layers.value)
     return {
       name: item?.label || itemId || '—',
       typeId: item?.typeId ? item.typeId.replace(/^ns3::/, '') : '—',
@@ -78,14 +72,9 @@ export const useTopologyEditor = () => {
 
   const protocolStack = computed(() => {
     const form = experimentForm.value
-    const appIds = [...new Set(editNodes.value.map((node) => node.appId || 'none'))]
-    const apps = appIds.map((id) => stackLayer('app', id))
-    const appName = apps.map((item) => item.name).join(' / ')
-    const appType = [...new Set(apps.map((item) => item.typeId))].join(' / ')
     const channel = stackLayer('channel', form.channelId || 'channel')
     const prop = stackLayer('channel', form.propagationId || 'range')
     return [
-      { key: 'app', layer: '应用层', name: appName, typeId: appType, source: [...new Set(apps.map((item) => item.source).filter(Boolean))].join('\n') },
       { key: 'routing', layer: '路由', ...stackLayer('routing', form.routingId || 'static') },
       { key: 'mac', layer: 'MAC', ...stackLayer('mac', form.macId || 'swarm') },
       { key: 'phy', layer: '物理层', ...stackLayer('phy', form.phyId || 'phy-fdm') },
@@ -109,7 +98,10 @@ export const useTopologyEditor = () => {
   }
 
   const onNodeSelect = (node: TopologyNode | null) => {
-    if (!node) return
+    if (!node) {
+      selectedIds.value = []
+      return
+    }
     const id = Number(node.node_id)
     if (!selectedIds.value.includes(id)) selectedIds.value = [id]
   }
@@ -186,7 +178,7 @@ export const useTopologyEditor = () => {
 
   const removeSelected = () => {
     const remaining = editNodes.value.length - selectedIds.value.length
-    if (remaining < MIN_NODE_COUNT || !selectedIds.value.length) return
+    if (remaining < 0 || !selectedIds.value.length) return
     const drop = new Set(selectedIds.value.map(Number))
     editNodes.value = editNodes.value.filter((node) => !drop.has(Number(node.node_id)))
     selectedIds.value = editNodes.value[0] ? [Number(editNodes.value[0].node_id)] : []
@@ -197,10 +189,12 @@ export const useTopologyEditor = () => {
     const layer = payload.layer || 'mac'
     const itemId = payload.id || payload.macId
     if (!itemId) return
+    const item = catalogItemById(layer, itemId, layers.value)
+    if (!item) return
     activeCatalogId.value = `${layer}:${itemId}`
 
     if (layer === 'channel' || payload.scope === 'scene') {
-      if (itemId === 'channel') experimentForm.value = { ...experimentForm.value, channelId: itemId }
+      if ((item.field || 'channelId') === 'channelId') experimentForm.value = { ...experimentForm.value, channelId: itemId }
       else experimentForm.value = { ...experimentForm.value, propagationId: itemId }
       return
     }
@@ -210,19 +204,36 @@ export const useTopologyEditor = () => {
       if (!ids.length) return
       const idSet = new Set(ids.map(Number))
       editNodes.value = editNodes.value.map((node) => (
-        idSet.has(Number(node.node_id)) ? { ...node, appId: itemId } : node
+        idSet.has(Number(node.node_id)) ? { ...node, appId: itemId, appAttrs: {} } : node
       ))
       return
     }
 
     const nextForm = { ...experimentForm.value, [field]: itemId }
     if (field === 'macId') {
-      const preset = macPresetById(itemId)
-      if (preset && nextForm.trafficId === 'none') nextForm.trafficId = preset.trafficDefault
       if (itemId === 'tdma') nextForm.slotNum = Math.min(8, Math.max(nextForm.slotNum || 4, editNodes.value.length))
     }
     experimentForm.value = nextForm
     editNodes.value = editNodes.value.map((node) => ({ ...node, [field]: itemId }))
+  }
+
+  const setProtocolAttribute = (typeId: string, name: string, value: string, nodeId?: number) => {
+    const update = (attrs: Record<string, string> = {}) => {
+      const next = { ...attrs }
+      if (value === '') delete next[name]
+      else next[name] = value
+      return next
+    }
+    if (nodeId !== undefined) {
+      editNodes.value = editNodes.value.map((node) => node.node_id === nodeId ? { ...node, appAttrs: update(node.appAttrs) } : node)
+    } else {
+      const attrs = experimentForm.value.protocolAttributes || {}
+      experimentForm.value = { ...experimentForm.value, protocolAttributes: { ...attrs, [typeId]: update(attrs[typeId]) } }
+    }
+  }
+
+  const setNodeDestination = (nodeId: number, destination?: number) => {
+    editNodes.value = editNodes.value.map((node) => node.node_id === nodeId ? { ...node, appDestination: destination } : node)
   }
 
   const onProtocolDrop = (payload: AssignPayload) => {
@@ -271,6 +282,8 @@ export const useTopologyEditor = () => {
     onProtocolDrop,
     replaceTopology,
     setField,
+    setProtocolAttribute,
+    setNodeDestination,
   }
 }
 

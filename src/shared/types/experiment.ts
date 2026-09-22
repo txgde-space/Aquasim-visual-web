@@ -19,6 +19,7 @@ export interface ExperimentForm {
   trafficPkt: number
   trafficStart: string
   trafficStop: string
+  protocolAttributes?: Record<string, Record<string, string>>
 }
 
 export interface TopologyNode extends Point3D {
@@ -29,6 +30,8 @@ export interface TopologyNode extends Point3D {
   macId: string
   routingId: string
   appId: string
+  appAttrs?: Record<string, string>
+  appDestination?: number
 }
 
 export interface ExperimentNodeSpec extends Point3D {
@@ -36,6 +39,8 @@ export interface ExperimentNodeSpec extends Point3D {
   name: string
   role: string
   app: string
+  appAttrs?: Record<string, string>
+  appDestination?: number
 }
 
 export type ExperimentTraffic =
@@ -73,6 +78,7 @@ export interface ExperimentSpec {
   }
   nodes: ExperimentNodeSpec[]
   traffic: ExperimentTraffic
+  protocolAttributes?: Record<string, Record<string, string>>
 }
 
 export type ValidationWarning = string

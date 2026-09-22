@@ -87,9 +87,14 @@ const scrollLogItemIntoView = (listEl: HTMLElement | null, eventId: string | nul
   const outOfViewBottom = targetRect.bottom > listRect.bottom
   if (!outOfViewTop && !outOfViewBottom) return
 
-  target.scrollIntoView({
-    block: 'nearest',
-    inline: 'nearest',
+  /* 不能用 scrollIntoView：抽屉收起时面板被 transform 移出屏幕，scrollIntoView
+     会横向滚动 overflow:hidden 的祖先（.deck），把收起的抽屉“拖”回可视区。
+     这里只垂直滚动日志列表自身，不触碰任何祖先容器 */
+  const nextTop = outOfViewTop
+    ? listEl.scrollTop - (listRect.top - targetRect.top)
+    : listEl.scrollTop + (targetRect.bottom - listRect.bottom)
+  listEl.scrollTo({
+    top: nextTop,
     behavior: props.isPlaying ? 'smooth' : 'auto',
   })
 }
@@ -268,7 +273,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
         日志解析失败：{{ parseErrors.length }} 条
       </li>
       <li v-if="visiblePacketEntries.length === 0" class="log-item empty">
-        暂无日志...
+        {{ logSourceKey === 'topology' ? '仅导入了实验拓扑，尚无发包记录。请在实验页运行仿真后查看回放。' : '暂无日志...' }}
       </li>
       <li
         v-for="packet in visiblePacketEntries"
