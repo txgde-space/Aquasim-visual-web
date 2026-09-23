@@ -23,6 +23,10 @@ const CAMERA_MIN_Z = 1
 const CAMERA_MAX_Z = 200000
 const LIGHT_INTENSITY = 1.1
 const LIGHT_GROUND_COLOR = new Color3(0.1, 0.14, 0.2)
+const CAMERA_MOVE_SPEED_RATIO = 0.45
+const CAMERA_FAST_MULTIPLIER = 2.5
+const CAMERA_MAX_FRAME_SECONDS = 0.05
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'])
 
 interface CameraPose {
   alpha: number
@@ -64,13 +68,42 @@ export const useBabylonScene = ({
   let resizeObserver: ResizeObserver | null = null
   let pointerObserver: Observer<PointerInfo> | null = null
   let defaultCameraState: CameraPose | null = null
+  const pressedKeys = new Set<string>()
+  let lastFrameTime = 0
 
   const getEngine = () => engine
   const getScene = () => scene
   const getCamera = () => camera
 
+  const translateCamera = (delta: Vector3) => {
+    if (!camera) return
+    // Preserve orbit angles and radius; keyboard/middle-button movement should
+    // not replace the topology center saved for “reset view”.
+    camera.setTarget(camera.getTarget().add(delta), false, false, true)
+  }
+
+  const moveFromKeyboard = (dt: number) => {
+    if (!camera || !pressedKeys.size || dt <= 0) return
+    const forward = camera.getTarget().subtract(camera.position)
+    forward.y = 0
+    if (forward.lengthSquared() < 1e-6) forward.set(-Math.cos(camera.alpha), 0, -Math.sin(camera.alpha))
+    forward.normalize()
+    const right = Vector3.Cross(Vector3.Up(), forward).normalize()
+    const direction = forward.scale(Number(pressedKeys.has('KeyW')) - Number(pressedKeys.has('KeyS')))
+      .add(right.scale(Number(pressedKeys.has('KeyD')) - Number(pressedKeys.has('KeyA'))))
+      .add(Vector3.Up().scale(Number(pressedKeys.has('KeyE')) - Number(pressedKeys.has('KeyQ'))))
+    if (direction.lengthSquared() === 0) return
+    const fast = pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight')
+    const distance = camera.radius * CAMERA_MOVE_SPEED_RATIO * (fast ? CAMERA_FAST_MULTIPLIER : 1) * dt
+    translateCamera(direction.normalize().scale(distance))
+  }
+
   const renderLoop = () => {
     if (!scene || !camera) return
+    const now = performance.now()
+    const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, CAMERA_MAX_FRAME_SECONDS) : 0
+    lastFrameTime = now
+    moveFromKeyboard(dt)
     onFrame()
     scene.render()
   }
@@ -80,6 +113,8 @@ export const useBabylonScene = ({
   const setActive = (active: boolean) => {
     if (!engine) return
     engine.stopRenderLoop()
+    pressedKeys.clear()
+    lastFrameTime = 0
     if (!active) return
     engine.runRenderLoop(renderLoop)
     engine.resize()
@@ -112,6 +147,16 @@ export const useBabylonScene = ({
     onFrame()
   }
 
+  const onCanvasPointerDown = () => canvasRef.value?.focus()
+  const onCanvasKeyDown = (event: KeyboardEvent) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    if (!MOVE_KEYS.has(event.code) && event.code !== 'ShiftLeft' && event.code !== 'ShiftRight') return
+    if (MOVE_KEYS.has(event.code)) event.preventDefault()
+    pressedKeys.add(event.code)
+  }
+  const onWindowKeyUp = (event: KeyboardEvent) => pressedKeys.delete(event.code)
+  const clearKeys = () => pressedKeys.clear()
+
   const mount = () => {
     const canvas = canvasRef.value
     if (!canvas) return
@@ -137,6 +182,11 @@ export const useBabylonScene = ({
     camera.minZ = CAMERA_MIN_Z
     camera.maxZ = CAMERA_MAX_Z
     camera.attachControl(canvas, true)
+    canvas.addEventListener('pointerdown', onCanvasPointerDown)
+    canvas.addEventListener('keydown', onCanvasKeyDown)
+    canvas.addEventListener('blur', clearKeys)
+    window.addEventListener('keyup', onWindowKeyUp)
+    window.addEventListener('blur', clearKeys)
     const pointerInput = camera.inputs?.attached?.pointers as { buttons?: number[] } | undefined
     if (pointerInput) {
       pointerInput.buttons = [0]
@@ -172,6 +222,12 @@ export const useBabylonScene = ({
   }
 
   const dispose = () => {
+    canvasRef.value?.removeEventListener('pointerdown', onCanvasPointerDown)
+    canvasRef.value?.removeEventListener('keydown', onCanvasKeyDown)
+    canvasRef.value?.removeEventListener('blur', clearKeys)
+    window.removeEventListener('keyup', onWindowKeyUp)
+    window.removeEventListener('blur', clearKeys)
+    pressedKeys.clear()
     cleanup?.()
     if (scene && pointerObserver) scene.onPointerObservable.remove(pointerObserver)
     pointerObserver = null
@@ -195,6 +251,7 @@ export const useBabylonScene = ({
     setClearColor,
     setActive,
     focusCamera,
+    translateCamera,
     resetCameraView,
     resize,
   }

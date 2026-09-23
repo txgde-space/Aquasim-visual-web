@@ -1,6 +1,6 @@
 <template>
   <div ref="hostEl" class="scene-host" :style="{ background: hostBackground }">
-    <canvas ref="canvasEl" class="scene-canvas" />
+    <canvas ref="canvasEl" class="scene-canvas" tabindex="0" aria-label="3D 场景，点击后可使用 WASD 移动、Q E 升降、Shift 加速" />
     <canvas
       ref="axesEl"
       class="scene-axes"
@@ -13,6 +13,7 @@
       <span>3D 视图</span>
       <span>拖动旋转</span>
       <span>滚轮缩放</span>
+      <span>点击画布后 WASD 移动 · Q/E 升降 · Shift 加速</span>
       <span>点击节点查看</span>
     </div>
 
@@ -413,8 +414,7 @@ const onCanvasPointerMove = (event) => {
   const up = Vector3.Cross(right, forward).normalize()
   const panScale = camera.radius * 0.0014
   const delta = right.scale(dx * panScale).add(up.scale(dy * panScale))
-  camera.target.addInPlace(delta)
-  babylon.focusCamera(camera.getTarget())
+  babylon.translateCamera(delta)
 }
 
 const endMiddlePan = (event) => {
