@@ -65,8 +65,11 @@ const props = defineProps({
   nodeVisuals: { type: Array, required: true },
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
+  topologyNodes: { type: Array, default: null },
   themeKey: { type: String, default: 'industrial-scada' },
   fxLevel: { type: String, default: 'standard' },
+  /* 视图常驻（v-show）时的可见性：false 停 renderLoop，true 恢复并补刷新 */
+  active: { type: Boolean, default: true },
 })
 
 const hostEl = ref(null)
@@ -131,6 +134,7 @@ const babylon = useBabylonScene({
   canvasRef: canvasEl,
   hostRef: hostEl,
   getClearColor: () => theme3D.value.clear,
+  getActive: () => props.active,
   onPick: (nodeId) => {
     if (!nodeId) {
       selectedNode.value = null
@@ -163,27 +167,26 @@ const buildNodes = () => {
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id)
     const pos = worldPos(node)
+    const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
+    const kind = isSink ? 'vessel' : 'auv'
     let entry = nodeMeshMap.get(node.node_id)
+    // 节点角色变化（sink ↔ 普通）时模型种类不同，整体重建
+    if (entry && entry.kind !== kind) {
+      disposeNodeEntry(entry)
+      nodeMeshMap.delete(node.node_id)
+      entry = null
+    }
     if (!entry) {
-      entry = createNodeEntry(scene, node.node_id, palette)
+      entry = createNodeEntry(scene, node.node_id, kind, palette)
       nodeMeshMap.set(node.node_id, entry)
     }
 
-    entry.base.position.copyFrom(pos)
-    entry.progress.position.copyFrom(pos)
-    entry.base.setEnabled(true)
-    const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
-    if (fx > 1) {
-      const pulse = 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
-      if (isSink) {
-        entry.base.scaling.set(1.72 * pulse, 0.42 * pulse, 0.66 * pulse)
-      } else {
-        entry.base.scaling.set(1.36 * pulse, 0.44 * pulse, 0.56 * pulse)
-      }
-    } else {
-      if (isSink) entry.base.scaling.set(1.62, 0.4, 0.62)
-      else entry.base.scaling.setAll(1)
-    }
+    entry.root.position.copyFrom(pos)
+    const pulse = fx > 1
+      ? 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
+      : 1
+    entry.root.scaling.setAll(pulse)
+
     entry.progress.setEnabled(true)
     entry.progress.scaling.setAll(0.01)
     syncMaterialColor(entry.progress.material, {
@@ -193,30 +196,7 @@ const buildNodes = () => {
     })
     const state = visualStateColor(visual, palette)
     syncMaterialColor(entry.base.material, state)
-    if (isSink) {
-      entry.sinkBridge.setEnabled(true)
-      entry.sinkMast.setEnabled(true)
 
-      const pulse = 1 + (Math.sin((props.currentTime * 0.0000034) + (node.node_id * 0.31)) * 0.018)
-      entry.sinkBridge.position.copyFromFloats(pos.x + 48, pos.y + 52, pos.z)
-      entry.sinkBridge.scaling.set(1.04 * pulse, 1.02 * pulse, 1.1 * pulse)
-      entry.sinkMast.position.copyFromFloats(pos.x + 74, pos.y + 122, pos.z)
-      entry.sinkMast.scaling.set(1, 1 + (Math.sin((props.currentTime * 0.000006) + node.node_id) * 0.04), 1)
-
-      syncMaterialColor(entry.sinkBridge.material, {
-        diffuse: state.diffuse.scale(0.88),
-        emissive: state.emissive.scale(0.92),
-        alpha: state.alpha,
-      })
-      syncMaterialColor(entry.sinkMast.material, {
-        diffuse: state.diffuse.scale(1.05),
-        emissive: state.emissive.scale(1.14),
-        alpha: state.alpha,
-      })
-    } else {
-      entry.sinkBridge.setEnabled(false)
-      entry.sinkMast.setEnabled(false)
-    }
     const progressStyle = visualProgressStyle(visual, palette)
     if (progressStyle && progressStyle.alpha > 0.001) {
       entry.progress.scaling.set(
@@ -328,11 +308,22 @@ const buildPackets = () => {
   }
 }
 
-const updateCameraTarget = () => {
-  if (!babylon.getCamera() || !props.nodes.length) return
-  const xs = props.nodes.map((node) => node.x)
-  const ys = props.nodes.map((node) => node.y)
-  const zs = props.nodes.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
+/* 相机 target 只在节点集合变化（换日志/增删节点）时重新聚焦。
+   之前 refreshScene 每帧执行这里：播放移动日志时相机跟着节点重心微移，
+   用户中键 pan 调整的视角也会在下一帧被瞬间拉回（肉眼可见的闪/跳）。
+   id 集合 signature 之外的位置变化不再触碰相机。 */
+let cameraFocusSignature = ''
+
+const updateCameraTargetIfNeeded = () => {
+  const topology = props.topologyNodes || props.nodes
+  if (!babylon.getCamera() || !topology.length) return
+  // Base topology is stable during movement playback and changes on log import.
+  const signature = topology.map((node) => `${node.node_id}:${node.x}:${node.y}:${node.z ?? 0}`).join('|')
+  if (signature === cameraFocusSignature) return
+  cameraFocusSignature = signature
+  const xs = topology.map((node) => node.x)
+  const ys = topology.map((node) => node.y)
+  const zs = topology.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
   const center = new Vector3(
     (Math.min(...xs) + Math.max(...xs)) / 2,
     (Math.min(...zs) + Math.max(...zs)) / 2,
@@ -343,6 +334,9 @@ const updateCameraTarget = () => {
 
 // World axes only depend on node bounds; skip the rebuild (which redraws a
 // dozen DynamicTexture labels) while bounds stay unchanged during playback.
+// Bounds are quantized to 5% of the span (min 10 world units): slow node
+// movement no longer re-triggers the rebuild every few frames, and the axis
+// padding (8% of span, min 220) absorbs the quantization lag with margin.
 let worldAxesSignature = ''
 
 const syncWorldAxesIfNeeded = () => {
@@ -355,12 +349,21 @@ const syncWorldAxesIfNeeded = () => {
   const xs = props.nodes.map((node) => node.x)
   const ys = props.nodes.map((node) => node.y)
   const zs = props.nodes.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...zs)
+  const maxY = Math.max(...zs)
+  const minZ = Math.min(...ys)
+  const maxZ = Math.max(...ys)
+  const span = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1)
+  const quantum = Math.max(span * 0.05, 10)
+  const q = (value) => Math.round(value / quantum)
   const signature = [
     props.nodes.length,
-    Math.min(...xs), Math.max(...xs),
-    Math.min(...zs), Math.max(...zs),
-    Math.min(...ys), Math.max(...ys),
-  ].map((value) => Math.round(value * 10) / 10).join(',')
+    q(minX), q(maxX),
+    q(minY), q(maxY),
+    q(minZ), q(maxZ),
+  ].join(',')
   if (signature === worldAxesSignature) return
   worldAxesSignature = signature
   syncWorldAxes(scene, props.nodes, worldAxesMap)
@@ -368,7 +371,7 @@ const syncWorldAxesIfNeeded = () => {
 
 const refreshScene = () => {
   if (!babylon.getScene()) return
-  updateCameraTarget()
+  updateCameraTargetIfNeeded()
   syncWorldAxesIfNeeded()
   buildNodes()
   buildPackets()
@@ -458,6 +461,21 @@ watch(
     babylon.setClearColor(theme3D.value.clear)
     queueRefresh()
   },
+)
+
+watch(
+  () => props.active,
+  (active) => {
+    babylon.setActive(active)
+    if (!active) return
+    // 隐藏期间 mesh 同步仍在跑（queueRefresh 未拦），显示时坐标轴 widget
+    // 与选中 tooltip 只随 renderLoop 更新，这里手动补一帧
+    drawAxesOverlay()
+    syncSelectedNodePos()
+  },
+  /* flush: 'post' —— 等 v-show 的 display 切换落进 DOM 后再 resize/read，
+     否则 engine.resize() 读到的是隐藏状态的 0 尺寸 */
+  { flush: 'post' },
 )
 
 watch(

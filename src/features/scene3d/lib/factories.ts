@@ -1,14 +1,14 @@
 import {
   Color3,
+  Mesh,
   MeshBuilder,
+  TransformNode,
   type LinesMesh,
-  type Mesh,
   type Scene,
   StandardMaterial,
   Vector3,
 } from '@babylonjs/core'
 import {
-  NODE_RADIUS,
   PATH_BLOCK_DIAMETER,
   PROGRESS_CORE_SCALE,
   type Theme3DPalette,
@@ -150,31 +150,156 @@ export const visualProgressStyle = (
   return null
 }
 
+export type NodeModelKind = 'vessel' | 'auv'
+
 export interface NodeMeshEntry {
+  kind: NodeModelKind
+  root: TransformNode
+  /** 船体 / 艇身主体：承载节点状态色（tx/rx/collision 变色） */
   base: Mesh
   progress: Mesh
-  sinkBridge: Mesh
-  sinkMast: Mesh
+  /** 上层建筑、尾舵、桅杆等固定配色部件 */
+  details: Mesh[]
 }
 
-/** Create the four meshes (with materials) that make up one node. */
-export const createNodeEntry = (scene: Scene, nodeId: number, palette: Theme3DPalette): NodeMeshEntry => {
-  const base = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-base`, {
-    diameter: NODE_RADIUS * 2,
-    segments: 22,
+/* ---- 水面舰艇（sink / 网关节点）：尖艏船体 + 甲板 + 舰桥 + 桅杆航行灯 ---- */
+
+/** 船体俯视轮廓（X = 船长，艏朝 +X；Y = 船宽），ExtrudeShape 沿 Z 拉出型深后翻转到 Y 向上 */
+const VESSEL_HULL_OUTLINE = [
+  new Vector3(250, 0, 0),
+  new Vector3(120, 76, 0),
+  new Vector3(-190, 76, 0),
+  new Vector3(-240, 44, 0),
+  new Vector3(-240, -44, 0),
+  new Vector3(-190, -76, 0),
+  new Vector3(120, -76, 0),
+]
+
+const buildVessel = (scene: Scene, nodeId: number, palette: Theme3DPalette, root: TransformNode) => {
+  const hull = bindNodeMeta(MeshBuilder.ExtrudeShape(`node-${nodeId}-hull`, {
+    shape: VESSEL_HULL_OUTLINE,
+    path: [new Vector3(0, 0, -32), new Vector3(0, 0, 52)],
+    cap: Mesh.CAP_ALL,
   }, scene), nodeId)
-  base.material = makeMaterial(
-    scene,
-    `node-${nodeId}-base-mat`,
-    palette.idleDiffuse,
-    palette.idleEmissive,
-    1,
-  )
+  hull.rotation.x = -Math.PI / 2
+  hull.parent = root
+  hull.material = makeMaterial(scene, `node-${nodeId}-hull-mat`, palette.idleDiffuse, palette.idleEmissive, 1)
+
+  const deck = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-deck`, {
+    width: 400,
+    height: 14,
+    depth: 132,
+  }, scene), nodeId)
+  deck.parent = root
+  deck.position.set(0, 59, 0)
+  deck.material = makeMaterial(scene, `node-${nodeId}-deck-mat`, palette.hull, null, 1)
+
+  const bridge = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-bridge`, {
+    width: 120,
+    height: 80,
+    depth: 92,
+  }, scene), nodeId)
+  bridge.parent = root
+  bridge.position.set(-110, 106, 0)
+  bridge.material = makeMaterial(scene, `node-${nodeId}-bridge-mat`, palette.superstructure, palette.superstructure.scale(0.08), 1)
+
+  const mast = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${nodeId}-mast`, {
+    diameterTop: 8,
+    diameterBottom: 16,
+    height: 130,
+    tessellation: 10,
+  }, scene), nodeId)
+  mast.parent = root
+  mast.position.set(-110, 211, 0)
+  mast.material = makeMaterial(scene, `node-${nodeId}-mast-mat`, palette.hull, null, 1)
+
+  const beacon = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-beacon`, {
+    diameter: 20,
+    segments: 10,
+  }, scene), nodeId)
+  beacon.parent = root
+  beacon.position.set(-110, 288, 0)
+  beacon.material = makeMaterial(scene, `node-${nodeId}-beacon-mat`, palette.beacon, palette.beacon.scale(0.85), 1)
+
+  return { base: hull, details: [deck, bridge, mast, beacon] }
+}
+
+/* ---- AUV（水下节点）：胶囊鱼雷艇身 + 指挥台围壳 + 十字尾舵 + 螺旋桨 ---- */
+
+const buildAuv = (scene: Scene, nodeId: number, palette: Theme3DPalette, root: TransformNode) => {
+  const body = bindNodeMeta(MeshBuilder.CreateCapsule(`node-${nodeId}-body`, {
+    radius: 54,
+    height: 400,
+    tessellation: 24,
+  }, scene), nodeId)
+  body.rotation.z = Math.PI / 2 // 胶囊默认沿 Y，放平到 X（艏朝 +X）
+  body.parent = root
+  body.material = makeMaterial(scene, `node-${nodeId}-body-mat`, palette.idleDiffuse, palette.idleEmissive, 1)
+
+  const sail = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-sail`, {
+    width: 84,
+    height: 54,
+    depth: 34,
+  }, scene), nodeId)
+  sail.parent = root
+  sail.position.set(34, 62, 0)
+  sail.material = makeMaterial(scene, `node-${nodeId}-sail-mat`, palette.hull, null, 1)
+
+  const fins = [
+    { name: 'fin-top', width: 70, height: 76, depth: 10, pos: new Vector3(-168, 58, 0) },
+    { name: 'fin-bottom', width: 70, height: 76, depth: 10, pos: new Vector3(-168, -58, 0) },
+    { name: 'fin-port', width: 70, height: 10, depth: 76, pos: new Vector3(-168, 0, 58) },
+    { name: 'fin-starboard', width: 70, height: 10, depth: 76, pos: new Vector3(-168, 0, -58) },
+  ].map((spec) => {
+    const fin = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-${spec.name}`, {
+      width: spec.width,
+      height: spec.height,
+      depth: spec.depth,
+    }, scene), nodeId)
+    fin.parent = root
+    fin.position.copyFrom(spec.pos)
+    fin.material = makeMaterial(scene, `node-${nodeId}-${spec.name}-mat`, palette.hull, null, 1)
+    return fin
+  })
+
+  const prop = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${nodeId}-prop`, {
+    diameter: 66,
+    height: 14,
+    tessellation: 20,
+  }, scene), nodeId)
+  prop.rotation.z = Math.PI / 2
+  prop.parent = root
+  prop.position.set(-206, 0, 0)
+  prop.material = makeMaterial(scene, `node-${nodeId}-prop-mat`, palette.hull, null, 1)
+
+  const bowLight = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-bow-light`, {
+    diameter: 18,
+    segments: 10,
+  }, scene), nodeId)
+  bowLight.parent = root
+  bowLight.position.set(196, 0, 0)
+  bowLight.material = makeMaterial(scene, `node-${nodeId}-bow-light-mat`, palette.beacon, palette.beacon.scale(0.85), 1)
+
+  return { base: body, details: [sail, ...fins, prop, bowLight] }
+}
+
+/** 创建节点模型：root 挂在节点世界坐标上，base 承载状态色，details 固定配色。 */
+export const createNodeEntry = (
+  scene: Scene,
+  nodeId: number,
+  kind: NodeModelKind,
+  palette: Theme3DPalette,
+): NodeMeshEntry => {
+  const root = new TransformNode(`node-${nodeId}-root`, scene)
+  const { base, details } = kind === 'vessel'
+    ? buildVessel(scene, nodeId, palette, root)
+    : buildAuv(scene, nodeId, palette, root)
 
   const progress = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-progress`, {
-    diameter: NODE_RADIUS * 2,
+    diameter: 300,
     segments: 18,
   }, scene), nodeId)
+  progress.parent = root
   progress.material = makeMaterial(
     scene,
     `node-${nodeId}-progress-mat`,
@@ -186,36 +311,7 @@ export const createNodeEntry = (scene: Scene, nodeId: number, palette: Theme3DPa
   progress.material.needDepthPrePass = true
   progress.renderingGroupId = 1
 
-  const sinkBridge = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-sink-bridge`, {
-    width: 168,
-    height: 84,
-    depth: 112,
-  }, scene), nodeId)
-  sinkBridge.material = makeMaterial(
-    scene,
-    `node-${nodeId}-sink-bridge-mat`,
-    palette.idleDiffuse.scale(0.88),
-    palette.idleEmissive.scale(0.8),
-    0.96,
-  )
-  sinkBridge.renderingGroupId = 1
-
-  const sinkMast = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${nodeId}-sink-mast`, {
-    diameterTop: 22,
-    diameterBottom: 28,
-    height: 120,
-    tessellation: 16,
-  }, scene), nodeId)
-  sinkMast.material = makeMaterial(
-    scene,
-    `node-${nodeId}-sink-mast-mat`,
-    palette.idleDiffuse.scale(1.04),
-    palette.idleEmissive.scale(1.05),
-    0.98,
-  )
-  sinkMast.renderingGroupId = 1
-
-  return { base, progress, sinkBridge, sinkMast }
+  return { kind, root, base, progress, details }
 }
 
 const disposeMeshAndMaterial = (mesh: Mesh): void => {
@@ -228,8 +324,8 @@ const disposeMeshAndMaterial = (mesh: Mesh): void => {
 export const disposeNodeEntry = (entry: NodeMeshEntry): void => {
   disposeMeshAndMaterial(entry.base)
   disposeMeshAndMaterial(entry.progress)
-  disposeMeshAndMaterial(entry.sinkBridge)
-  disposeMeshAndMaterial(entry.sinkMast)
+  for (const detail of entry.details) disposeMeshAndMaterial(detail)
+  entry.root.dispose()
 }
 
 export interface PacketMeshEntry {

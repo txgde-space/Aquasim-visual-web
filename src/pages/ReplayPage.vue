@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
 import { session } from '../shared/sessionStore'
@@ -7,7 +7,7 @@ import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared
 import { parseLog } from '@/features/replay/lib/logParser'
 import { timeDisplay } from '@/features/replay/lib/format'
 import { LOG_SOURCES } from '@/features/replay/lib/sources'
-import { usePlaybackEngine } from '@/features/replay/composables/usePlaybackEngine'
+import { usePlaybackEngine, type PlaybackEngineOptions } from '@/features/replay/composables/usePlaybackEngine'
 import { useReplayState } from '@/features/replay/composables/useReplayState'
 import { useLogPanel } from '@/features/replay/composables/useLogPanel'
 import { cloneNode, useEditMode } from '@/features/replay/composables/useEditMode'
@@ -23,10 +23,13 @@ const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'extreme', label: '增强' },
 ])
 
-let getCycleEndUs = () => MIN_SIM_TIME_US
-const playback = usePlaybackEngine({ getCycleEndUs })
+/* state 依赖 playback（循环依赖），引擎创建时只能先拿占位 getter；state 就位后
+   必须原地替换 options 上的属性——重绑局部变量不会影响引擎已捕获的对象引用，
+   否则引擎的回放终点永远是 MIN_SIM_TIME_US，10s 处自动停且无法 seek 超过 */
+const playbackOptions: PlaybackEngineOptions = { getCycleEndUs: () => MIN_SIM_TIME_US }
+const playback = usePlaybackEngine(playbackOptions)
 const state = useReplayState({ playback })
-getCycleEndUs = () => state.cycleEndUs.value
+playbackOptions.getCycleEndUs = () => state.cycleEndUs.value
 const panel = useLogPanel({ state, playback })
 const editMode = useEditMode({
   state,
@@ -63,6 +66,7 @@ const {
   selectedLifecyclePacketId,
   showAllActivePackets,
   editSoundSpeed,
+  baseNodesState,
   parseErrors,
   cycleEndUs,
   nodesState,
@@ -98,6 +102,7 @@ const {
   onGlobalPointerMove,
   onGlobalPointerUp,
 } = panel
+const hasOpened3D = ref(visualMode.value === '3d')
 
 const {
   onSampleLogChange,
@@ -121,6 +126,7 @@ const onFxLevelChange = (event: Event) => {
 }
 
 const onVisualModeChange = (mode: string) => {
+  if (mode === '3d') hasOpened3D.value = true
   panel.visualMode.value = mode
 }
 
@@ -138,8 +144,11 @@ const logSourceLabel = computed(() =>
     : (LOG_SOURCES[logSourceKey.value]?.label ?? '示例'),
 )
 
-watch(nodesState, (nodes) => {
-  if (isEditMode.value) return
+/* 同步给实验页「从回放同步」的是静态拓扑，不是播放中 movement 插值的瞬时
+   帧位置——之前 watch nodesState（moving 播放时每帧都是新数组）+ deep，
+   导致播放期间每帧 clone 全部节点，纯浪费。baseNodesState 只在换日志 /
+   实验页应用拓扑时变化。 */
+watch(baseNodesState, (nodes) => {
   session.replayNodes = (nodes || []).map(cloneNode)
 }, { deep: true })
 
@@ -183,8 +192,10 @@ onBeforeUnmount(() => {
   <section class="page">
     <div class="deck">
       <div class="deck-canvas">
+        <!-- 首次打开 3D 后两个视图常驻：3D 引擎只建一次，切视图不再销毁重建。
+             NodeCanvas 隐藏时宿主尺寸归零，其 updateViewport 会忽略并保持状态。 -->
         <NodeCanvas
-          v-if="visualMode === '2d'"
+          v-show="visualMode === '2d'"
           :nodes="nodesState"
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
@@ -201,10 +212,13 @@ onBeforeUnmount(() => {
           @node-move-end="onEditNodeMoveEnd"
           @node-select="onEditNodeSelect"
         />
-        <Suspense v-else>
+        <Suspense v-if="hasOpened3D">
           <template #default>
             <NodeScene3D
+              v-show="visualMode === '3d'"
+              :active="visualMode === '3d'"
               :nodes="nodesState"
+              :topology-nodes="baseNodesState"
               :node-visuals="nodeVisuals"
               :visible-packets="displayPackets"
               :current-time="currentTime"
@@ -213,7 +227,7 @@ onBeforeUnmount(() => {
             />
           </template>
           <template #fallback>
-            <div class="visual-loading">
+            <div v-if="visualMode === '3d'" class="visual-loading">
               <div class="visual-loading-core" aria-hidden="true">
                 <span class="visual-loading-ring ring-a"></span>
                 <span class="visual-loading-ring ring-b"></span>

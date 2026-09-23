@@ -35,6 +35,7 @@ interface BabylonSceneDeps {
   canvasRef: Ref<HTMLCanvasElement | null>
   hostRef: Ref<HTMLElement | null>
   getClearColor: () => Color4
+  getActive?: () => boolean
   /** Called for POINTERPICK with the picked mesh's nodeId, or null on empty pick. */
   onPick: (nodeId: number | null) => void
   /** Called every render frame before scene.render() (tooltip sync, axes widget). */
@@ -52,6 +53,7 @@ export const useBabylonScene = ({
   canvasRef,
   hostRef,
   getClearColor,
+  getActive,
   onPick,
   onFrame,
   cleanup,
@@ -66,6 +68,22 @@ export const useBabylonScene = ({
   const getEngine = () => engine
   const getScene = () => scene
   const getCamera = () => camera
+
+  const renderLoop = () => {
+    if (!scene || !camera) return
+    onFrame()
+    scene.render()
+  }
+
+  /* 视图常驻（v-show）时隐藏期间停掉 renderLoop，避免不可见场景的 GPU/CPU
+     空转；重新激活时恢复循环并补一次 resize（隐藏期间宿主尺寸可能变过） */
+  const setActive = (active: boolean) => {
+    if (!engine) return
+    engine.stopRenderLoop()
+    if (!active) return
+    engine.runRenderLoop(renderLoop)
+    engine.resize()
+  }
 
   const setClearColor = (color: Color4) => {
     if (scene) scene.clearColor = color.clone()
@@ -99,7 +117,12 @@ export const useBabylonScene = ({
     if (!canvas) return
 
     engine = new Engine(canvas, true, {
-      preserveDrawingBuffer: false,
+      /* preserveDrawingBuffer: true —— 岛屿面板的 backdrop-filter blur 扫过
+         WebGL canvas 时，合成器需要采样帧纹理；false 时 swap 后内容失效，
+         真机 GPU 下采样到空纹理表现为一帧黑/空闪（软渲染复现不了）。
+         true 让合成器始终拿到有效帧，代价是每帧纹理拷贝而非交换，
+         本场景 mesh 量级下可忽略 */
+      preserveDrawingBuffer: true,
       stencil: true,
       antialias: true,
     })
@@ -136,13 +159,15 @@ export const useBabylonScene = ({
       onPick(nodeId ?? null)
     })
 
-    engine.runRenderLoop(() => {
-      if (!scene || !camera) return
-      onFrame()
-      scene.render()
-    })
+    if (getActive?.() !== false) engine.runRenderLoop(renderLoop)
 
-    resizeObserver = new ResizeObserver(() => resize())
+    resizeObserver = new ResizeObserver(() => {
+      /* 常驻视图被 v-show 隐藏（display:none）时宿主尺寸归零：保持 backbuffer，
+         不把 WebGL 画布缩到 0，重新显示时无缝恢复 */
+      const host = hostRef.value
+      if (host && (host.clientWidth < 2 || host.clientHeight < 2)) return
+      resize()
+    })
     if (hostRef.value) resizeObserver.observe(hostRef.value)
   }
 
@@ -168,6 +193,7 @@ export const useBabylonScene = ({
     getScene,
     getCamera,
     setClearColor,
+    setActive,
     focusCamera,
     resetCameraView,
     resize,

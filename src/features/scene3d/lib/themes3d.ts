@@ -8,11 +8,15 @@ export interface Theme3DPalette {
   rx: Color3
   bad: Color3
   line: Color3
+  /** 船体/艇身细节（深色钢结构） */
+  hull: Color3
+  /** 舰桥等上层建筑（浅色） */
+  superstructure: Color3
+  /** 航行灯 / beacon 自发光 */
+  beacon: Color3
   markerAlpha: number
 }
 
-/** Base radius of a node sphere in world units. */
-export const NODE_RADIUS = 130
 /** World units per meter of node depth (z is flipped into -Y). */
 export const DEPTH_SCALE = 38
 /** Diameter of the cylinder block travelling along a packet path. */
@@ -35,6 +39,9 @@ export const THEME_3D: Record<string, Theme3DPalette> = Object.freeze({
     rx: color3('#14b8a6'),
     bad: color3('#ef4444'),
     line: color3('#6d90a6'),
+    hull: color3('#3b5568'),
+    superstructure: color3('#c8d6e2'),
+    beacon: color3('#ffb454'),
     markerAlpha: 0.42,
   },
 })
