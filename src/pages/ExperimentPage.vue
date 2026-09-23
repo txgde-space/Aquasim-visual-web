@@ -140,7 +140,7 @@ const files = useExperimentFiles(editor, catalog, aquaSimHome, selectDirectory, 
   runLog.value = ''
   consoleOpen.value = false
 })
-const { documentJson, message: fileMessage, failed: fileFailed, importing, previous, newExperiment, restorePrevious, importFile, exportFile } = files
+const { documentJson, message: fileMessage, failed: fileFailed, importing, newExperiment, importFile, exportFile } = files
 
 const copyJson = async () => {
   try {
@@ -221,6 +221,7 @@ const copyJson = async () => {
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
+        <button class="btn btn-compact" :disabled="runStatus === 'running' || buildStatus === 'building' || importing" @click="newExperiment">新建实验</button>
         <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || buildStatus === 'building'" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
@@ -250,8 +251,8 @@ const copyJson = async () => {
         <aside class="dock-body">
           <ExperimentFiles
             :disabled="runStatus === 'running' || buildStatus === 'building'"
-            :message="fileMessage" :failed="fileFailed" :importing="importing" :can-restore="!!previous"
-            @new="newExperiment" @import="importFile" @export="exportFile" @restore="restorePrevious"
+            :message="fileMessage" :failed="fileFailed" :importing="importing"
+            @import="importFile" @export="exportFile"
           />
           <SimulatorSettings
             v-model="aquaSimHome"

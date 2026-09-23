@@ -8,7 +8,6 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
   const message = ref('')
   const failed = ref(false)
   const importing = ref(false)
-  const previous = ref<ExperimentDraftData | null>(null)
   let generation = 0
   onBeforeUnmount(() => { generation++ })
   const snapshot = (): ExperimentDraftData => JSON.parse(JSON.stringify({
@@ -25,18 +24,9 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
     onReplace()
   }
   const newExperiment = () => {
-    previous.value = snapshot()
     apply({ form: createDefaultExperimentForm(), nodes: [], selectedIds: [], activeCatalogId: 'mac:swarm' })
     failed.value = false
     message.value = '已新建空白实验，可添加节点或导入参数。'
-  }
-  const restorePrevious = () => {
-    if (!previous.value) return
-    const draft = previous.value
-    previous.value = null
-    apply(draft)
-    failed.value = false
-    message.value = '已恢复替换前的实验。'
   }
   const importFile = async (file: File) => {
     const request = ++generation
@@ -48,7 +38,6 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
       const text = await file.text()
       if (request !== generation) return
       const draft = parseExperiment(text, layers.value)
-      previous.value = snapshot()
       apply(draft)
       message.value = `已导入 ${file.name}（${draft.nodes.length} 个节点）。`
     } catch (error) {
@@ -72,5 +61,5 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
     failed.value = false
     message.value = '已发起实验参数下载。'
   }
-  return { documentJson, message, failed, importing, previous, newExperiment, restorePrevious, importFile, exportFile }
+  return { documentJson, message, failed, importing, newExperiment, importFile, exportFile }
 }
