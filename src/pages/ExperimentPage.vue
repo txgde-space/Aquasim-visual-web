@@ -19,7 +19,8 @@ import ProtocolAttributes from '@/features/experiment/components/ProtocolAttribu
 import SimulatorSettings from '@/features/experiment/components/SimulatorSettings.vue'
 
 const router = useRouter()
-const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, resetDirectory, selectDirectory } = useSimulatorSettings()
+const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory } = useSimulatorSettings()
+const simulatorBusy = computed(() => buildStatus.value === 'building' || cleanStatus.value === 'cleaning')
 const editor = useTopologyEditor(catalog)
 const {
   editNodes,
@@ -109,7 +110,7 @@ const runStatusLabel = computed(
 )
 
 const onRun = async () => {
-  if (editNodes.value.length < 2 || !catalogReady.value || buildStatus.value === 'building') return
+  if (editNodes.value.length < 2 || !catalogReady.value || simulatorBusy.value) return
   await runExperiment()
   consoleOpen.value = true
 }
@@ -184,7 +185,7 @@ const copyJson = async () => {
           <template #node-details="{ node }">
             <NodeProtocolDetails
               :node-id="node.node_id" :nodes="editNodes" :form="experimentForm" :layers="catalog" :ready="catalogReady"
-              :disabled="runStatus === 'running' || buildStatus === 'building'"
+              :disabled="runStatus === 'running' || simulatorBusy"
               @application="(nodeId, id) => assignItem({ layer: 'app', id }, [nodeId])"
               @attribute="setProtocolAttribute" @destination="setNodeDestination"
             />
@@ -221,8 +222,8 @@ const copyJson = async () => {
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
-        <button class="btn btn-compact" :disabled="runStatus === 'running' || buildStatus === 'building' || importing" @click="newExperiment">新建实验</button>
-        <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || buildStatus === 'building'" @click="onRun">
+        <button class="btn btn-compact" :disabled="runStatus === 'running' || simulatorBusy || importing" @click="newExperiment">新建实验</button>
+        <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || simulatorBusy" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
       </div>
@@ -249,22 +250,21 @@ const copyJson = async () => {
           :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
         >
         <aside class="dock-body">
-          <ExperimentFiles
-            :disabled="runStatus === 'running' || buildStatus === 'building'"
-            :message="fileMessage" :failed="fileFailed" :importing="importing"
-            @import="importFile" @export="exportFile"
-          />
           <SimulatorSettings
             v-model="aquaSimHome"
             :default-home="defaultHome"
             :checking="checking"
-            :disabled="runStatus === 'running' || buildStatus === 'building'"
+            :disabled="runStatus === 'running' || simulatorBusy"
             :build-status="buildStatus"
             :build-log="buildLog"
             :build-error="buildError"
+            :build-progress="buildProgress"
+            :clean-status="cleanStatus"
+            :clean-error="cleanError"
             :storage-error="storageError"
             :result="simulatorResult"
             @precompile="precompile"
+            @clear-build="clearBuild"
             @reset="resetDirectory"
             @select="selectDirectory"
           />
@@ -301,6 +301,11 @@ const copyJson = async () => {
             @remove-node="removeSelected"
             @download="exportFile"
             @copy="copyJson"
+          />
+          <ExperimentFiles
+            :disabled="runStatus === 'running' || simulatorBusy"
+            :message="fileMessage" :failed="fileFailed" :importing="importing"
+            @import="importFile" @export="exportFile"
           />
         </aside>
         </SplitPane>

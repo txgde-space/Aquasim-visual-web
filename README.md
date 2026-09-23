@@ -75,7 +75,7 @@ yarn dev
 Requirements and behavior:
 
 - Keep aqua-sim-dev as a sibling checkout; it does not need to be copied into this repository. The directory must contain an executable `ns3` script and `src/aqua-sim-tg`. Missing configuration is created on the first run; a working native build toolchain is required.
-- The experiment page’s **仿真环境** panel lets you browse and select a directory on the server machine or enter its path, remembers it in the current browser, and provides a **预编译** button that configures the checkout when needed and runs `./ns3 build`. The input placeholder shows the actual server default path. Initial loading and directory selection only check paths; they never start compilation.
+- The experiment page’s **仿真环境** panel lets you browse and select a directory on the server machine or enter its path, remembers it in the current browser, and provides a **预编译** button that configures the checkout when needed and runs `./ns3 build`, with live build progress. **清除构建** runs `./ns3 clean` on the selected checkout. The input placeholder shows the actual server default path. Initial loading and directory selection only check paths; they never start compilation.
 - Selection priority: browser setting → `AQUA_SIM_HOME` → `../aqua-sim-dev` relative to the repository root. Clear the field or use **恢复默认** to restore server defaults. An invalid explicit path produces an error instead of silently selecting another checkout.
 - Configuration uses `--disable-werror` so warnings from newer compilers remain visible without becoming fatal errors. Existing checkouts with `NS3_WARNINGS_AS_ERRORS=ON` are reconfigured once, preserving their cached profile and module selection.
 - Precompilation and simulation share a server-side lock. Configure and build each have a 15-minute timeout. Precompilation builds the existing ns-3 targets without running a simulation; newly generated experiment code is still compiled when running an experiment.
@@ -220,9 +220,9 @@ yarn dev
 要求与行为：
 
 - 首次打开实验页会创建空白实验；拖动画布空白处可平移，拖动已有节点可移动，右键画布可填写 X/Y/Z 坐标精确添加节点，也可在「实验文件」中导入参数。实验与回放之间切换会保留当前拓扑、协议选择、协议属性和全部表单参数；刷新页面会重新创建空白实验，需要跨会话保存时请导出参数。
-- 顶部「新建实验」清空当前实验；「实验文件」中的「导出参数」下载 `experiment.json`，「导入参数」恢复实验，也兼容以前导出的 v0 规格。新文件额外保存未启用的流量/MAC 参数、完整坐标及仿真目录；导入不自动运行或编译。文件校验失败不影响当前草稿。
+- 顶部「新建实验」清空当前实验；右侧抽屉底部「实验文件」中的「导出参数」下载 `experiment.json`，「导入参数」恢复实验，也兼容以前导出的 v0 规格。新文件额外保存未启用的流量/MAC 参数、完整坐标及仿真目录；导入不自动运行或编译。文件校验失败不影响当前草稿。
 - aqua-sim-dev 保持为同级独立仓库，无需复制进本项目。目录必须包含可执行的 `ns3` 脚本与 `src/aqua-sim-tg`；首次运行时自动补充 configure，仍需安装本机编译工具链。
-- 实验页右侧的「仿真环境」可通过「选择目录」浏览并选用**运行服务的机器上的目录**，也可手动填写路径；设置自动保存在当前浏览器，输入框占位提示显示服务器实际默认路径。点击「预编译」会在必要时执行 configure，再执行 `./ns3 build`，完成后可查看编译输出；打开页面和选择目录只检查路径，不自动编译。
+- 实验页右侧的「仿真环境」可通过「选择目录」浏览并选用**运行服务的机器上的目录**，也可手动填写路径；设置自动保存在当前浏览器，输入框占位提示显示服务器实际默认路径。点击「预编译」会在必要时执行 configure，再执行 `./ns3 build`；构建中显示阶段和编译进度，完成后可查看输出。「清除构建」执行 `./ns3 clean` 清除所选目录的构建产物和配置缓存，之后需重新预编译。打开页面和选择目录只检查路径，不自动编译。
 - 优先级：前端目录 → `AQUA_SIM_HOME` → 仓库根目录的 `../aqua-sim-dev`。清空输入或点击「恢复默认」使用服务器默认值；显式设置的路径无效时直接报错，不静默切换到其他仓库。
 - 配置时使用 `--disable-werror`，保留编译警告但不将其升级为错误。已有目录若启用了 `NS3_WARNINGS_AS_ERRORS`，会先重新配置关闭它，保留原有构建模式、模块选择等缓存选项。
 - 预编译与仿真共用服务端互斥锁；configure 与 build 各限时 15 分钟。预编译构建已有 ns-3 目标，并编译运行 TypeId 元数据探针（不创建仿真节点）；新生成的实验代码仍会在运行实验时编译。

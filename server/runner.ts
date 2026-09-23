@@ -7,13 +7,14 @@ import type { ExperimentSpec } from '../src/shared/types/experiment'
 import { generateAquaVisualCc } from '../src/features/experiment/lib/generateScratch'
 import { inspectSimulator } from './simulatorConfig'
 import { checkProtocolRequirements } from './protocolRequirements'
-import { cachedCatalog, catalogProbe, saveCatalog } from './protocolCatalog'
+import { cachedCatalog, catalogProbe, invalidateCatalog, saveCatalog } from './protocolCatalog'
 
 /** POST /api/run request body limit (1 MB). */
 export const BODY_LIMIT_BYTES = 1_000_000
 const RUN_TIMEOUT_MS = 180_000
 const CONFIGURE_TIMEOUT_MS = 900_000
 const BUILD_TIMEOUT_MS = 900_000
+const CLEAN_TIMEOUT_MS = 180_000
 /** Grace period after SIGTERM before escalating to SIGKILL. */
 const SIGKILL_GRACE_MS = 5_000
 /** Keep at most the tail of child output to bound memory. */
@@ -22,6 +23,24 @@ const STDOUT_CAP_BYTES = 400_000
 export interface RunOutcome {
   status: number
   payload: Record<string, unknown>
+}
+
+type BuildPhase = 'configure' | 'build' | 'catalog' | 'done' | 'failed'
+interface BuildProgress {
+  home: string
+  phase: BuildPhase
+  completed: number
+  total: number
+}
+let buildProgress: BuildProgress | null = null
+const setBuildProgress = (home: string, phase: BuildPhase, completed = 0, total = 0) => {
+  buildProgress = { home, phase, completed, total }
+}
+
+export const readPrecompileProgress = (aquaSimHome: unknown = ''): RunOutcome => {
+  const config = inspectSimulator(aquaSimHome)
+  if (!config.ok) return { status: 400, payload: config }
+  return { status: 200, payload: { ok: true, progress: buildProgress?.home === config.home ? buildProgress : null } }
 }
 
 const isConfigured = (cwd: string): boolean => (
@@ -79,12 +98,15 @@ const runProcess = (
   cwd: string,
   argv: string[],
   timeoutMs: number,
+  onOutput?: (chunk: string) => void,
 ): Promise<{ code: number | null; stdout: string }> => new Promise((resolve) => {
   const child = spawn(argv[0], argv.slice(1), { cwd, env: process.env })
   let stdout = ''
   const onData = (chunk: Buffer) => {
-    stdout += chunk.toString()
+    const output = chunk.toString()
+    stdout += output
     if (stdout.length > STDOUT_CAP_BYTES) stdout = stdout.slice(-STDOUT_CAP_BYTES / 2)
+    onOutput?.(output)
   }
   child.stdout.on('data', onData)
   child.stderr.on('data', onData)
@@ -158,20 +180,37 @@ const discoverCatalog = async (home: string) => {
 const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
   const config = inspectSimulator(aquaSimHome)
   if (!config.ok) return { status: 400, payload: config }
+  setBuildProgress(config.home, 'configure')
   const setup = await ensureConfigured(config.home)
   if (!setup.ok) {
+    setBuildProgress(config.home, 'failed')
     return {
       status: 500,
       payload: { ok: false, phase: 'configure', error: '预编译配置失败', stdout: setup.stdout, home: config.home },
     }
   }
-  const build = await runProcess(config.home, [path.join(config.home, 'ns3'), 'build'], BUILD_TIMEOUT_MS)
+  setBuildProgress(config.home, 'build')
+  let progressTail = ''
+  const build = await runProcess(config.home, [path.join(config.home, 'ns3'), 'build'], BUILD_TIMEOUT_MS, (chunk) => {
+    progressTail = (progressTail + chunk).slice(-512)
+    const matches = [...progressTail.matchAll(/\[(\d+)\/(\d+)\]/g)]
+    const latest = matches.at(-1)
+    if (!latest) return
+    const completed = Number(latest[1])
+    const total = Number(latest[2])
+    if (total > 0 && completed <= total) setBuildProgress(config.home, 'build', completed, total)
+  })
   const ok = build.code === 0
   let catalog
   if (ok) {
+    setBuildProgress(config.home, 'catalog')
     try { catalog = await discoverCatalog(config.home) }
-    catch (error) { return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: build.stdout } } }
+    catch (error) {
+      setBuildProgress(config.home, 'failed')
+      return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: build.stdout } }
+    }
   }
+  setBuildProgress(config.home, ok ? 'done' : 'failed', ok ? 1 : 0, 1)
   return {
     status: ok ? 200 : 500,
     payload: {
@@ -181,6 +220,21 @@ const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
       error: ok ? '' : '预编译失败，请查看编译输出',
       stdout: [setup.stdout, build.stdout].filter(Boolean).join('\n'),
     },
+  }
+}
+
+const doClearBuild = async (aquaSimHome: unknown): Promise<RunOutcome> => {
+  const config = inspectSimulator(aquaSimHome)
+  if (!config.ok) return { status: 400, payload: config }
+  const clean = await runProcess(config.home, [path.join(config.home, 'ns3'), 'clean'], CLEAN_TIMEOUT_MS)
+  if (clean.code === 0) {
+    invalidateCatalog(config.home)
+    if (buildProgress?.home === config.home) buildProgress = null
+  }
+  return {
+    status: clean.code === 0 ? 200 : 500,
+    payload: { ok: clean.code === 0, home: config.home, stdout: clean.stdout,
+      error: clean.code === 0 ? '' : '清除构建失败，请查看输出' },
   }
 }
 
@@ -265,6 +319,9 @@ export const runExperimentGuarded = (spec: unknown, aquaSimHome: unknown = ''): 
 
 export const precompileSimulatorGuarded = (aquaSimHome: unknown = ''): Promise<RunOutcome> =>
   runExclusive(() => doPrecompile(aquaSimHome))
+
+export const clearSimulatorBuildGuarded = (aquaSimHome: unknown = ''): Promise<RunOutcome> =>
+  runExclusive(() => doClearBuild(aquaSimHome))
 
 /** Read a JSON request body, rejecting payloads over the size limit. */
 export const readJsonBody = (req: IncomingMessage, limit = BODY_LIMIT_BYTES): Promise<unknown> => new Promise((resolve, reject) => {

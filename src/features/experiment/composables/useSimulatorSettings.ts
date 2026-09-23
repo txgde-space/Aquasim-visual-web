@@ -11,6 +11,12 @@ interface SimulatorCheck {
   catalog?: CatalogLayer[] | null
 }
 
+interface BuildProgress {
+  phase: 'configure' | 'build' | 'catalog' | 'done' | 'failed'
+  completed: number
+  total: number
+}
+
 export const useSimulatorSettings = () => {
   const aquaSimHome = ref('')
   const catalog = ref<CatalogLayer[]>(TYPEID_LAYERS)
@@ -21,8 +27,36 @@ export const useSimulatorSettings = () => {
   const buildStatus = ref<'idle' | 'building' | 'ok' | 'fail'>('idle')
   const buildLog = ref('')
   const buildError = ref('')
+  const buildProgress = ref<BuildProgress | null>(null)
+  const cleanStatus = ref<'idle' | 'cleaning' | 'ok' | 'fail'>('idle')
+  const cleanError = ref('')
   const result = ref<SimulatorCheck | null>(null)
   let pending: AbortController | null = null
+  let progressTimer: ReturnType<typeof setInterval> | null = null
+  let progressRequestPending = false
+  const stopProgressPolling = () => {
+    if (progressTimer) clearInterval(progressTimer)
+    progressTimer = null
+  }
+  const pollBuildProgress = async () => {
+    if (progressRequestPending || buildStatus.value !== 'building') return
+    progressRequestPending = true
+    try {
+      const response = await fetch('/api/simulator/build-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
+      })
+      if (response.ok) {
+        const data = await response.json() as { progress?: BuildProgress | null }
+        if (buildStatus.value === 'building' && data.progress) buildProgress.value = data.progress
+      }
+    } catch {
+      // A transient progress request must not interrupt the actual build.
+    } finally {
+      progressRequestPending = false
+    }
+  }
   try {
     aquaSimHome.value = localStorage.getItem(LOCAL_STORAGE_KEYS.aquaSimHome) || ''
   } catch {
@@ -39,6 +73,9 @@ export const useSimulatorSettings = () => {
     buildStatus.value = 'idle'
     buildLog.value = ''
     buildError.value = ''
+    buildProgress.value = null
+    cleanStatus.value = 'idle'
+    cleanError.value = ''
     try {
       if (value.trim()) localStorage.setItem(LOCAL_STORAGE_KEYS.aquaSimHome, value.trim())
       else localStorage.removeItem(LOCAL_STORAGE_KEYS.aquaSimHome)
@@ -84,13 +121,17 @@ export const useSimulatorSettings = () => {
   }
 
   const precompile = async () => {
-    if (buildStatus.value === 'building') return
+    if (buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
     pending?.abort()
     pending = null
     checking.value = false
     buildStatus.value = 'building'
     buildLog.value = ''
     buildError.value = ''
+    buildProgress.value = { phase: 'configure', completed: 0, total: 0 }
+    cleanStatus.value = 'idle'
+    progressTimer = setInterval(() => { void pollBuildProgress() }, 600)
+    void pollBuildProgress()
     try {
       const response = await fetch('/api/simulator/build', {
         method: 'POST',
@@ -106,9 +147,41 @@ export const useSimulatorSettings = () => {
       catalog.value = data.catalog || TYPEID_LAYERS
       catalogReady.value = !!data.catalog
       buildStatus.value = 'ok'
+      buildProgress.value = { phase: 'done', completed: 1, total: 1 }
     } catch (error) {
       buildStatus.value = 'fail'
       buildError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      stopProgressPolling()
+    }
+  }
+
+  const clearBuild = async () => {
+    if (buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    cleanStatus.value = 'cleaning'
+    cleanError.value = ''
+    buildLog.value = ''
+    try {
+      const response = await fetch('/api/simulator/clean', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
+      })
+      if (!response.headers.get('content-type')?.includes('application/json')) {
+        throw new Error('仿真服务不可用，请通过 yarn dev 启动服务。')
+      }
+      const data = await response.json() as { ok?: boolean; stdout?: string; error?: string }
+      buildLog.value = data.stdout || ''
+      if (!response.ok || !data.ok) throw new Error(data.error || '清除构建失败')
+      catalog.value = TYPEID_LAYERS
+      catalogReady.value = false
+      buildStatus.value = 'idle'
+      buildProgress.value = null
+      buildError.value = ''
+      cleanStatus.value = 'ok'
+    } catch (error) {
+      cleanStatus.value = 'fail'
+      cleanError.value = error instanceof Error ? error.message : String(error)
     }
   }
 
@@ -121,7 +194,10 @@ export const useSimulatorSettings = () => {
     void checkDirectory()
   }
   onMounted(checkDirectory)
-  onBeforeUnmount(() => pending?.abort())
+  onBeforeUnmount(() => {
+    pending?.abort()
+    stopProgressPolling()
+  })
 
-  return { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result, precompile, buildStatus, buildLog, buildError, resetDirectory, selectDirectory }
+  return { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory }
 }

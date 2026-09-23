@@ -70,8 +70,8 @@ src/
 
 - **`allowedHosts: true`**（`vite.config.js`，dev 与 preview 各一处）：为 LAN 演示功能保留（README 宣称 `yarn dev:public`）。后果：任何能访问该端口的设备都可加载页面并触发 `/api/run` 在本机执行仿真。请勿在不可信网络环境中使用 `dev:public` / `preview --host`。
 - 仿真目录优先级：前端设置（`aquasim_aqua_sim_home`，当前浏览器保存、随请求传递）→ `AQUA_SIM_HOME` → 同级 `../aqua-sim-dev`；显式目录无效时直接报错，不静默回退。路径基于服务器文件系统，相对路径基于本仓库根目录；检查接口只验证 `ns3` 可执行文件与 `src/aqua-sim-tg`，不保证构建成功。未 configure 时由 runner 自动配置。
-- `/api/run`、`/api/simulator/build`、`/api/simulator/check` 与只读目录浏览 `/api/simulator/directories` 仅挂载于 Vite dev；preview / 静态部署不提供仿真后端。
-- 「预编译」调用 `/api/simulator/build`：必要时 configure，再执行 `./ns3 build`；预编译和仿真共用 runner 互斥锁。配置统一带 `--disable-werror`；已有缓存开启 `NS3_WARNINGS_AS_ERRORS` 时只重配该选项，保留构建模式与模块配置，避免新编译器的普通警告导致失败。打开页面/选择目录仅检查路径，不自动编译。
+- `/api/run`、`/api/simulator/build`、`/api/simulator/build-progress`、`/api/simulator/clean`、`/api/simulator/check` 与只读目录浏览 `/api/simulator/directories` 仅挂载于 Vite dev；preview / 静态部署不提供仿真后端。
+- 「预编译」调用 `/api/simulator/build`：必要时 configure，再执行 `./ns3 build`；`build-progress` 返回当前阶段及 Ninja `[已完成/总任务]` 进度。配置与协议目录阶段显示不定进度。「清除构建」调用该目录的 `./ns3 clean`，清除构建产物与配置缓存，并使已缓存的协议目录失效。预编译、清除构建和仿真共用 runner 互斥锁。配置统一带 `--disable-werror`；已有缓存开启 `NS3_WARNINGS_AS_ERRORS` 时只重配该选项，保留构建模式与模块配置，避免新编译器的普通警告导致失败。打开页面/选择目录仅检查路径，不自动编译。
 - 预编译完成后通过 `server/templates/typeidCatalog.cc` 探针枚举实际注册、可构造的 Aqua-Sim 各层类型及继承属性；`typeIdCatalog.ts` 的静态表仅提供标签与初始化占位，不作为运行白名单。动态目录按仿真路径与 Aqua-Sim 库签名缓存在服务端内存中，页面在加载目录后才允许选协议、运行。新增已注册协议无需追加前端白名单；具有特殊构造或外部依赖的协议仍需相应安装适配。
 - `generateScratch.ts` 按实际选择的 PHY/MAC/路由/信道/传播模型和节点应用生成代码；协议属性覆盖快捷表单参数，Socket/设备连接由生成器管理。`protocolRequirements.ts` 在运行前检查 Bellhop 文件与 Modem 串口。无原生日志的协议使用 `replayTrace.ts` 的 PHY 成功收发记录，不改变既有日志解析语义。
 - 应用只在节点卡片配置：源为应用所在节点，`appDestination` 必须明确选择；`appAttrs` 只作用于该节点，启动默认 0s、停止默认仿真结束，其余使用协议注册默认值（OnOff 的 Nsend 自动匹配节点数量）。取消全局流量表单、全局应用层展示和切换 MAC 时隐式安装应用；新规格 traffic 固定 none。旧规格/API 流量预设保留兼容。

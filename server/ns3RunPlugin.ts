@@ -1,5 +1,5 @@
 import type { Plugin } from 'vite'
-import { precompileSimulatorGuarded, readJsonBody, runExperimentGuarded } from './runner'
+import { clearSimulatorBuildGuarded, precompileSimulatorGuarded, readJsonBody, readPrecompileProgress, runExperimentGuarded } from './runner'
 import { browseSimulatorDirectories, inspectSimulator } from './simulatorConfig'
 import { cachedCatalog } from './protocolCatalog'
 
@@ -11,7 +11,7 @@ export const ns3RunPlugin = (): Plugin => ({
   name: 'ns3-run',
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
-      if (req.method !== 'POST' || !['/api/run', '/api/simulator/check', '/api/simulator/directories', '/api/simulator/build'].includes(req.url || '')) {
+      if (req.method !== 'POST' || !['/api/run', '/api/simulator/check', '/api/simulator/directories', '/api/simulator/build', '/api/simulator/build-progress', '/api/simulator/clean'].includes(req.url || '')) {
         next()
         return
       }
@@ -37,6 +37,18 @@ export const ns3RunPlugin = (): Plugin => ({
         }
         if (req.url === '/api/simulator/build') {
           const { status, payload } = await precompileSimulatorGuarded(request.aquaSimHome)
+          res.statusCode = status
+          res.end(JSON.stringify(payload))
+          return
+        }
+        if (req.url === '/api/simulator/build-progress') {
+          const { status, payload } = readPrecompileProgress(request.aquaSimHome)
+          res.statusCode = status
+          res.end(JSON.stringify(payload))
+          return
+        }
+        if (req.url === '/api/simulator/clean') {
+          const { status, payload } = await clearSimulatorBuildGuarded(request.aquaSimHome)
           res.statusCode = status
           res.end(JSON.stringify(payload))
           return

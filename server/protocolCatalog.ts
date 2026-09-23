@@ -5,6 +5,7 @@ import { TYPEID_LAYERS } from '../src/features/experiment/lib/typeIdCatalog'
 
 export const catalogProbe = fs.readFileSync(new URL('./templates/typeidCatalog.cc', import.meta.url), 'utf8')
 const catalogs = new Map<string, { signature: string; layers: CatalogLayer[] }>()
+export const invalidateCatalog = (home: string) => { catalogs.delete(home) }
 const signature = (home: string) => {
   const lib = path.join(home, 'build/lib')
   try {
