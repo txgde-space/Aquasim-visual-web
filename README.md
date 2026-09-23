@@ -25,7 +25,7 @@ The app includes both a 2D Canvas replay view and a Babylon.js 3D view, so it ca
 - Vue 3
 - Vite
 - Babylon.js
-- Tailwind CSS
+- CSS design tokens and component styles
 
 ## Getting Started
 
@@ -170,7 +170,7 @@ Aquasim Visual Web 是一个基于 Vue 3 + Vite 的水下声学网络仿真回�
 - Vue 3
 - Vite
 - Babylon.js
-- Tailwind CSS
+- CSS 设计令牌与组件样式
 
 ## 快速开始
 
