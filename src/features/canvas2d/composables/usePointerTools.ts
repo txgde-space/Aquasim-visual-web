@@ -12,7 +12,6 @@ interface PointerToolsDeps {
   props: {
     editMode: boolean
     boxSelect: boolean
-    allowPlaceNode: boolean
     nodes: Array<{ node_id: number; x: number; y: number }>
   }
   emit: (event: string, ...args: unknown[]) => void
@@ -61,7 +60,6 @@ export const usePointerTools = ({
     origins: Map<number, { x: number; y: number }>
   } | null> = ref(null)
   let activePointerId: number | null = null
-  let placeOnPanClick = false
 
   const capturePointer = (pointerId: number) => {
     try {
@@ -82,9 +80,8 @@ export const usePointerTools = ({
     activePointerId = null
   }
 
-  const startPanGesture = (event: PointerEvent, sx: number, sy: number, allowPlace = false) => {
+  const startPanGesture = (event: PointerEvent, sx: number, sy: number) => {
     activePointerId = event.pointerId
-    placeOnPanClick = allowPlace
     view.isPanning.value = true
     setHoveredNodeId(null)
     view.beginPan(sx, sy)
@@ -219,9 +216,7 @@ export const usePointerTools = ({
     }
 
     measure.selectedMeasurementId.value = null
-    startPanGesture(event, sx, sy,
-      props.editMode && props.allowPlaceNode && !forcePan
-      && !event.shiftKey && !event.ctrlKey && !event.metaKey)
+    startPanGesture(event, sx, sy)
   }
 
   const onPointerMove = (event: PointerEvent) => {
@@ -343,8 +338,6 @@ export const usePointerTools = ({
 
     if (!view.isPanning.value) return
 
-    const shouldPlace = placeOnPanClick && !view.hasDragged.value
-    placeOnPanClick = false
     if (!view.hasDragged.value && event?.button === 0 && event.type !== 'pointercancel') {
       const canvas = getCanvasEl()
       if (canvas) {
@@ -354,9 +347,6 @@ export const usePointerTools = ({
         const target = pickNodeAt(x, y)
         if (target) {
           emit('node-select', target)
-        } else if (shouldPlace) {
-          emit('node-place', toWorld(x, y))
-          emit('pause-request')
         } else if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
           emit('selection-change', [])
           emit('node-select', null)
@@ -421,7 +411,6 @@ export const usePointerTools = ({
     view.dragFrozenBounds.value = null
     view.isPanning.value = false
     spaceHeld.value = false
-    placeOnPanClick = false
     releasePointer()
     toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
     measure.resetTransient()

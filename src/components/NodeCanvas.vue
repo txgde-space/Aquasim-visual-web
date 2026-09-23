@@ -100,7 +100,30 @@
       @pointermove="onCanvasPointerMove"
       @pointerup="onPointerUp"
       @pointerleave="onCanvasPointerLeave"
+      @contextmenu="onCanvasContextMenu"
     />
+
+    <form
+      v-if="contextMenu"
+      ref="contextMenuEl"
+      class="node-context-menu"
+      role="dialog"
+      aria-label="添加节点"
+      :style="{ left: `${contextMenu.left}px`, top: `${contextMenu.top}px` }"
+      @submit.prevent="addNodeFromContext"
+      @contextmenu.prevent.stop
+    >
+      <div class="node-context-head">
+        <strong>添加节点</strong>
+        <button type="button" class="node-card-close" aria-label="关闭添加节点菜单" @click="closeContextMenu">×</button>
+      </div>
+      <div class="node-context-coords">
+        <label class="field field-compact"><span>X (m)</span><input ref="contextXEl" v-model="contextMenu.x" class="select" type="number" step="0.01" required /></label>
+        <label class="field field-compact"><span>Y (m)</span><input v-model="contextMenu.y" class="select" type="number" step="0.01" required /></label>
+        <label class="field field-compact"><span>Z (m)</span><input v-model="contextMenu.z" class="select" type="number" step="0.01" required /></label>
+      </div>
+      <button type="submit" class="btn primary node-context-add">添加节点</button>
+    </form>
 
     <div
       v-if="hoveredNodePos && hoveredNode && hoveredNodeStats"
@@ -149,7 +172,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { THEME_PROFILES } from '@/features/canvas2d/lib/themes'
 import { LOCAL_STORAGE_KEYS } from '@/shared/constants'
 import {
@@ -228,6 +251,9 @@ const hostBackground = computed(() => {
 const fxIntensity = computed(() => (props.fxLevel === 'extreme' ? 2.2 : 1))
 const canvasEl = ref(null)
 const containerEl = ref(null)
+const contextMenuEl = ref(null)
+const contextXEl = ref(null)
+const contextMenu = ref(null)
 const displayWidth = ref(900)
 const displayHeight = ref(520)
 const hoveredNodeId = ref(null)
@@ -322,7 +348,6 @@ const canvasCursorClass = computed(() => {
   if (props.editMode) {
     if (draggingNodeId.value || dragGroup.value || isPanning.value) return 'canvas-edit-dragging'
     if (hoveredNodeId.value != null) return 'canvas-edit-hover'
-    if (props.allowPlaceNode) return 'canvas-place'
     return 'canvas-edit'
   }
   return ''
@@ -331,6 +356,40 @@ const canvasCursorClass = computed(() => {
 const toScreen = (x, y) => toScreenPoint(x, y, projection.value)
 
 const toWorld = (x, y) => toWorldPoint(x, y, projection.value)
+
+const closeContextMenu = () => { contextMenu.value = null }
+const onCanvasContextMenu = (event) => {
+  if (!props.editMode || !props.allowPlaceNode) return
+  event.preventDefault()
+  const rect = canvasEl.value?.getBoundingClientRect()
+  if (!rect) return
+  const sx = event.clientX - rect.left
+  const sy = event.clientY - rect.top
+  const point = toWorld(sx, sy)
+  const averageZ = props.nodes.length
+    ? props.nodes.reduce((sum, node) => sum + (Number(node.z) || 0), 0) / props.nodes.length
+    : 0
+  contextMenu.value = {
+    left: Math.max(8, Math.min(sx, displayWidth.value - 254)),
+    top: Math.max(8, Math.min(sy, displayHeight.value - 214)),
+    x: point.x.toFixed(2),
+    y: point.y.toFixed(2),
+    z: averageZ.toFixed(2),
+  }
+  nextTick(() => contextXEl.value?.focus())
+}
+const addNodeFromContext = () => {
+  const menu = contextMenu.value
+  if (!menu) return
+  const values = [menu.x, menu.y, menu.z]
+  if (values.some((value) => String(value).trim() === '' || !Number.isFinite(Number(value)))) return
+  emit('node-place', { x: Number(menu.x), y: Number(menu.y), z: Number(menu.z) })
+  emit('pause-request')
+  closeContextMenu()
+}
+const onContextMenuOutside = (event) => {
+  if (contextMenu.value && !contextMenuEl.value?.contains(event.target)) closeContextMenu()
+}
 
 const pickNodeAt = (sx, sy) => {
   let picked = null
@@ -573,6 +632,7 @@ watch(() => props.editMode, (next, previous) => {
 
 const onKeyDown = (event) => {
   if (event.key === 'Escape') {
+    closeContextMenu()
     zoomPanelOpen.value = false
     cancelActiveTool()
     return
@@ -597,6 +657,7 @@ onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   document.addEventListener('pointerdown', onZoomOutside, true)
+  document.addEventListener('pointerdown', onContextMenuOutside, true)
   updateViewport()
   // 同步补一次首帧绘制，不等 rAF，保证页面第一次 paint 画布就有内容
   draw()
@@ -618,6 +679,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('pointerdown', onZoomOutside, true)
+  document.removeEventListener('pointerdown', onContextMenuOutside, true)
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
@@ -781,6 +843,36 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.node-context-menu {
+  position: absolute;
+  z-index: 30;
+  width: min(240px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(10px);
+}
+.node-context-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+.node-context-coords {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.node-context-coords .field:last-child { grid-column: 1 / -1; }
+.node-context-add { width: 100%; }
+
 .node-tooltip {
   position: absolute;
   z-index: 30;
@@ -937,10 +1029,6 @@ onBeforeUnmount(() => {
 
 .canvas-edit {
   cursor: grab;
-}
-
-.canvas-place {
-  cursor: copy;
 }
 
 .canvas-select {

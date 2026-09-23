@@ -145,7 +145,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     return ids.length ? Math.max(...ids) + 1 : 1
   }
 
-  const addNode = (point?: { x: unknown; y: unknown } | null) => {
+  const addNode = (point?: { x: unknown; y: unknown; z?: unknown } | null) => {
     const nodeId = nextNodeId()
     const xs = editNodes.value.map((node) => Number(node.x) || 0)
     const ys = editNodes.value.map((node) => Number(node.y) || 0)
@@ -156,7 +156,9 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     const placed = point && typeof point === 'object' && !('target' in point) && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))
     const x = placed ? Number(point.x) : (xs.length ? Math.max(...xs) + spacing : 0)
     const y = placed ? Number(point.y) : (ys.length ? ys.reduce((sum, value) => sum + value, 0) / ys.length : 0)
-    const z = zs.length ? zs.reduce((sum, value) => sum + value, 0) / zs.length : 0
+    const z = placed && point?.z !== undefined && point.z !== '' && Number.isFinite(Number(point.z))
+      ? Number(point.z)
+      : (zs.length ? zs.reduce((sum, value) => sum + value, 0) / zs.length : 0)
     const sample = selectedEditNode.value || editNodes.value[0]
     editNodes.value = [
       ...editNodes.value,
