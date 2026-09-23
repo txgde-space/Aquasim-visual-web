@@ -18,17 +18,6 @@
         >
           测距工具
         </button>
-        <button
-          v-if="allowPlaceNode"
-          class="toolbar-btn"
-          :class="{ active: toolMode === 'place' }"
-          title="在画布上点击放置新节点，Esc 取消"
-          @click="activatePlaceTool"
-        >
-          放置节点
-        </button>
-
-
       </div>
 
       <div ref="zoomControlEl" class="toolbar-group toolbar-zoom" @wheel.stop>
@@ -329,13 +318,11 @@ const canvasCursorClass = computed(() => {
   if (toolMode.value === TOOL_MODES.MEASURE) {
     return hoveredMeasureNode.value ? 'canvas-measure-hover' : 'canvas-measure'
   }
-  if (toolMode.value === TOOL_MODES.PLACE) {
-    return hoveredNodeId.value != null ? 'canvas-edit-hover' : 'canvas-place'
-  }
   if (marquee.value) return 'canvas-marquee'
   if (props.editMode) {
-    if (draggingNodeId.value || dragGroup.value) return 'canvas-edit-dragging'
+    if (draggingNodeId.value || dragGroup.value || isPanning.value) return 'canvas-edit-dragging'
     if (hoveredNodeId.value != null) return 'canvas-edit-hover'
+    if (props.allowPlaceNode) return 'canvas-place'
     return 'canvas-edit'
   }
   return ''
@@ -429,7 +416,6 @@ const {
   onPointerUp,
   onDragOver,
   onDrop,
-  activatePlaceTool,
   activateMeasureTool,
   cancelActiveTool,
 } = pointer

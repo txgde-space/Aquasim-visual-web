@@ -5,7 +5,6 @@ import type { MeasureTool } from './useMeasureTool'
 export const TOOL_MODES = Object.freeze({
   PAN: 'pan',
   MEASURE: 'measure',
-  PLACE: 'place',
   SELECT: 'select',
 })
 
@@ -62,6 +61,7 @@ export const usePointerTools = ({
     origins: Map<number, { x: number; y: number }>
   } | null> = ref(null)
   let activePointerId: number | null = null
+  let placeOnPanClick = false
 
   const capturePointer = (pointerId: number) => {
     try {
@@ -82,8 +82,9 @@ export const usePointerTools = ({
     activePointerId = null
   }
 
-  const startPanGesture = (event: PointerEvent, sx: number, sy: number) => {
+  const startPanGesture = (event: PointerEvent, sx: number, sy: number, allowPlace = false) => {
     activePointerId = event.pointerId
+    placeOnPanClick = allowPlace
     view.isPanning.value = true
     setHoveredNodeId(null)
     view.beginPan(sx, sy)
@@ -114,7 +115,7 @@ export const usePointerTools = ({
     const sx = event.clientX - rect.left
     const sy = event.clientY - rect.top
 
-    if (event.button === 1 || (spaceHeld.value && toolMode.value !== TOOL_MODES.MEASURE && toolMode.value !== TOOL_MODES.PLACE)) {
+    if (event.button === 1 || (spaceHeld.value && toolMode.value !== TOOL_MODES.MEASURE)) {
       startPanGesture(event, sx, sy)
       return
     }
@@ -146,27 +147,6 @@ export const usePointerTools = ({
       measure.commitMeasurementState([...measure.measurementLines.value, nextMeasurement], nextMeasurement.id)
       measure.pendingMeasurePoint.value = null
       scheduleDraw()
-      return
-    }
-
-    if (props.editMode && toolMode.value === TOOL_MODES.PLACE) {
-      const target = pickNodeAt(sx, sy)
-      if (target) {
-        event.preventDefault()
-        draggingNodeId.value = target.node_id
-        view.dragFrozenBounds.value = { ...getViewBounds() }
-        activePointerId = event.pointerId
-        view.hasDragged.value = false
-        view.panStart.value = { x: sx, y: sy }
-        emit('node-select', target)
-        emit('pause-request')
-        capturePointer(event.pointerId)
-        scheduleDraw()
-        return
-      }
-      const world = toWorld(sx, sy)
-      emit('node-place', { x: world.x, y: world.y })
-      emit('pause-request')
       return
     }
 
@@ -239,7 +219,9 @@ export const usePointerTools = ({
     }
 
     measure.selectedMeasurementId.value = null
-    startPanGesture(event, event.clientX - rect.left, event.clientY - rect.top)
+    startPanGesture(event, sx, sy,
+      props.editMode && props.allowPlaceNode && !forcePan
+      && !event.shiftKey && !event.ctrlKey && !event.metaKey)
   }
 
   const onPointerMove = (event: PointerEvent) => {
@@ -361,6 +343,8 @@ export const usePointerTools = ({
 
     if (!view.isPanning.value) return
 
+    const shouldPlace = placeOnPanClick && !view.hasDragged.value
+    placeOnPanClick = false
     if (!view.hasDragged.value && event?.button === 0 && event.type !== 'pointercancel') {
       const canvas = getCanvasEl()
       if (canvas) {
@@ -370,6 +354,9 @@ export const usePointerTools = ({
         const target = pickNodeAt(x, y)
         if (target) {
           emit('node-select', target)
+        } else if (shouldPlace) {
+          emit('node-place', toWorld(x, y))
+          emit('pause-request')
         } else if (!event.shiftKey && !event.ctrlKey && !event.metaKey) {
           emit('selection-change', [])
           emit('node-select', null)
@@ -415,20 +402,9 @@ export const usePointerTools = ({
     })
   }
 
-  const activatePlaceTool = () => {
-    if (toolMode.value === TOOL_MODES.PLACE) {
-      toolMode.value = TOOL_MODES.PAN
-      scheduleDraw()
-      return
-    }
-    toolMode.value = TOOL_MODES.PLACE
-    measure.resetTransient()
-    scheduleDraw()
-  }
-
   const activateMeasureTool = () => {
     if (toolMode.value === TOOL_MODES.MEASURE) {
-      toolMode.value = TOOL_MODES.PAN
+      toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
     } else {
       toolMode.value = TOOL_MODES.MEASURE
     }
@@ -445,20 +421,12 @@ export const usePointerTools = ({
     view.dragFrozenBounds.value = null
     view.isPanning.value = false
     spaceHeld.value = false
+    placeOnPanClick = false
     releasePointer()
-    toolMode.value = TOOL_MODES.PAN
+    toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
     measure.resetTransient()
     scheduleDraw()
   }
-
-  // Deactivate place tool when edit/place becomes unavailable.
-  watch(() => [props.editMode, props.allowPlaceNode], ([editable, allowPlace]) => {
-    if (!editable || !allowPlace) {
-      if (toolMode.value === TOOL_MODES.PLACE) {
-        toolMode.value = props.boxSelect ? TOOL_MODES.SELECT : TOOL_MODES.PAN
-      }
-    }
-  })
 
   // Keep the tool mode in sync with boxSelect availability.
   watch(() => props.boxSelect, (enabled) => {
@@ -486,7 +454,6 @@ export const usePointerTools = ({
     onPointerUp,
     onDragOver,
     onDrop,
-    activatePlaceTool,
     activateMeasureTool,
     cancelActiveTool,
   }
