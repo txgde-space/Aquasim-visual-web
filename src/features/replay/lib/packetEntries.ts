@@ -9,8 +9,8 @@ import type {
   ReplayPacket,
   ReplayReceiver,
 } from '@/shared/types/replay'
-import { blockedReasonLabel, clampRatio, reasonLabel, timeDisplay } from './format'
-import { earlierArrivalLate } from './geometry'
+import { blockedReasonLabel, clampRatio, durationForProgress, reasonLabel, timeDisplay } from './format'
+import { indexTimingWarnings, packetTimingKey } from './packetTimeline'
 
 export type { PacketTone }
 
@@ -46,81 +46,81 @@ export const packetTagClass = (kind: string): string => {
 
 export interface PacketEntryContext {
   nodeById: Map<number, ReplayNode>
-  packetMap: Map<string, ReplayPacket>
-  currentTimeUs: number
   originalReceiverMap: Map<string, ReplayReceiver>
   packetRows: ReplayPacket[]
+  fractionalTiming?: boolean
 }
 
-export const buildPacketEntries = (packets: ReplayPacket[], ctx: PacketEntryContext): PacketEntry[] => packets.map((packet): PacketEntry => {
-  const sourceNode = ctx.nodeById.get(packet.src)
-  const receivers = packet.receivers.map((receiver): DisplayReceiver => {
-    const dstNode = ctx.nodeById.get(receiver.dst)
-    const overlapHint = receiver.status !== 'ok'
-      && Array.isArray(receiver.with)
-      && receiver.with.length > 0
-      ? `（与 ${receiver.with.join(', ')} 重叠）`
-      : ''
-    const reason = receiver.status === 'ok' ? '成功' : `${reasonLabel(receiver.reason)}${overlapHint}`
-    const tone = statusTone(receiver.status, receiver.reason)
-    const original = ctx.originalReceiverMap.get(`${packet.eventId}:${receiver.dst}`)
-    const originalChanged = Boolean(
-      original
-      && (original.status !== receiver.status || (original.reason || null) !== (receiver.reason || null)),
-    )
+export const buildPacketEntries = (packets: ReplayPacket[], ctx: PacketEntryContext): PacketEntry[] => {
+  const timingWarnings = packets.some((packet) => packet.simulated) ? indexTimingWarnings(ctx.packetRows) : null
+  return packets.map((packet): PacketEntry => {
+    const sourceNode = ctx.nodeById.get(packet.src)
+    const receivers = packet.receivers.map((receiver): DisplayReceiver => {
+      const dstNode = ctx.nodeById.get(receiver.dst)
+      const overlapHint = receiver.status !== 'ok'
+        && Array.isArray(receiver.with)
+        && receiver.with.length > 0
+        ? `（与 ${receiver.with.join(', ')} 重叠）`
+        : ''
+      const reason = receiver.status === 'ok' ? '成功' : `${reasonLabel(receiver.reason)}${overlapHint}`
+      const tone = statusTone(receiver.status, receiver.reason)
+      const original = ctx.originalReceiverMap.get(`${packet.eventId}:${receiver.dst}`)
+      const originalChanged = Boolean(
+        original
+        && (original.status !== receiver.status || (original.reason || null) !== (receiver.reason || null)),
+      )
+
+      return {
+        ...receiver,
+        dstLabel: dstNode ? dstNode.name : `Node-${receiver.dst}`,
+        reasonLabel: reason,
+        tone,
+        originalChanged,
+        originalReasonLabel: original
+          ? (original.status === 'ok' ? '成功' : reasonLabel(original.reason))
+          : null,
+      }
+    })
+
+    const okCount = receivers.filter((receiver) => receiver.status === 'ok').length
+    const failCount = receivers.length - okCount
+    const rxrxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
+    const rxtxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
+    const packetKind = !packet.tx_committed
+      ? 'blocked'
+      : failCount === 0
+        ? 'ok'
+        : (okCount > 0 ? 'mixed' : 'fail')
+    const totalDurationUs = Math.max(ctx.fractionalTiming ? 0 : 1, packet.timeEnd - packet.tx_start_us)
+    const blockedReasonText = packet.tx_committed ? null : blockedReasonLabel(packet.tx_blocked_reason)
+    const outcomeSummary = packet.tx_committed
+      ? `成功 ${okCount} / rx-rx ${rxrxCount} / rx-tx ${rxtxCount}`
+      : `未发出 / 原因 ${blockedReasonText}`
+    const timingWarn = Boolean(packet.simulated) && !!timingWarnings?.get(packetTimingKey(packet))
 
     return {
-      ...receiver,
-      dstLabel: dstNode ? dstNode.name : `Node-${receiver.dst}`,
-      reasonLabel: reason,
-      tone,
-      originalChanged,
-      originalReasonLabel: original
-        ? (original.status === 'ok' ? '成功' : reasonLabel(original.reason))
-        : null,
+      ...packet,
+      sourceLabel: sourceNode ? sourceNode.name : `Node-${packet.src}`,
+      receivers,
+      okCount,
+      failCount,
+      rxrxCount,
+      rxtxCount,
+      packetKind,
+      packetKindLabel: packetTagLabel(packetKind),
+      packetKindClass: packetTagClass(packetKind),
+      packetDurationLabel: timeDisplay(totalDurationUs, ctx.fractionalTiming),
+      prettyTime: timeDisplay(packet.tx_start_us, ctx.fractionalTiming),
+      blockedReasonText,
+      outcomeSummary,
+      startUs: packet.tx_start_us,
+      endUs: packet.timeEnd,
+      timingWarn,
     }
   })
+}
 
-  const okCount = receivers.filter((receiver) => receiver.status === 'ok').length
-  const failCount = receivers.length - okCount
-  const rxrxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_rx').length
-  const rxtxCount = receivers.filter((receiver) => receiver.reason === 'collision_rx_tx').length
-  const packetKind = !packet.tx_committed
-    ? 'blocked'
-    : failCount === 0
-      ? 'ok'
-      : (okCount > 0 ? 'mixed' : 'fail')
-  const totalDurationUs = Math.max(1, packet.timeEnd - packet.tx_start_us)
-  const progressPct = clampRatio((ctx.currentTimeUs - packet.tx_start_us) / totalDurationUs) * 100
-  const blockedReasonText = packet.tx_committed ? null : blockedReasonLabel(packet.tx_blocked_reason)
-  const outcomeSummary = packet.tx_committed
-    ? `成功 ${okCount} / rx-rx ${rxrxCount} / rx-tx ${rxtxCount}`
-    : `未发出 / 原因 ${blockedReasonText}`
-  const timingWarn = Boolean(packet.simulated) && earlierArrivalLate(packet, ctx.packetRows)
-
-  return {
-    ...packet,
-    sourceLabel: sourceNode ? sourceNode.name : `Node-${packet.src}`,
-    receivers,
-    okCount,
-    failCount,
-    rxrxCount,
-    rxtxCount,
-    packetKind,
-    packetKindLabel: packetTagLabel(packetKind),
-    packetKindClass: packetTagClass(packetKind),
-    packetDurationLabel: timeDisplay(totalDurationUs),
-    prettyTime: timeDisplay(packet.tx_start_us),
-    progressPct,
-    blockedReasonText,
-    outcomeSummary,
-    startUs: packet.tx_start_us,
-    endUs: packet.timeEnd,
-    timingWarn,
-  }
-})
-
-export const buildLifecycleGroups = (packetEntries: PacketEntry[], currentTimeUs: number): LifecycleGroup[] => {
+export const buildLifecycleGroups = (packetEntries: PacketEntry[], fractionalTiming = false): LifecycleGroup[] => {
   const groups = new Map<string, LifecycleGroup>()
   for (const entry of packetEntries) {
     const key = String(entry.packet_id)
@@ -140,7 +140,6 @@ export const buildLifecycleGroups = (packetEntries: PacketEntry[], currentTimeUs
       packetKindClass: '',
       packetDurationLabel: '',
       prettyTime: '',
-      progressPct: 0,
     }
     existing.startUs = Math.min(existing.startUs, entry.startUs)
     existing.endUs = Math.max(existing.endUs, entry.endUs)
@@ -162,8 +161,7 @@ export const buildLifecycleGroups = (packetEntries: PacketEntry[], currentTimeUs
         : failCount === 0
           ? 'ok'
           : (okCount > 0 ? 'mixed' : 'fail')
-      const totalDurationUs = Math.max(1, group.endUs - group.startUs)
-      const progressPct = clampRatio((currentTimeUs - group.startUs) / totalDurationUs) * 100
+      const totalDurationUs = Math.max(fractionalTiming ? 0 : 1, group.endUs - group.startUs)
 
       return {
         ...group,
@@ -176,15 +174,14 @@ export const buildLifecycleGroups = (packetEntries: PacketEntry[], currentTimeUs
         packetKind,
         packetKindLabel: packetTagLabel(packetKind),
         packetKindClass: packetTagClass(packetKind),
-        packetDurationLabel: timeDisplay(totalDurationUs),
-        prettyTime: timeDisplay(group.startUs),
-        progressPct,
+        packetDurationLabel: timeDisplay(totalDurationUs, fractionalTiming),
+        prettyTime: timeDisplay(group.startUs, fractionalTiming),
       }
     })
     .sort((a, b) => a.startUs - b.startUs)
 }
 
-export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, currentTimeUs: number): LifecycleStage[] => {
+export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, currentTimeUs: number, fractionalTiming = false): LifecycleStage[] => {
   if (!lifecyclePacket) return []
 
   const stages: LifecycleStage[] = []
@@ -195,7 +192,7 @@ export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, cur
       status: segment.tx_committed ? 'ok' : 'fail',
       title: segment.tx_committed ? `${segment.sourceLabel} 发射` : `${segment.sourceLabel} 发送被阻塞`,
       detail: segment.tx_committed
-        ? `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us)}`
+        ? `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 时长 ${timeDisplay(segment.tx_duration_us, fractionalTiming)}`
         : `${lifecyclePacket.packet_id} · 段 ${segment.eventId} · 未发出（${blockedReasonLabel(segment.tx_blocked_reason)}）`,
       startUs: segment.tx_start_us,
       endUs: segment.tx_end_us,
@@ -209,7 +206,7 @@ export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, cur
         type: 'rx',
         status: statusTone(receiver.status, receiver.reason),
         title: `${receiver.dstLabel} 接收`,
-        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us)}`,
+        detail: `${receiver.reasonLabel} · 段 ${segment.eventId} · 时长 ${timeDisplay(receiver.rx_duration_us, fractionalTiming)}`,
         startUs: receiver.rx_start_us,
         endUs: receiver.rx_end_us,
         progressPct: 0,
@@ -221,7 +218,7 @@ export const buildLifecycleStages = (lifecyclePacket: LifecycleGroup | null, cur
   return stages
     .sort((a, b) => a.startUs - b.startUs)
     .map((stage): LifecycleStage => {
-      const totalUs = Math.max(1, stage.endUs - stage.startUs)
+      const totalUs = durationForProgress(stage.endUs - stage.startUs, fractionalTiming)
       const progressPct = clampRatio((currentTimeUs - stage.startUs) / totalUs) * 100
       return {
         ...stage,

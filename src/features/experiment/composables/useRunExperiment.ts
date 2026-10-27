@@ -1,5 +1,6 @@
-import { ref, type Ref } from 'vue'
+import { onScopeDispose, ref, type Ref } from 'vue'
 import type { ExperimentSpec } from '../../../shared/types/experiment'
+import { requestSimulator } from '../api/simulator'
 
 export type RunStatus = 'idle' | 'running' | 'ok' | 'fail'
 
@@ -21,20 +22,29 @@ interface RunExperimentDeps {
 export const useRunExperiment = ({ getSpec, getAquaSimHome, onSuccess }: RunExperimentDeps) => {
   const runStatus: Ref<RunStatus> = ref('idle')
   const runLog: Ref<string> = ref('')
+  let pending: AbortController | null = null
+  let disposed = false
+
+  onScopeDispose(() => {
+    disposed = true
+    // Stop listening after leaving the page. The server retains its own lock and timeout.
+    pending?.abort()
+    pending = null
+  })
 
   const runExperiment = async () => {
-    if (runStatus.value === 'running') return
+    if (disposed || runStatus.value === 'running') return
+    const controller = new AbortController()
+    pending = controller
     runStatus.value = 'running'
     runLog.value = ''
     try {
-      const response = await fetch('/api/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ spec: getSpec(), aquaSimHome: getAquaSimHome().trim() }),
-      })
-      const data = await response.json() as RunResponse
+      const { ok, data } = await requestSimulator<RunResponse>('run', {
+        spec: getSpec(), aquaSimHome: getAquaSimHome().trim(),
+      }, controller.signal)
+      if (pending !== controller || disposed) return
       runLog.value = data.stdout || data.error || ''
-      if (!response.ok || data.ok === false) {
+      if (!ok || data.ok === false) {
         runStatus.value = 'fail'
         return
       }
@@ -43,8 +53,11 @@ export const useRunExperiment = ({ getSpec, getAquaSimHome, onSuccess }: RunExpe
         onSuccess(data.log, data.logName || 'ns3.log')
       }
     } catch (error) {
+      if (controller.signal.aborted || disposed) return
       runStatus.value = 'fail'
       runLog.value = String((error as { message?: unknown })?.message || error)
+    } finally {
+      if (pending === controller) pending = null
     }
   }
 

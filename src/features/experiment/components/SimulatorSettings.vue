@@ -9,7 +9,7 @@ const props = defineProps<{
   buildStatus: 'idle' | 'building' | 'ok' | 'fail'
   buildLog: string
   buildError: string
-  buildProgress: { phase: 'configure' | 'build' | 'catalog' | 'done' | 'failed'; completed: number; total: number } | null
+  buildProgress: { phase: 'waiting' | 'configure' | 'build' | 'catalog' | 'done' | 'failed'; completed: number; total: number } | null
   cleanStatus: 'idle' | 'cleaning' | 'ok' | 'fail'
   cleanError: string
   disabled: boolean
@@ -24,11 +24,14 @@ const emit = defineEmits<{
   select: [path: string]
 }>()
 const pickerOpen = ref(false)
+const directoryDisabled = computed(() => props.disabled
+  && !(props.buildStatus === 'building' && props.buildProgress?.phase === 'waiting'))
 const progressPercent = computed(() => props.buildProgress?.phase === 'build' && props.buildProgress.total > 0
   ? Math.round(props.buildProgress.completed / props.buildProgress.total * 100)
   : null)
 const progressLabel = computed(() => {
   const progress = props.buildProgress
+  if (progress?.phase === 'waiting') return '正在等待当前任务完成，将自动继续预编译…'
   if (progress?.phase === 'configure') return '正在配置构建环境…'
   if (progress?.phase === 'catalog') return '正在读取注册协议…'
   if (progress?.phase === 'build' && progress.total > 0) return `已编译 ${progress.completed} / ${progress.total}`
@@ -51,24 +54,24 @@ const selectDirectory = (path: string) => {
         id="simulator-directory"
         class="select directory-input"
         :value="modelValue"
-        :disabled="disabled"
+        :disabled="directoryDisabled"
         :placeholder="defaultHome ? `留空使用${defaultHome}` : '留空使用服务器默认目录'"
         :title="defaultHome ? `留空使用${defaultHome}` : '留空使用服务器默认目录'"
         spellcheck="false"
         @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         @keydown.enter.prevent="!disabled && !checking && $emit('precompile')"
       />
-      <button class="btn btn-compact directory-choose" :disabled="disabled" @click="pickerOpen = true">选择目录</button>
+      <button class="btn btn-compact directory-choose" :disabled="directoryDisabled" @click="pickerOpen = true">选择目录</button>
       </div>
     </div>
     <div class="build-actions">
       <button class="btn btn-compact" :disabled="checking || disabled" @click="$emit('precompile')">
-        {{ buildStatus === 'building' ? '编译中…' : '预编译' }}
+        {{ buildStatus === 'building' ? (buildProgress?.phase === 'waiting' ? '等待中…' : '编译中…') : '预编译' }}
       </button>
       <button class="btn btn-compact" :disabled="checking || disabled" title="清除所选仿真目录的构建产物与配置缓存" @click="$emit('clearBuild')">
         {{ cleanStatus === 'cleaning' ? '清除中…' : '清除构建' }}
       </button>
-      <button class="btn btn-compact" :disabled="!modelValue || disabled" @click="$emit('reset')">恢复默认</button>
+      <button class="btn btn-compact" :disabled="!modelValue || directoryDisabled" @click="$emit('reset')">恢复默认</button>
     </div>
     <div class="directory-result" role="status" aria-live="polite">
       <div v-if="buildStatus === 'building'" class="build-progress">
@@ -94,7 +97,7 @@ const selectDirectory = (path: string) => {
       <pre>{{ buildLog }}</pre>
     </details>
     <SimulatorDirectoryPicker
-      v-if="pickerOpen && !disabled"
+      v-if="pickerOpen && !directoryDisabled"
       :initial-path="modelValue"
       @select="selectDirectory"
       @close="pickerOpen = false"

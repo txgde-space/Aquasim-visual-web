@@ -35,7 +35,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Matrix, MeshBuilder, Vector3, Viewport } from '@babylonjs/core'
+import { Matrix, Vector3, Viewport } from '@babylonjs/core'
 import {
   DEPTH_SCALE,
   PROGRESS_CORE_SCALE,
@@ -51,6 +51,7 @@ import {
   disposePacketEntry,
   setMaterialColor,
   syncMaterialColor,
+  syncPacketGeometry,
   visualProgressStyle,
   visualStateColor,
 } from '@/features/scene3d/lib/factories'
@@ -60,6 +61,7 @@ import {
   syncWorldAxes,
 } from '@/features/scene3d/lib/worldAxes'
 import { useBabylonScene } from '@/features/scene3d/lib/useBabylonScene'
+import { packetPathKey, worldAxisBounds, worldAxesNeedRefresh } from '@/features/scene3d/lib/sceneState'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -72,22 +74,33 @@ const props = defineProps({
   /* 视图常驻（v-show）时的可见性：false 停 renderLoop，true 恢复并补刷新 */
   active: { type: Boolean, default: true },
 })
+const emit = defineEmits(['scene-error'])
 
 const hostEl = ref(null)
 const canvasEl = ref(null)
 const axesEl = ref(null)
-const selectedNode = ref(null)
+const selectedNodeId = ref(null)
 const selectedNodePos = ref(null)
 
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
+const selectedNode = computed(() => nodeById.value.get(selectedNodeId.value) || null)
 const selectedNodeVisual = computed(() => {
   if (!selectedNode.value) return null
   return nodeVisualById.value.get(selectedNode.value.node_id) || null
 })
 
-const nodeLabel = (node) => `Node ${node.node_id}`
-const nodeTitle = (node) => node.name ? `${nodeLabel(node)} · ${node.name}` : nodeLabel(node)
+const clearSelection = () => {
+  selectedNodeId.value = null
+  selectedNodePos.value = null
+}
+
+// A replacement topology is a different replay, even if it reuses node IDs.
+watch(() => props.topologyNodes, clearSelection)
+watch(
+  () => props.active && selectedNodeId.value != null && !nodeById.value.has(selectedNodeId.value),
+  (missing) => { if (missing) clearSelection() },
+)
 
 const theme3D = computed(() => theme3DFor(props.themeKey))
 /* Babylon 引擎初始化前宿主先垫一层与 clearColor 相同的底色，避免切页闪一帧透明 */
@@ -100,7 +113,7 @@ const worldAxesMap = new Map()
 /** Consecutive refreshes a packet entry survives while inactive before disposal. */
 const PACKET_ENTRY_STALE_REFRESHES = 3
 const packetStaleCounts = new Map()
-let renderQueued = false
+let refreshPending = false
 let middlePanPointerId = null
 let middlePanLast = null
 
@@ -131,24 +144,27 @@ const drawAxesOverlay = () => {
   drawAxesWidget(axesEl.value, camera)
 }
 
+const onSceneFrame = () => {
+  flushRefresh()
+  syncSelectedNodePos()
+  drawAxesOverlay()
+}
+
 const babylon = useBabylonScene({
   canvasRef: canvasEl,
   hostRef: hostEl,
   getClearColor: () => theme3D.value.clear,
   getActive: () => props.active,
   onPick: (nodeId) => {
-    if (!nodeId) {
-      selectedNode.value = null
-      selectedNodePos.value = null
+    if (nodeId == null || !nodeById.value.has(nodeId)) {
+      clearSelection()
       return
     }
-    selectedNode.value = nodeById.value.get(nodeId) || null
+    selectedNodeId.value = nodeId
     syncSelectedNodePos()
   },
-  onFrame: () => {
-    syncSelectedNodePos()
-    drawAxesOverlay()
-  },
+  onFrame: onSceneFrame,
+  onError: (error) => emit('scene-error', error),
   cleanup: () => {
     for (const entry of nodeMeshMap.values()) disposeNodeEntry(entry)
     nodeMeshMap.clear()
@@ -165,6 +181,7 @@ const buildNodes = () => {
   if (!scene) return
   const palette = theme3D.value
   const fx = fx3D.value
+  const inactiveProgressStyle = { diffuse: palette.rx, emissive: palette.rx.scale(0.28), alpha: 0 }
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id)
     const pos = worldPos(node)
@@ -189,12 +206,6 @@ const buildNodes = () => {
     entry.root.scaling.setAll(pulse)
 
     entry.progress.setEnabled(true)
-    entry.progress.scaling.setAll(0.01)
-    syncMaterialColor(entry.progress.material, {
-      diffuse: palette.rx,
-      emissive: palette.rx.scale(0.28),
-      alpha: 0,
-    })
     const state = visualStateColor(visual, palette)
     syncMaterialColor(entry.base.material, state)
 
@@ -206,6 +217,9 @@ const buildNodes = () => {
         progressStyle.scaleZ ?? PROGRESS_CORE_SCALE,
       )
       syncMaterialColor(entry.progress.material, progressStyle)
+    } else {
+      entry.progress.scaling.setAll(0.01)
+      syncMaterialColor(entry.progress.material, inactiveProgressStyle)
     }
   }
 
@@ -234,55 +248,51 @@ const buildPackets = () => {
       if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
       const dstNode = nodeById.value.get(receiver.dst)
       if (!dstNode) continue
-      const key = `${packet.packet_id}:${receiver.dst}`
-      activeKeys.add(key)
+      const key = packetPathKey(packet, receiver.dst)
 
       const dstPos = worldPos(dstNode)
-      const pathDuration = Math.max(1, receiver.rx_start_us - packet.tx_start_us)
+      const propagationDelay = receiver.rx_start_us - packet.tx_start_us
+      const pathDuration = propagationDelay > 0 ? propagationDelay : 1
       const frontRatio = clamp((now - packet.tx_start_us) / pathDuration, 0, 1)
       const tailRatio = clamp((now - (packet.tx_start_us + packet.tx_duration_us)) / pathDuration, 0, 1)
       const startRatio = Math.min(frontRatio, tailRatio)
       const endRatio = Math.max(frontRatio, tailRatio)
       if (endRatio <= 0) continue
 
-      const fullDirection = dstPos.subtract(srcPos)
-      const pathLength = fullDirection.length()
-      if (pathLength < 1) continue
-      const segLength = Math.max(80, pathLength * Math.max(0.001, endRatio - startRatio))
-      const midPos = srcPos.add(fullDirection.scale((startRatio + endRatio) / 2))
+      if (Vector3.DistanceSquared(srcPos, dstPos) < 1) continue
+      activeKeys.add(key)
       const color = packetColor(receiver, now, palette)
 
       let entry = packetMeshMap.get(key)
       if (!entry) {
-        entry = createPacketEntry(scene, packet.packet_id, receiver.dst, srcPos, dstPos, palette, color)
+        entry = createPacketEntry(scene, key, receiver.dst, srcPos, dstPos, palette, color)
         packetMeshMap.set(key, entry)
+      } else {
+        syncPacketGeometry(entry, srcPos, dstPos)
       }
       packetStaleCounts.delete(key)
 
-      MeshBuilder.CreateLines(null, {
-        points: [srcPos, dstPos],
-        instance: entry.line,
-      })
+      const segLength = Math.max(80, entry.pathLength * Math.max(0.001, endRatio - startRatio))
+      const midRatio = (startRatio + endRatio) / 2
       entry.line.setEnabled(true)
       entry.line.alpha = fx > 1 ? 0.62 : 0.52
       entry.line.color = palette.line
       entry.block.setEnabled(true)
       entry.marker.setEnabled(now >= receiver.rx_start_us)
 
-      entry.block.position.copyFrom(midPos)
+      entry.block.position.set(
+        srcPos.x + entry.direction.x * midRatio,
+        srcPos.y + entry.direction.y * midRatio,
+        srcPos.z + entry.direction.z * midRatio,
+      )
       entry.block.scaling.x = fx > 1 ? 1.15 : 1
       entry.block.scaling.y = segLength / 100
       entry.block.scaling.z = fx > 1 ? 1.15 : 1
-      entry.block.rotationQuaternion = null
-      entry.block.lookAt(dstPos)
-      entry.block.rotate(Vector3.Right(), Math.PI / 2)
       const pulseAlpha = fx > 1
         ? (0.78 + ((Math.sin((now * 0.000009) + segLength) + 1) * 0.08))
         : 0.96
       setMaterialColor(entry.block.material, color, color.scale(0.12 * fx), pulseAlpha)
 
-      entry.marker.position.copyFrom(dstPos)
-      entry.marker.scaling.setAll(1)
       setMaterialColor(
         entry.marker.material,
         color,
@@ -309,10 +319,8 @@ const buildPackets = () => {
   }
 }
 
-/* 相机 target 只在节点集合变化（换日志/增删节点）时重新聚焦。
-   之前 refreshScene 每帧执行这里：播放移动日志时相机跟着节点重心微移，
-   用户中键 pan 调整的视角也会在下一帧被瞬间拉回（肉眼可见的闪/跳）。
-   id 集合 signature 之外的位置变化不再触碰相机。 */
+/* Use the base topology rather than moving playback positions so orbit/pan
+   stays stable. Refocus only when the base topology coordinates change. */
 let cameraFocusSignature = ''
 
 const updateCameraTargetIfNeeded = () => {
@@ -335,43 +343,27 @@ const updateCameraTargetIfNeeded = () => {
 
 // World axes only depend on node bounds; skip the rebuild (which redraws a
 // dozen DynamicTexture labels) while bounds stay unchanged during playback.
-// Bounds are quantized to 5% of the span (min 10 world units): slow node
-// movement no longer re-triggers the rebuild every few frames, and the axis
-// padding (8% of span, min 220) absorbs the quantization lag with margin.
-let worldAxesSignature = ''
+// Compare absolute bounds to the last rendered bounds. Using a normalized
+// signature alone would miss expansion/contraction around the origin.
+let drawnWorldAxisBounds = null
 
 const syncWorldAxesIfNeeded = () => {
   const scene = babylon.getScene()
   if (!scene) return
-  if (!props.nodes.length) {
-    worldAxesSignature = ''
+  const nextBounds = worldAxisBounds(props.nodes, DEPTH_SCALE)
+  if (!worldAxesNeedRefresh(drawnWorldAxisBounds, nextBounds)) return
+  drawnWorldAxisBounds = nextBounds
+  if (!nextBounds) {
+    for (const entry of worldAxesMap.values()) disposeWorldAxisEntry(entry)
+    worldAxesMap.clear()
     return
   }
-  const xs = props.nodes.map((node) => node.x)
-  const ys = props.nodes.map((node) => node.y)
-  const zs = props.nodes.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...zs)
-  const maxY = Math.max(...zs)
-  const minZ = Math.min(...ys)
-  const maxZ = Math.max(...ys)
-  const span = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1)
-  const quantum = Math.max(span * 0.05, 10)
-  const q = (value) => Math.round(value / quantum)
-  const signature = [
-    props.nodes.length,
-    q(minX), q(maxX),
-    q(minY), q(maxY),
-    q(minZ), q(maxZ),
-  ].join(',')
-  if (signature === worldAxesSignature) return
-  worldAxesSignature = signature
   syncWorldAxes(scene, props.nodes, worldAxesMap)
 }
 
 const refreshScene = () => {
-  if (!babylon.getScene()) return
+  if (!props.active || !babylon.getScene()) return
+  babylon.setClearColor(theme3D.value.clear)
   updateCameraTargetIfNeeded()
   syncWorldAxesIfNeeded()
   buildNodes()
@@ -380,12 +372,22 @@ const refreshScene = () => {
 }
 
 const resize = () => {
-  babylon.resize()
+  if (props.active) babylon.resize()
 }
 
 const resetCameraView = () => {
   babylon.resetCameraView()
   drawAxesOverlay()
+}
+
+const onSceneKeyDown = (event) => {
+  if (!props.active || event.defaultPrevented || event.isComposing
+    || event.key !== 'Escape' || selectedNodeId.value == null) return
+  const focusedElement = document.activeElement
+  const restoreCanvasFocus = focusedElement && hostEl.value?.contains(focusedElement)
+  clearSelection()
+  event.preventDefault()
+  if (restoreCanvasFocus) canvasEl.value?.focus({ preventScroll: true })
 }
 
 const onCanvasPointerDown = (event) => {
@@ -431,13 +433,21 @@ const endMiddlePan = (event) => {
   middlePanLast = null
 }
 
+const cancelRefresh = () => {
+  refreshPending = false
+}
+
 const queueRefresh = () => {
-  if (renderQueued) return
-  renderQueued = true
-  requestAnimationFrame(() => {
-    renderQueued = false
-    refreshScene()
-  })
+  if (props.active) refreshPending = true
+}
+
+const flushRefresh = () => {
+  if (!refreshPending || !props.active || !babylon.getScene()) return
+  refreshPending = false
+  // Babylon already owns a frame loop. Consume the latest props immediately
+  // before its render instead of scheduling another RAF, which can coalesce
+  // alternating playback ticks while the previous refresh is still pending.
+  refreshScene()
 }
 
 onMounted(() => {
@@ -446,30 +456,38 @@ onMounted(() => {
   window.addEventListener('pointerup', endMiddlePan)
   window.addEventListener('pointercancel', endMiddlePan)
   window.addEventListener('resize', resize)
+  window.addEventListener('keydown', onSceneKeyDown)
   queueRefresh()
 })
 
 watch(
-  () => [props.nodes, props.nodeVisuals, props.visiblePackets, props.currentTime, props.themeKey, props.fxLevel],
-  () => queueRefresh(),
-  { deep: true },
+  () => props.active ? [props.nodeVisuals, props.visiblePackets, props.currentTime, props.themeKey, props.fxLevel] : null,
+  queueRefresh,
 )
 
+// Geometry may also be edited in place; only read mesh/camera input fields.
 watch(
-  () => props.themeKey,
-  () => {
-    babylon.setClearColor(theme3D.value.clear)
-    queueRefresh()
-  },
+  () => props.active ? [
+    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role]),
+    props.topologyNodes?.map((node) => [node.node_id, node.x, node.y, node.z]),
+  ] : null,
+  queueRefresh,
 )
 
 watch(
   () => props.active,
   (active) => {
+    cancelRefresh()
+    if (!active) {
+      endMiddlePan()
+      selectedNodePos.value = null
+      babylon.setActive(false)
+      return
+    }
+    // Hidden scenes skip mesh updates; sync current data before rendering again.
+    queueRefresh()
+    flushRefresh()
     babylon.setActive(active)
-    if (!active) return
-    // 隐藏期间 mesh 同步仍在跑（queueRefresh 未拦），显示时坐标轴 widget
-    // 与选中 tooltip 只随 renderLoop 更新，这里手动补一帧
     drawAxesOverlay()
     syncSelectedNodePos()
   },
@@ -478,20 +496,15 @@ watch(
   { flush: 'post' },
 )
 
-watch(
-  () => props.fxLevel,
-  () => {
-    queueRefresh()
-  },
-)
-
 onBeforeUnmount(() => {
   // Mesh/material disposal runs in the babylon cleanup hook (before scene
   // disposal); here we only release DOM/window listeners.
+  cancelRefresh()
   endMiddlePan()
   window.removeEventListener('resize', resize)
   window.removeEventListener('pointerup', endMiddlePan)
   window.removeEventListener('pointercancel', endMiddlePan)
+  window.removeEventListener('keydown', onSceneKeyDown)
   if (canvasEl.value) {
     canvasEl.value.removeEventListener('pointerdown', onCanvasPointerDown)
     canvasEl.value.removeEventListener('pointermove', onCanvasPointerMove)

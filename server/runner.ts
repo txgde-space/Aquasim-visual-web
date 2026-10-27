@@ -6,7 +6,6 @@ import type { IncomingMessage } from 'node:http'
 import type { ExperimentSpec } from '../src/shared/types/experiment'
 import { generateAquaVisualCc } from '../src/features/experiment/lib/generateScratch'
 import { inspectSimulator } from './simulatorConfig'
-import { checkProtocolRequirements } from './protocolRequirements'
 import { cachedCatalog, catalogProbe, invalidateCatalog, saveCatalog } from './protocolCatalog'
 
 /** POST /api/run request body limit (1 MB). */
@@ -32,6 +31,12 @@ interface BuildProgress {
   completed: number
   total: number
 }
+export interface SimulatorTask {
+  kind: 'build' | 'run' | 'clean'
+  home: string
+}
+let activeTask: (SimulatorTask & { promise: Promise<RunOutcome> }) | null = null
+const taskMetadata = (): SimulatorTask | null => activeTask ? { kind: activeTask.kind, home: activeTask.home } : null
 let buildProgress: BuildProgress | null = null
 const setBuildProgress = (home: string, phase: BuildPhase, completed = 0, total = 0) => {
   buildProgress = { home, phase, completed, total }
@@ -40,25 +45,42 @@ const setBuildProgress = (home: string, phase: BuildPhase, completed = 0, total 
 export const readPrecompileProgress = (aquaSimHome: unknown = ''): RunOutcome => {
   const config = inspectSimulator(aquaSimHome)
   if (!config.ok) return { status: 400, payload: config }
-  return { status: 200, payload: { ok: true, progress: buildProgress?.home === config.home ? buildProgress : null } }
+  const home = fs.realpathSync(config.home)
+  return { status: 200, payload: { ok: true, progress: buildProgress?.home === home ? buildProgress : null, task: taskMetadata() } }
 }
 
-const isConfigured = (cwd: string): boolean => (
-  fs.existsSync(path.join(cwd, 'cmake-cache'))
-  || fs.existsSync(path.join(cwd, 'build', 'CMakeCache.txt'))
-  || fs.existsSync(path.join(cwd, 'cmake-cache.txt'))
-)
+interface ConfiguredCache {
+  directory: string
+  warningsAsErrors: boolean
+}
 
-const warningsAsErrors = (cwd: string): boolean => {
-  for (const relative of ['cmake-cache/CMakeCache.txt', 'build/CMakeCache.txt', 'cmake-cache.txt']) {
+const configuredCaches = (cwd: string): ConfiguredCache[] => {
+  let entries: fs.Dirent[]
+  try { entries = fs.readdirSync(cwd, { withFileTypes: true }) }
+  catch { return [] }
+  const caches: ConfiguredCache[] = []
+  const seen = new Set<string>()
+  // ns3.search_cmake_cache searches */CMakeCache.txt and recognizes caches by
+  // their profile and generator. Inspect every candidate: its glob order may
+  // select build/ even when an older cmake-cache/ already has Werror disabled.
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') || (!entry.isDirectory() && !entry.isSymbolicLink())) continue
+    const directory = path.join(cwd, entry.name)
     try {
-      const cache = fs.readFileSync(path.join(cwd, relative), 'utf8')
-      return /^NS3_WARNINGS_AS_ERRORS:BOOL=(ON|TRUE|YES|1)\s*$/mi.test(cache)
+      const file = fs.realpathSync(path.join(directory, 'CMakeCache.txt'))
+      if (seen.has(file)) continue
+      const cache = fs.readFileSync(file, 'utf8')
+      if (!/^build_profile:INTERNAL=\S.*$/m.test(cache) || !/^CMAKE_GENERATOR:[^=]+=\S.*$/m.test(cache)) continue
+      seen.add(file)
+      caches.push({
+        directory,
+        warningsAsErrors: /^NS3_WARNINGS_AS_ERRORS:BOOL=(ON|TRUE|YES|1)\s*$/mi.test(cache),
+      })
     } catch {
-      // Try the other cache locations supported by this runner.
+      // Empty build directories and unrelated files are not configured caches.
     }
   }
-  return false
+  return caches
 }
 
 /**
@@ -90,7 +112,18 @@ const collectRunLog = (cwd: string, sinceMs: number, fallbackName: string): { lo
     }
   }
   if (!hits.length) return { log: null, logName: '' }
-  hits.sort((a, b) => Number(a.name === fallbackName) - Number(b.name === fallbackName) || b.mtimeMs - a.mtimeMs)
+  // Every stack uses the same PHY trace; native logs remain a fallback.
+  hits.sort((a, b) => Number(b.name === fallbackName) - Number(a.name === fallbackName) || b.mtimeMs - a.mtimeMs)
+  if (hits[0].name === fallbackName && hits.length > 1) {
+    // Some implementations expose no common Tx/Rx events. An empty adapter log
+    // must not conceal their native output; this rule applies to every stack.
+    try {
+      const generated = JSON.parse(fs.readFileSync(hits[0].full, 'utf8'))
+      if (Array.isArray(generated.packets) && generated.packets.length === 0) hits.shift()
+    } catch {
+      hits.shift()
+    }
+  }
   return { log: fs.readFileSync(hits[0].full, 'utf8'), logName: hits[0].name }
 }
 
@@ -132,19 +165,31 @@ const runProcess = (
 })
 
 const ensureConfigured = async (cwd: string): Promise<{ ok: boolean; stdout: string }> => {
-  const configured = isConfigured(cwd)
-  if (configured && !warningsAsErrors(cwd)) return { ok: true, stdout: '' }
-  const ns3 = path.join(cwd, 'ns3')
-  const result = await runProcess(cwd, [
-    ns3,
-    'configure',
-    // Existing checkouts keep their profile, modules, and other cached options.
-    ...(!configured ? ['--build-profile=debug', '--enable-examples'] : []),
-    '--disable-werror',
-  ], CONFIGURE_TIMEOUT_MS)
+  const caches = configuredCaches(cwd)
+  const output: string[] = []
+  if (!caches.length) {
+    const result = await runProcess(cwd, [
+      path.join(cwd, 'ns3'), 'configure', '--build-profile=debug', '--enable-examples', '--disable-werror',
+    ], CONFIGURE_TIMEOUT_MS)
+    output.push(result.stdout)
+    if (result.code !== 0) return { ok: false, stdout: output.join('\n') }
+  } else {
+    for (const cache of caches) {
+      if (!cache.warningsAsErrors) continue
+      // Passing only this cache option to CMake preserves the selected profile,
+      // enabled/disabled modules and all other flags. ns3 configure supplies
+      // defaults for some options even when no corresponding flag was passed.
+      const result = await runProcess(cwd, [
+        'cmake', '-S', cwd, '-B', cache.directory, '-DNS3_WARNINGS_AS_ERRORS=OFF',
+      ], CONFIGURE_TIMEOUT_MS)
+      output.push(result.stdout)
+      if (result.code !== 0) return { ok: false, stdout: output.join('\n') }
+    }
+  }
+  const configured = configuredCaches(cwd)
   return {
-    ok: result.code === 0 && isConfigured(cwd) && !warningsAsErrors(cwd),
-    stdout: result.stdout,
+    ok: configured.length > 0 && configured.every((cache) => !cache.warningsAsErrors),
+    stdout: output.filter(Boolean).join('\n'),
   }
 }
 
@@ -160,8 +205,6 @@ const runNs3 = async (cwd: string, program: string, sinceMs: number, logName: st
     ...files,
   }
 }
-
-let activeTask: Promise<RunOutcome> | null = null
 
 const discoverCatalog = async (home: string) => {
   const name = `aqua-visual-catalog-${randomUUID().slice(0, 8)}`
@@ -207,7 +250,7 @@ const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
     try { catalog = await discoverCatalog(config.home) }
     catch (error) {
       setBuildProgress(config.home, 'failed')
-      return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: build.stdout } }
+      return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: [setup.stdout, build.stdout].filter(Boolean).join('\n') } }
     }
   }
   setBuildProgress(config.home, ok ? 'done' : 'failed', ok ? 1 : 0, 1)
@@ -253,9 +296,11 @@ const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<Run
   const scratchAbs = path.join(home, scratchRel)
   const fallbackLog = `net.aqua-visual-${runId}.json`
   const startedAt = Date.now()
+  let setupOutput = ''
 
   try {
     const setup = await ensureConfigured(home)
+    setupOutput = setup.stdout
     if (!setup.ok) {
       return {
         status: 500,
@@ -271,7 +316,6 @@ const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<Run
     const catalog = cachedCatalog(home) || await discoverCatalog(home)
     fs.mkdirSync(path.dirname(scratchAbs), { recursive: true })
     const code = generateAquaVisualCc(spec as ExperimentSpec, catalog, fallbackLog)
-    checkProtocolRequirements(home, spec as ExperimentSpec)
     fs.writeFileSync(scratchAbs, code)
 
     const result = await runNs3(home, scratchName, startedAt, fallbackLog)
@@ -283,7 +327,8 @@ const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<Run
     }
     return { status: result.ok ? 200 : 500, payload }
   } catch (error) {
-    return { status: 500, payload: { ok: false, error: String((error as { message?: unknown })?.message || error) } }
+    const message = String((error as { message?: unknown })?.message || error)
+    return { status: 500, payload: { ok: false, error: message, stdout: [setupOutput, message].filter(Boolean).join('\n') } }
   } finally {
     try {
       fs.unlinkSync(scratchAbs)
@@ -297,31 +342,34 @@ const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<Run
 /**
  * Precompilation and simulation share a lock because both mutate the ns-3 build tree.
  */
-const runExclusive = (start: () => Promise<RunOutcome>): Promise<RunOutcome> => {
+const runExclusive = (kind: SimulatorTask['kind'], aquaSimHome: unknown, start: (home: string) => Promise<RunOutcome>): Promise<RunOutcome> => {
+  const config = inspectSimulator(aquaSimHome)
+  if (!config.ok) return Promise.resolve({ status: 400, payload: config })
+  const home = fs.realpathSync(config.home)
   if (activeTask) {
+    if (kind === 'build' && activeTask.kind === 'build' && activeTask.home === home) return activeTask.promise
     return Promise.resolve({
       status: 409,
-      payload: { ok: false, error: '已有预编译或仿真任务进行中，请等待当前任务完成后再试' },
+      payload: { ok: false, code: 'SIMULATOR_BUSY', task: taskMetadata(), error: '已有预编译、仿真或清除构建任务进行中，请等待当前任务完成后再试' },
     })
   }
-  const task = start()
-  activeTask = task
-  task
-    .catch(() => {})
-    .finally(() => {
-      if (activeTask === task) activeTask = null
-    })
-  return task
+  // Acquire before starting configure/catalog work. Return the finally-wrapped
+  // promise so an immediate request after await cannot observe a stale lock.
+  const promise = Promise.resolve().then(() => start(home)).finally(() => {
+    if (activeTask?.promise === promise) activeTask = null
+  })
+  activeTask = { kind, home, promise }
+  return promise
 }
 
 export const runExperimentGuarded = (spec: unknown, aquaSimHome: unknown = ''): Promise<RunOutcome> =>
-  runExclusive(() => doRunExperiment(spec, aquaSimHome))
+  runExclusive('run', aquaSimHome, (home) => doRunExperiment(spec, home))
 
 export const precompileSimulatorGuarded = (aquaSimHome: unknown = ''): Promise<RunOutcome> =>
-  runExclusive(() => doPrecompile(aquaSimHome))
+  runExclusive('build', aquaSimHome, doPrecompile)
 
 export const clearSimulatorBuildGuarded = (aquaSimHome: unknown = ''): Promise<RunOutcome> =>
-  runExclusive(() => doClearBuild(aquaSimHome))
+  runExclusive('clean', aquaSimHome, doClearBuild)
 
 /** Read a JSON request body, rejecting payloads over the size limit. */
 export const readJsonBody = (req: IncomingMessage, limit = BODY_LIMIT_BYTES): Promise<unknown> => new Promise((resolve, reject) => {

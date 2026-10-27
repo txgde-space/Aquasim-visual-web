@@ -5,7 +5,17 @@ export const normalizeTime = (value: unknown): number => {
 
 export const clampRatio = (value: unknown): number => Math.max(0, Math.min(1, Number(value) || 0))
 
-export const timeDisplay = (us: number): string => {
+/** Guard only the denominator for precise logs; never enlarge their event times. */
+export const durationForProgress = (us: number, fractionalTiming = false): number => (
+  fractionalTiming && us > 0 ? us : Math.max(1, us)
+)
+
+export const timeDisplay = (us: number, fractionalTiming = false): string => {
+  if (fractionalTiming) {
+    if (us >= 1_000_000) return `${Number((us / 1_000_000).toFixed(9))} s`
+    if (us >= 1000) return `${Number((us / 1000).toFixed(6))} ms`
+    return `${Number(us.toFixed(3))} μs`
+  }
   if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)} s`
   return `${(us / 1000).toFixed(2)} ms`
 }

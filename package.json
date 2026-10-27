@@ -10,10 +10,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "preview:public": "vite preview --host 0.0.0.0",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "yarn typecheck:app && yarn typecheck:server",
+    "typecheck:app": "vue-tsc --noEmit -p tsconfig.app.json",
+    "typecheck:server": "tsc --noEmit -p tsconfig.node.json",
+    "check:regressions": "node scripts/check-regressions.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.3.0",
+    "highlight.js": "11.12.0",
     "vue": "^3.5.32",
     "vue-router": "4"
   },

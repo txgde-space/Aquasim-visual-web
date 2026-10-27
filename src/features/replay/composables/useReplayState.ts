@@ -1,5 +1,5 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
-import { DEFAULT_SOUND_SPEED_MPS, LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '@/shared/constants'
+import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '@/shared/constants'
 import { sanitizeDisplayText } from '@/shared/logSafety'
 import type { LogMeta, ParsedLog } from '@/shared/types/log'
 import type {
@@ -13,23 +13,20 @@ import type {
   ReplayReceiver,
 } from '@/shared/types/replay'
 import { LOG_SOURCES } from '../lib/sources'
-import { clampRatio, normalizeTime, reasonLabel } from '../lib/format'
+import { clampRatio, durationForProgress, normalizeTime } from '../lib/format'
+import { propagationSpeedFromMeta, usesFractionalTiming } from '../lib/propagation'
 import { resolveMovingNodes } from '../lib/logNormalize'
 import { normalizePacketsFromParsed } from '../lib/logMerge'
 import { createEmptyParsedLog, parseLog } from '../lib/logParser'
-import { enforceMinGap, summarizePackets } from '../lib/geometry'
+import { summarizePackets } from '../lib/geometry'
+import { buildNodeVisual, type NodeRxEvent } from '../lib/nodeVisuals'
+import { activePacketsAt, indexPacketIntervals } from '../lib/packetTimeline'
 import {
   buildLifecycleGroups,
   buildLifecycleStages,
   buildPacketEntries,
 } from '../lib/packetEntries'
 import type { PlaybackEngine } from './usePlaybackEngine'
-
-const RX_OK_HOLD_US = 180_000
-const RX_FAIL_HOLD_US = 220_000
-
-/** Receiver event enriched with its source packet identity (used by node visuals). */
-type RxEvent = ReplayReceiver & { collision_start_us: number; packet_id: string; src: number }
 
 export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const logSourceKey: Ref<string> = ref('default')
@@ -40,11 +37,10 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const selectedLifecyclePacketId: Ref<string> = ref('')
   const showAllActivePackets: Ref<boolean> = ref(true)
   const interactionMode: Ref<string> = ref('replay')
-  const editSoundSpeed: Ref<number> = ref(DEFAULT_SOUND_SPEED_MPS)
-
   const initialParsed: ParsedLog = parseLog(LOG_SOURCES.default.raw)
+  const editSoundSpeed: Ref<number> = ref(propagationSpeedFromMeta(initialParsed.meta))
 
-  const baseNodesState: Ref<ReplayNode[]> = ref(enforceMinGap(initialParsed.nodes))
+  const baseNodesState: Ref<ReplayNode[]> = ref(initialParsed.nodes.map((node) => ({ ...node })))
   const nodeMovementRows: Ref<Movement[]> = ref(initialParsed.movements as unknown as Movement[])
   const sourcePacketRows: Ref<ReplayPacket[]> = ref(
     normalizePacketsFromParsed(initialParsed, uploadedLogName.value || 'node-log'),
@@ -52,9 +48,12 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const simulatedPacketRows: Ref<ReplayPacket[] | null> = ref(null)
   const parseErrors: Ref<string[]> = ref(initialParsed.parseErrors)
   const metaState: Ref<LogMeta> = ref(initialParsed.meta)
+  const fractionalTiming = computed(() => usesFractionalTiming(metaState.value))
+  const successTraceOnly = computed(() => metaState.value.trace_scope === 'phy-success')
   const editNodes: Ref<ReplayNode[]> = ref([])
   const originalEditPoseById: Ref<Map<number, ReplayNode>> = ref(new Map())
-  const selectedEditNodeId: Ref<number | null> = ref(null)
+  const selectedEditNodeIds: Ref<number[]> = ref([])
+  const selectedEditNodeId = computed(() => selectedEditNodeIds.value.length === 1 ? selectedEditNodeIds.value[0] : null)
 
   const isEditMode: ComputedRef<boolean> = computed(() => interactionMode.value === 'edit')
   const isCustomLog: ComputedRef<boolean> = computed(() => ['upload', 'node-upload', 'topology'].includes(logSourceKey.value))
@@ -80,11 +79,17 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
       ? simulatedPacketRows.value
       : sourcePacketRows.value
   ))
-  const nodesState: ComputedRef<ReplayNode[]> = computed(() => (
-    isEditMode.value
-      ? editNodes.value
-      : resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, playback.currentTime.value)
-  ))
+  const staticNodes = computed(() => {
+    const nodes = baseNodesState.value
+    // Preserve the existing last-record-wins behavior for duplicate node IDs.
+    const byId = new Map(nodes.map((node) => [node.node_id, node]))
+    return byId.size === nodes.length ? nodes : [...byId.values()]
+  })
+  const nodesState: ComputedRef<ReplayNode[]> = computed(() => {
+    if (isEditMode.value) return editNodes.value
+    if (!nodeMovementRows.value.length) return staticNodes.value
+    return resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, playback.currentTime.value)
+  })
 
   const originalReceiverMap: ComputedRef<Map<string, ReplayReceiver>> = computed(() => {
     const map = new Map<string, ReplayReceiver>()
@@ -102,7 +107,10 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const originalSummary = computed(() => summarizePackets(sourcePacketRows.value))
   const simulatedSummary = computed(() => summarizePackets(packetRows.value))
 
-  const nodeById: ComputedRef<Map<number, ReplayNode>> = computed(() => new Map(nodesState.value.map((node) => [node.node_id, node])))
+  // Packet labels depend on topology metadata, not interpolated frame positions.
+  const nodeById: ComputedRef<Map<number, ReplayNode>> = computed(() => new Map(
+    (isEditMode.value ? editNodes.value : baseNodesState.value).map((node) => [node.node_id, node]),
+  ))
   const packetByPacketId: ComputedRef<Map<string, ReplayPacket>> = computed(() => {
     const map = new Map<string, ReplayPacket>()
     for (const packet of packetRows.value) {
@@ -159,30 +167,22 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
 
   const packetEntries: ComputedRef<PacketEntry[]> = computed(() => buildPacketEntries(packets.value, {
     nodeById: nodeById.value,
-    packetMap: packetByPacketId.value,
-    currentTimeUs: playback.currentTime.value,
     originalReceiverMap: originalReceiverMap.value,
     packetRows: packetRows.value,
+    fractionalTiming: fractionalTiming.value,
   }))
 
-  const lifecycleGroups: ComputedRef<LifecycleGroup[]> = computed(() => buildLifecycleGroups(packetEntries.value, playback.currentTime.value))
+  const lifecycleGroups: ComputedRef<LifecycleGroup[]> = computed(() => buildLifecycleGroups(packetEntries.value, fractionalTiming.value))
   const visiblePacketEntries: ComputedRef<PacketEntry[]> = computed(() => packetEntries.value)
 
+  const packetIntervalIndex = computed(() => indexPacketIntervals(packetEntries.value))
+  const activePacketEntries = computed(() => activePacketsAt(packetIntervalIndex.value, playback.currentTime.value))
+
   const currentPacketIds: ComputedRef<Set<string>> = computed(() => new Set(
-    packetEntries.value
-      .filter((packet) => playback.currentTime.value >= packet.startUs && playback.currentTime.value <= packet.endUs)
-      .map((packet) => packet.eventId),
+    activePacketEntries.value.map((packet) => packet.eventId),
   ))
 
-  const activePacket: ComputedRef<PacketEntry | null> = computed(() => {
-    for (let i = packetEntries.value.length - 1; i >= 0; i -= 1) {
-      const packet = packetEntries.value[i]
-      if (playback.currentTime.value >= packet.startUs && playback.currentTime.value <= packet.endUs) {
-        return packet
-      }
-    }
-    return null
-  })
+  const activePacket: ComputedRef<PacketEntry | null> = computed(() => activePacketEntries.value.at(-1) || null)
 
   const focusedPacket: ComputedRef<PacketEntry | null> = computed(() => (
     playback.focusedPacketId.value
@@ -204,7 +204,15 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     return lifecycleGroups.value.find((packet) => packet.packet_id === targetId) || lifecycleGroups.value[0] || null
   })
 
-  const lifecycleStages: ComputedRef<LifecycleStage[]> = computed(() => buildLifecycleStages(lifecyclePacket.value, playback.currentTime.value))
+  const lifecycleStageMetadata = computed(() => buildLifecycleStages(lifecyclePacket.value, 0, fractionalTiming.value))
+  const lifecycleStages: ComputedRef<LifecycleStage[]> = computed(() => {
+    const time = playback.currentTime.value
+    return lifecycleStageMetadata.value.map((stage) => ({
+      ...stage,
+      progressPct: clampRatio((time - stage.startUs) / durationForProgress(stage.endUs - stage.startUs, fractionalTiming.value)) * 100,
+      active: time >= stage.startUs && time <= stage.endUs,
+    }))
+  })
   const activeLifecycleStage: ComputedRef<LifecycleStage | null> = computed(() => lifecycleStages.value.find((stage) => stage.active) || null)
   const globalActiveEventId: ComputedRef<string | null> = computed(() => activePacket.value?.eventId || null)
   const lifecycleActiveEventId: ComputedRef<string | null> = computed(() => activeLifecycleStage.value?.eventId || null)
@@ -215,10 +223,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
       return lifecyclePacket.value.segments
     }
 
-    const activePackets = packetEntries.value.filter(
-      (packet) => playback.currentTime.value >= packet.startUs && playback.currentTime.value <= packet.endUs,
-    )
-    if (showAllActivePackets.value) return activePackets
+    if (showAllActivePackets.value) return activePacketEntries.value
     if (focusedPacket.value) return [focusedPacket.value]
     return activePacket.value ? [activePacket.value] : []
   })
@@ -237,7 +242,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   })
 
   const rxEventsByNode = computed(() => {
-    const map = new Map<number, RxEvent[]>()
+    const map = new Map<number, NodeRxEvent[]>()
     for (const packet of packets.value) {
       for (const receiver of packet.receivers) {
         const list = map.get(receiver.dst) || []
@@ -253,132 +258,28 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     return map
   })
 
-  const makeVisual = (node: ReplayNode, patch: Partial<NodeVisual>): NodeVisual => ({
-    node_id: node.node_id,
-    mode: 'idle',
-    fillProgress: 0,
-    fade: 1,
-    statusText: '空闲',
-    packetId: null,
-    overlay: null,
-    ...patch,
-  })
-
-  const nodeVisuals = computed(() => {
+  const nodeVisuals: ComputedRef<NodeVisual[]> = computed(() => {
     const time = playback.currentTime.value
-
-    return nodesState.value.map((node): NodeVisual => {
-      const txEvents = txEventsByNode.value.get(node.node_id) || []
-      const rxEvents = rxEventsByNode.value.get(node.node_id) || []
-
-      const activeTx = txEvents
-        .filter((packet) => time >= packet.tx_start_us && time <= packet.tx_end_us)
-        .sort((a, b) => a.tx_start_us - b.tx_start_us)
-        .at(-1) || null
-
-      const activeReceivers = rxEvents
-        .filter((receiver) => time >= receiver.rx_start_us && time <= receiver.rx_end_us)
-        .sort((a, b) => a.rx_start_us - b.rx_start_us)
-
-      const activeRxTxConflict = activeReceivers
-        .filter((receiver) => receiver.reason === 'collision_rx_tx')
-        .at(-1) || null
-
-      const activeRxRxConflict = activeReceivers
-        .filter((receiver) => receiver.reason === 'collision_rx_rx' && time >= receiver.collision_start_us)
-        .at(-1) || null
-
-      const preCollisionReceive = activeReceivers
-        .filter((receiver) => receiver.reason === 'collision_rx_rx' && time < receiver.collision_start_us)
-        .at(-1) || null
-
-      const activeReceive = activeReceivers
-        .filter((receiver) => receiver.status === 'ok')
-        .at(-1) || null
-
-      const recentSuccess = rxEvents
-        .filter((receiver) => receiver.status === 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_OK_HOLD_US)
-        .sort((a, b) => a.rx_end_us - b.rx_end_us)
-        .at(-1) || null
-
-      const recentFailure = rxEvents
-        .filter((receiver) => receiver.status !== 'ok' && time > receiver.rx_end_us && time - receiver.rx_end_us <= RX_FAIL_HOLD_US)
-        .sort((a, b) => a.rx_end_us - b.rx_end_us)
-        .at(-1) || null
-
-      if (activeTx) {
-        return makeVisual(node, {
-          mode: 'tx',
-          fillProgress: clampRatio((time - activeTx.tx_start_us) / Math.max(activeTx.tx_duration_us, 1)),
-          statusText: activeRxTxConflict ? '发送中 / rx-tx 冲突' : '发送中',
-          packetId: activeTx.packet_id,
-          overlay: activeRxTxConflict
-            ? { kind: 'collision_rx_tx', strength: 1, packetId: activeRxTxConflict.packet_id }
-            : null,
-        })
-      }
-
-      if (activeRxRxConflict) {
-        return makeVisual(node, {
-          mode: 'collision',
-          fillProgress: 1,
-          statusText: '接收冲突',
-          packetId: activeRxRxConflict.packet_id,
-          overlay: { kind: 'collision_rx_rx', strength: 1, packetId: activeRxRxConflict.packet_id },
-        })
-      }
-
-      if (activeReceive) {
-        return makeVisual(node, {
-          mode: 'rx',
-          fillProgress: clampRatio((time - activeReceive.rx_start_us) / Math.max(activeReceive.rx_duration_us, 1)),
-          statusText: '接收中',
-          packetId: activeReceive.packet_id,
-        })
-      }
-
-      if (preCollisionReceive) {
-        return makeVisual(node, {
-          mode: 'rx',
-          fillProgress: clampRatio((time - preCollisionReceive.rx_start_us) / Math.max(preCollisionReceive.rx_duration_us, 1)),
-          statusText: '接收中',
-          packetId: preCollisionReceive.packet_id,
-        })
-      }
-
-      if (recentFailure) {
-        const fade = clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US))
-        return makeVisual(node, {
-          mode: 'collision-linger',
-          fillProgress: 1,
-          fade,
-          statusText: reasonLabel(recentFailure.reason),
-          packetId: recentFailure.packet_id,
-          overlay: { kind: recentFailure.reason ?? 'fail', strength: fade, packetId: recentFailure.packet_id },
-        })
-      }
-
-      if (recentSuccess) {
-        return makeVisual(node, {
-          mode: 'rx-done',
-          fillProgress: 1,
-          fade: clampRatio(1 - ((time - recentSuccess.rx_end_us) / RX_OK_HOLD_US)),
-          statusText: '接收成功',
-          packetId: recentSuccess.packet_id,
-        })
-      }
-
-      return makeVisual(node, {})
-    })
+    const txByNode = txEventsByNode.value
+    const rxByNode = rxEventsByNode.value
+    return nodesState.value.map((node) => buildNodeVisual(
+      node, txByNode.get(node.node_id) || [], rxByNode.get(node.node_id) || [], time, fractionalTiming.value,
+    ))
   })
 
   const applyParsedLog = (parsed: ParsedLog, exitEdit: () => void = () => {}) => {
+    // Prepare before replacing the current log, so a malformed record cannot
+    // leave the existing replay half-updated. World coordinates stay unchanged.
+    const nextNodes = parsed.nodes.map((node) => ({ ...node }))
+    const nextPackets = normalizePacketsFromParsed(parsed, uploadedLogName.value || 'node-log')
     exitEdit()
-    baseNodesState.value = enforceMinGap(parsed.nodes)
+    selectedEditNodeIds.value = []
+    baseNodesState.value = nextNodes
     nodeMovementRows.value = parsed.movements as unknown as Movement[]
-    sourcePacketRows.value = normalizePacketsFromParsed(parsed, uploadedLogName.value || 'node-log')
+    sourcePacketRows.value = nextPackets
     parseErrors.value = parsed.parseErrors
     metaState.value = parsed.meta
+    editSoundSpeed.value = propagationSpeedFromMeta(parsed.meta)
 
     playback.focusedPacketId.value = null
     selectedLifecyclePacketId.value = ''
@@ -430,6 +331,8 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     showAllActivePackets,
     interactionMode,
     editSoundSpeed,
+    fractionalTiming,
+    successTraceOnly,
     baseNodesState,
     nodeMovementRows,
     sourcePacketRows,
@@ -439,6 +342,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     editNodes,
     originalEditPoseById,
     selectedEditNodeId,
+    selectedEditNodeIds,
     isEditMode,
     isCustomLog,
     activeLogName,

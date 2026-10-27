@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { nextTick, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import type {
   LifecycleGroup,
   LifecycleStage,
   PacketEntry,
   ReplayNode,
 } from '@/shared/types/replay'
-import { SOUND_SPEED_OPTIONS_MPS } from '@/shared/constants'
+import { DEFAULT_RADIO_PROPAGATION_SPEED_MPS, SOUND_SPEED_OPTIONS_MPS } from '@/shared/constants'
 import { LOG_SOURCES } from '../lib/sources'
 import { timeDisplay } from '../lib/format'
 import { receiverPillClass } from '../lib/packetEntries'
 import type { PacketSummary } from '../lib/geometry'
 import type { PacketTrackTarget } from '../composables/useLogPanel'
+import { usePacketListProgress } from '../composables/usePacketListProgress'
+import { useVirtualLogList } from '../composables/useVirtualLogList'
 import StatsBar from './StatsBar.vue'
 
 const props = defineProps<{
+  panelActive: boolean
+  currentTime: number
   isPlaying: boolean
   replayMode: string
   logSourceKey: string
@@ -23,8 +27,11 @@ const props = defineProps<{
   fxLevel: string
   fxLevelOptions: ReadonlyArray<{ key: string; label: string }>
   isEditMode: boolean
+  fractionalTiming?: boolean
+  successTraceOnly?: boolean
   editSoundSpeed: number
   selectedEditNode: ReplayNode | null
+  selectedEditNodeCount: number
   selectedLifecyclePacketId: string
   lifecyclePacketOptions: ReadonlyArray<{ id: string; label: string; startUs: number }>
   lifecyclePacket: LifecycleGroup | null
@@ -32,7 +39,6 @@ const props = defineProps<{
   lifecycleStages: LifecycleStage[]
   parseErrors: string[]
   visiblePacketEntries: PacketEntry[]
-  currentPacketIds: Set<string>
   focusedPacketId: string | null
   summary: PacketSummary
   originalSummary: PacketSummary
@@ -67,6 +73,30 @@ const nodeLogFileInput = useTemplateRef<HTMLInputElement>('nodeLogFileInput')
 const globalLogListEl = useTemplateRef<HTMLElement>('globalLogListEl')
 const lifecycleLogListEl = useTemplateRef<HTMLElement>('lifecycleLogListEl')
 
+const globalList = useVirtualLogList({
+  list: globalLogListEl,
+  getItems: () => props.visiblePacketEntries,
+  isActive: () => props.panelActive && props.replayMode === 'global',
+})
+const { windowItems, startIndex, topPadding, bottomPadding, virtual: virtualGlobalList } = globalList
+const packetIndexByEventId = computed(() => {
+  const indexes = new Map<string, number>()
+  props.visiblePacketEntries.forEach((packet, index) => {
+    if (!indexes.has(packet.eventId)) indexes.set(packet.eventId, index)
+  })
+  return indexes
+})
+
+usePacketListProgress({
+  list: globalLogListEl,
+  getPackets: () => windowItems.value,
+  getTime: () => props.currentTime,
+  isActive: () => props.panelActive,
+  getFocus: () => props.focusedPacketId,
+  isEditMode: () => props.isEditMode,
+  fractionalTiming: () => !!props.fractionalTiming,
+})
+
 const openLogFilePicker = () => {
   logFileInput.value?.click()
 }
@@ -77,8 +107,7 @@ const openNodeLogFilePicker = () => {
 
 const scrollLogItemIntoView = (listEl: HTMLElement | null, eventId: string | null) => {
   if (!listEl || !eventId) return
-  const target = [...listEl.querySelectorAll<HTMLElement>('.log-item')]
-    .find((item) => item.dataset.eventId === eventId)
+  const target = listEl.querySelector<HTMLElement>(`.log-item[data-event-id="${CSS.escape(eventId)}"]`)
   if (!target) return
 
   const listRect = listEl.getBoundingClientRect()
@@ -99,16 +128,18 @@ const scrollLogItemIntoView = (listEl: HTMLElement | null, eventId: string | nul
   })
 }
 
-watch([() => props.replayMode, () => props.globalActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-  if (mode !== 'global' || !eventId) return
-  if (mode === prevMode && eventId === prevEventId) return
+watch([() => props.panelActive, () => props.replayMode, () => props.globalActiveEventId], async ([active, mode, eventId]) => {
+  if (!active || mode !== 'global' || !eventId) return
   await nextTick()
+  if (virtualGlobalList.value) {
+    await globalList.ensureVisible(packetIndexByEventId.value.get(eventId) ?? -1)
+    return
+  }
   scrollLogItemIntoView(globalLogListEl.value, eventId)
 })
 
-watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode, eventId], [prevMode, prevEventId]) => {
-  if (mode !== 'lifecycle' || !eventId) return
-  if (mode === prevMode && eventId === prevEventId) return
+watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleActiveEventId], async ([active, mode, eventId]) => {
+  if (!active || mode !== 'lifecycle' || !eventId) return
   await nextTick()
   scrollLogItemIntoView(lifecycleLogListEl.value, eventId)
 })
@@ -139,6 +170,7 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             </option>
           </select>
         </label>
+        <p v-if="successTraceOnly" class="trace-scope">仅记录物理层发送与成功接收，不含丢包原因。</p>
         <div class="control-fields-grid">
           <label class="field field-compact">
             <div class="field-head"><span>回放模式</span></div>
@@ -160,8 +192,11 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             </select>
           </label>
           <label v-if="isEditMode" class="field field-compact">
-            <div class="field-head"><span>声速</span></div>
-            <select class="select" :value="String(editSoundSpeed)" @change="emit('editSoundSpeedChange', $event)">
+            <div class="field-head"><span>{{ fractionalTiming ? '传播速度' : '声速' }}</span><span v-if="fractionalTiming" class="field-param">m/s</span></div>
+            <input v-if="fractionalTiming" class="select" type="number" min="1" :max="DEFAULT_RADIO_PROPAGATION_SPEED_MPS" step="any"
+              :value="editSoundSpeed" @change="emit('editSoundSpeedChange', $event)" />
+            <select v-else class="select" :value="String(editSoundSpeed)" @change="emit('editSoundSpeedChange', $event)">
+              <option v-if="!SOUND_SPEED_OPTIONS_MPS.includes(editSoundSpeed)" :value="editSoundSpeed">{{ editSoundSpeed }} m/s</option>
               <option v-for="option in SOUND_SPEED_OPTIONS_MPS" :key="option" :value="option">{{ option }} m/s</option>
             </select>
           </label>
@@ -187,9 +222,9 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
           {{ showAllActivePackets ? '显示全部传播' : '仅显示聚焦包' }}
         </button>
       </details>
-      <details v-if="isEditMode && selectedEditNode" class="panel-section" open>
-        <summary>节点参数</summary>
-        <div class="field field-compact">
+      <details v-if="isEditMode" class="panel-section" open>
+        <summary>节点编辑 · 已选 {{ selectedEditNodeCount }} 个</summary>
+        <div v-if="selectedEditNode" class="field field-compact">
           <div class="field-head"><span>{{ selectedEditNode.name }}（{{ selectedEditNode.node_id }}）</span></div>
           <div class="coord-grid">
             <label class="field field-compact">
@@ -205,10 +240,11 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
               <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="emit('coordChange', 'z', $event)" />
             </label>
           </div>
-          <div class="control-btn-row coord-actions">
-            <button class="btn btn-compact" @click="emit('restoreSelected')">恢复该点</button>
-            <button class="btn btn-compact" @click="emit('restoreAll')">恢复全部</button>
-          </div>
+        </div>
+        <p v-else class="edit-selection-hint">{{ selectedEditNodeCount ? '拖动任一选中节点可整体移动；单独选择一个节点可编辑坐标。' : '单击节点选择；按住 Shift 点击或框选可追加选择。' }}</p>
+        <div class="control-btn-row coord-actions">
+          <button class="btn btn-compact" :disabled="!selectedEditNodeCount" @click="emit('restoreSelected')">{{ selectedEditNodeCount === 1 ? '恢复该点' : '恢复选中' }}</button>
+          <button class="btn btn-compact" @click="emit('restoreAll')">恢复全部</button>
         </div>
       </details>
       <input
@@ -229,11 +265,15 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
     </div>
     <div class="card-title">{{ isEditMode ? '推演' : (replayMode === 'lifecycle' ? '生命周期' : '日志') }}</div>
 
-    <div v-if="replayMode === 'lifecycle'" class="lifecycle-panel">
+    <div
+      v-if="replayMode === 'lifecycle'"
+      v-memo="[panelActive, lifecyclePacket, panelActive ? lifecycleStages : null]"
+      class="lifecycle-panel"
+    >
       <div v-if="lifecyclePacket" class="lifecycle-summary">
         <div>当前包：<strong>{{ lifecyclePacket.packet_id }}</strong></div>
         <div>源节点：{{ lifecyclePacket.sourceLabel }}</div>
-        <div>生命周期：{{ timeDisplay(lifecyclePacket.startUs) }} - {{ timeDisplay(lifecyclePacket.endUs) }}</div>
+        <div>生命周期：{{ timeDisplay(lifecyclePacket.startUs, fractionalTiming) }} - {{ timeDisplay(lifecyclePacket.endUs, fractionalTiming) }}</div>
         <div>当前阶段：{{ activeLifecycleStage ? activeLifecycleStage.title : '无' }}</div>
       </div>
 
@@ -251,15 +291,15 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
             class="event-track"
             @pointerdown="emit('trackPointerDown', { ...(lifecyclePacket ?? {}), eventId: stage.eventId, packet_id: stage.eventId, startUs: stage.startUs, endUs: stage.endUs }, $event)"
           >
-            <div class="event-band" :style="{ width: `${stage.progressPct}%` }" aria-hidden="true"></div>
+            <div class="event-band" :style="{ transform: `scaleX(${stage.progressPct / 100})` }" aria-hidden="true"></div>
           </div>
           <div class="log-content">
             <div class="log-head">
-              <span class="time">{{ timeDisplay(stage.startUs) }}</span>
+              <span class="time">{{ timeDisplay(stage.startUs, fractionalTiming) }}</span>
               <span class="tag" :class="stage.status === 'ok' ? 'tag-ok' : (stage.status === 'rxrx' || stage.status === 'fail' ? 'tag-fail' : 'tag-mixed')">
                 {{ stage.type.toUpperCase() }}
               </span>
-              <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs) }}</span>
+              <span class="duration">时长 {{ timeDisplay(stage.endUs - stage.startUs, fractionalTiming) }}</span>
               <span class="packet-title">{{ stage.title }}</span>
             </div>
             <div class="packet-hint">{{ stage.detail }}</div>
@@ -268,26 +308,36 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
       </ul>
     </div>
 
-    <ul v-if="replayMode === 'global'" ref="globalLogListEl" class="log-list">
+    <!-- Labels and receiver details stay cached during playback. The progress
+         effect updates only time-dependent rows and catches up when reopened. -->
+    <ul
+      v-if="replayMode === 'global'"
+      ref="globalLogListEl"
+      v-memo="[windowItems, topPadding, bottomPadding, startIndex, parseErrors, logSourceKey, isEditMode, focusedPacketId]"
+      class="log-list"
+    >
       <li v-if="parseErrors.length" class="log-item parse-error">
         日志解析失败：{{ parseErrors.length }} 条
       </li>
       <li v-if="visiblePacketEntries.length === 0" class="log-item empty">
         {{ logSourceKey === 'topology' ? '仅导入了实验拓扑，尚无发包记录。请在实验页运行仿真后查看回放。' : '暂无日志...' }}
       </li>
+      <li v-if="topPadding" class="log-spacer" :style="{ height: `${topPadding}px` }" aria-hidden="true"></li>
       <li
-        v-for="packet in visiblePacketEntries"
+        v-for="(packet, index) in windowItems"
         :key="packet.eventId"
         class="log-item"
         :data-event-id="packet.eventId"
+        :data-virtual-index="startIndex + index"
+        :aria-posinset="virtualGlobalList ? startIndex + index + 1 : undefined"
+        :aria-setsize="virtualGlobalList ? visiblePacketEntries.length : undefined"
         :class="{
-          'log-item-active': currentPacketIds.has(packet.eventId),
           'log-item-focused': focusedPacketId === packet.eventId,
         }"
         @click="emit('logSelect', packet)"
       >
         <div class="event-track" @pointerdown="emit('trackPointerDown', packet, $event)">
-          <div class="event-band" :style="{ width: `${packet.progressPct}%` }" aria-hidden="true"></div>
+          <div class="event-band" aria-hidden="true"></div>
         </div>
 
         <div class="log-content">
@@ -322,8 +372,21 @@ watch([() => props.replayMode, () => props.lifecycleActiveEventId], async ([mode
           </div>
         </div>
       </li>
+      <li v-if="bottomPadding" class="log-spacer" :style="{ height: `${bottomPadding}px` }" aria-hidden="true"></li>
     </ul>
 
     <StatsBar :summary="summary" :original-summary="originalSummary" :is-edit-mode="isEditMode" />
   </aside>
 </template>
+
+<style scoped>
+.trace-scope { margin: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.edit-selection-hint { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.log-spacer {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  pointer-events: none;
+  list-style: none;
+}
+</style>

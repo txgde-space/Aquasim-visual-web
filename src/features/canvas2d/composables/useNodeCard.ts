@@ -7,10 +7,11 @@ interface NodeCardDeps {
   element: Ref<HTMLElement | null>
   pick: (x: number, y: number) => { node_id: number } | null
   allowClick: () => boolean
+  isActive?: () => boolean
 }
 
 /** Cards open on a node click and remain visible until explicitly dismissed. */
-export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick }: NodeCardDeps) => {
+export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick, isActive = () => true }: NodeCardDeps) => {
   const nodeId = ref<number | null>(null)
   const pinned = computed(() => nodeId.value != null)
   const size = ref({ width: 360, height: 210 })
@@ -20,7 +21,9 @@ export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick }: Node
     down = null
     nodeId.value = null
   }
-  watch(nodeIds, (ids) => { if (nodeId.value != null && !ids.includes(nodeId.value)) close() })
+  watch(() => isActive() ? nodeIds() : null, (ids) => {
+    if (ids && nodeId.value != null && !ids.includes(nodeId.value)) close()
+  })
   watch(element, (el) => {
     observer?.disconnect()
     if (!el) return
@@ -29,7 +32,7 @@ export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick }: Node
   })
   const beginClick = (event: PointerEvent) => {
     down = null
-    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || !allowClick()) return
+    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || !isActive() || !allowClick()) return
     const rect = canvas.value?.getBoundingClientRect()
     if (!rect) return
     const node = pick(event.clientX - rect.left, event.clientY - rect.top)
@@ -37,20 +40,32 @@ export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick }: Node
   }
   const endClick = (event: PointerEvent) => {
     const start = down
+    if (!start || event.pointerId !== start.pointerId) return
     down = null
-    if (!start || event.pointerId !== start.pointerId || event.type === 'pointercancel') return
+    if (event.type === 'pointercancel' || !isActive() || !allowClick()) return
     if ((event.clientX - start.x) ** 2 + (event.clientY - start.y) ** 2 > DRAG_THRESHOLD_PX_SQ) return
     const rect = canvas.value?.getBoundingClientRect()
     if (!rect || pick(event.clientX - rect.left, event.clientY - rect.top)?.node_id !== start.id) return
     nodeId.value = start.id
   }
+  const moveClick = (event: PointerEvent) => {
+    if (!down || event.pointerId !== down.pointerId) return
+    // Once a press becomes a drag, returning to its origin cannot reopen it.
+    if ((event.clientX - down.x) ** 2 + (event.clientY - down.y) ** 2 > DRAG_THRESHOLD_PX_SQ) down = null
+  }
   const outside = (event: PointerEvent) => {
     if (element.value?.contains(event.target as Node)) return
     close()
   }
-  const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+  const escape = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || !isActive()) return
+    const restoreFocus = element.value?.contains(document.activeElement)
+    close()
+    if (restoreFocus) canvas.value?.focus({ preventScroll: true })
+  }
   onMounted(() => {
     document.addEventListener('pointerdown', outside, true)
+    window.addEventListener('pointermove', moveClick)
     window.addEventListener('pointerup', endClick)
     window.addEventListener('pointercancel', endClick)
     window.addEventListener('keydown', escape)
@@ -58,6 +73,7 @@ export const useNodeCard = ({ nodeIds, canvas, element, pick, allowClick }: Node
   onBeforeUnmount(() => {
     observer?.disconnect()
     document.removeEventListener('pointerdown', outside, true)
+    window.removeEventListener('pointermove', moveClick)
     window.removeEventListener('pointerup', endClick)
     window.removeEventListener('pointercancel', endClick)
     window.removeEventListener('keydown', escape)

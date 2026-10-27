@@ -61,14 +61,13 @@ export const validateImportedText = (text: unknown): ValidationResult => {
   return { ok: true }
 }
 
-export const capParsedLog = <T extends ParsedLog>(parsed: T): T => {
-  if (parsed.nodes.length > MAX_LOG_NODES) parsed.nodes.length = MAX_LOG_NODES
-  if (parsed.packets.length > MAX_LOG_PACKETS) parsed.packets.length = MAX_LOG_PACKETS
-  if (parsed.movements.length > MAX_LOG_PACKETS) parsed.movements.length = MAX_LOG_PACKETS
-  if (parsed.nodeEvents.length > MAX_LOG_PACKETS) parsed.nodeEvents.length = MAX_LOG_PACKETS
-  if (parsed.tx.length > MAX_LOG_PACKETS) parsed.tx.length = MAX_LOG_PACKETS
-  if (parsed.rx.length > MAX_LOG_PACKETS) parsed.rx.length = MAX_LOG_PACKETS
-  if (parsed.parseErrors.length > 50) parsed.parseErrors.length = 50
-  parsed.parseErrors = parsed.parseErrors.map((item) => sanitizeDisplayText(item, 80))
-  return parsed
-}
+export const capParsedLog = <T extends ParsedLog>(parsed: T): T => ({
+  ...parsed,
+  nodes: parsed.nodes.slice(0, MAX_LOG_NODES),
+  packets: parsed.packets.slice(0, MAX_LOG_PACKETS),
+  movements: parsed.movements.slice(0, MAX_LOG_PACKETS),
+  nodeEvents: parsed.nodeEvents.slice(0, MAX_LOG_PACKETS),
+  tx: parsed.tx.slice(0, MAX_LOG_PACKETS),
+  rx: parsed.rx.slice(0, MAX_LOG_PACKETS),
+  parseErrors: parsed.parseErrors.slice(0, 50).map((item) => sanitizeDisplayText(item, 80)),
+})

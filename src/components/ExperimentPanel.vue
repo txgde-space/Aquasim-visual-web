@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { macPresetById } from '@/features/experiment/lib/experimentSpec'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import HighlightedCode from '@/features/experiment/components/HighlightedCode.vue'
 
 const props = defineProps({
   form: { type: Object, required: true },
@@ -9,7 +9,6 @@ const props = defineProps({
   warnings: { type: Array, default: () => [] },
   nodeCount: { type: Number, default: 0 },
   selectedCount: { type: Number, default: 0 },
-  selectedMacId: { type: String, default: '' },
   selectedSummary: { type: String, default: '' },
   runStatus: { type: String, default: 'idle' },
 })
@@ -25,30 +24,40 @@ const emit = defineEmits([
   'run',
 ])
 
-const selectedMac = computed(() => (props.selectedMacId ? macPresetById(props.selectedMacId) : null))
 const viewer = ref(null)
+const viewerCloseButton = ref(null)
+let viewerReturnFocus = null
 
-const openViewer = (kind) => {
+const openViewer = async (kind) => {
+  viewerReturnFocus = document.activeElement
   viewer.value = kind
+  await nextTick()
+  if (viewer.value === kind) viewerCloseButton.value?.focus()
 }
 
 const closeViewer = () => {
   viewer.value = null
+  if (viewerReturnFocus?.isConnected) viewerReturnFocus.focus({ preventScroll: true })
+  viewerReturnFocus = null
 }
 
 const viewerTitle = computed(() => (viewer.value === 'cc' ? 'scratch/aqua-visual.cc' : 'experiment.json'))
 const viewerBody = computed(() => (viewer.value === 'cc' ? props.scratchCc : props.specJson))
 
 const onEsc = (event) => {
-  if (event.key === 'Escape') closeViewer()
+  if (event.key !== 'Escape' || event.isComposing) return
+  // A modal owns Escape even if Tab has moved focus outside its contents.
+  event.preventDefault()
+  event.stopPropagation()
+  closeViewer()
 }
 
 watch(viewer, (open) => {
-  if (open) window.addEventListener('keydown', onEsc)
-  else window.removeEventListener('keydown', onEsc)
+  if (open) window.addEventListener('keydown', onEsc, true)
+  else window.removeEventListener('keydown', onEsc, true)
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onEsc))
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc, true))
 
 const copyViewer = async () => {
   try {
@@ -63,34 +72,15 @@ const onField = (key, event) => {
   emit('update-field', key, value)
 }
 
-const onNumberField = (key, event) => {
-  emit('update-field', key, Number(event.target.value))
-}
 </script>
 
 <template>
   <div class="experiment-panel">
-    <div class="dock-title">仿真参数</div>
+    <div class="dock-title">全局仿真参数</div>
     <div class="control-fields-grid">
       <label class="field field-compact" title="仿真停止时间，如 30s">
         <div class="field-head"><span>仿真时长</span><span class="field-param">simStop</span></div>
         <input class="select" :value="form.simStop" @input="onField('simStop', $event)" />
-      </label>
-      <label class="field field-compact" title="传输距离（米）">
-        <div class="field-head"><span>传输距离 m</span><span class="field-param">transRange</span></div>
-        <input class="select" type="number" min="1" step="10" :value="form.transRange" @input="onNumberField('transRange', $event)" />
-      </label>
-      <label v-if="selectedMac?.id === 'swarm'" class="field field-compact" title="首轮延迟，如 1s">
-        <div class="field-head"><span>首轮延迟</span><span class="field-param">InitialRoundDelay</span></div>
-        <input class="select" :value="form.initialRoundDelay" @input="onField('initialRoundDelay', $event)" />
-      </label>
-      <label v-if="selectedMac?.id === 'tdma'" class="field field-compact">
-        <div class="field-head"><span>时隙数</span><span class="field-param">SlotNum</span></div>
-        <input class="select" type="number" min="1" max="8" :value="form.slotNum" @input="onNumberField('slotNum', $event)" />
-      </label>
-      <label v-if="selectedMac?.id === 'tdma'" class="field field-compact" title="时隙长度，如 5s">
-        <div class="field-head"><span>时隙长度</span><span class="field-param">SlotLen</span></div>
-        <input class="select" :value="form.slotLen" @input="onField('slotLen', $event)" />
       </label>
     </div>
 
@@ -119,10 +109,10 @@ const onNumberField = (key, event) => {
             <span>{{ viewerTitle }}</span>
             <div class="code-modal-actions">
               <button class="btn btn-compact" @click="copyViewer">复制</button>
-              <button class="btn btn-compact" @click="closeViewer">关闭</button>
+              <button ref="viewerCloseButton" class="btn btn-compact" @click="closeViewer">关闭</button>
             </div>
           </div>
-          <textarea class="code-modal-body" readonly :value="viewerBody" />
+          <HighlightedCode class="code-modal-body" :code="viewerBody" :language="viewer === 'cc' ? 'cpp' : 'json'" :aria-label="viewerTitle" />
         </div>
       </div>
     </Teleport>

@@ -1,7 +1,8 @@
-import { computed, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
 import { experimentDraft } from './experimentDraft'
 import { catalogItemById, type CatalogLayer } from '../lib/typeIdCatalog'
+import { MAX_NODE_COUNT, nextAvailableNodeId, topologyIssues } from '../lib/experimentValidation'
 
 /** Normalise any node-like object (replay node, canvas node) into a TopologyNode. */
 export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): TopologyNode => ({
@@ -11,9 +12,9 @@ export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): To
   y: Number(node.y) || 0,
   z: Number(node.z) || 0,
   role: node.role || 'node',
-  phyId: node.phyId || 'phy-fdm',
-  macId: node.macId || 'swarm',
-  routingId: node.routingId || 'static',
+  phyId: node.phyId || '',
+  macId: node.macId || '',
+  routingId: node.routingId || '',
   appId: node.appId || 'none',
   appAttrs: { ...node.appAttrs },
   appDestination: node.appDestination,
@@ -33,6 +34,8 @@ const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100
 
 export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
   const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId } = experimentDraft
+  const topologyError = ref('')
+  const canAddNode = computed(() => editNodes.value.length < MAX_NODE_COUNT)
 
   const selectedNodes: ComputedRef<TopologyNode[]> = computed(() => (
     editNodes.value.filter((node) => selectedIds.value.includes(Number(node.node_id)))
@@ -40,7 +43,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
   const selectedEditNode: ComputedRef<TopologyNode | null> = computed(() => (
     selectedNodes.value.length === 1 ? selectedNodes.value[0] : null
   ))
-  const selectedMacId: ComputedRef<string> = computed(() => experimentForm.value.macId || 'swarm')
+  const selectedMacId: ComputedRef<string> = computed(() => experimentForm.value.macId)
   const selectedSummary = computed(() =>
     selectedNodes.value.length ? `已选 ${selectedNodes.value.length} 个节点` : '未选中节点',
   )
@@ -48,9 +51,9 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
   /** Nodes handed to the canvas: form-level protocol fields merged in. */
   const canvasNodes = computed(() => editNodes.value.map((node) => ({
     ...node,
-    macId: experimentForm.value.macId || 'swarm',
-    phyId: experimentForm.value.phyId || 'phy-fdm',
-    routingId: experimentForm.value.routingId || 'static',
+    macId: experimentForm.value.macId,
+    phyId: experimentForm.value.phyId,
+    routingId: experimentForm.value.routingId,
   })))
   const nodeVisuals = computed(() => canvasNodes.value.map((node) => ({
     ...node,
@@ -72,12 +75,12 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
 
   const protocolStack = computed(() => {
     const form = experimentForm.value
-    const channel = stackLayer('channel', form.channelId || 'channel')
-    const prop = stackLayer('channel', form.propagationId || 'range')
+    const channel = stackLayer('channel', form.channelId)
+    const prop = stackLayer('channel', form.propagationId)
     return [
-      { key: 'routing', layer: '路由', ...stackLayer('routing', form.routingId || 'static') },
-      { key: 'mac', layer: 'MAC', ...stackLayer('mac', form.macId || 'swarm') },
-      { key: 'phy', layer: '物理层', ...stackLayer('phy', form.phyId || 'phy-fdm') },
+      { key: 'routing', layer: '路由', ...stackLayer('routing', form.routingId) },
+      { key: 'mac', layer: 'MAC', ...stackLayer('mac', form.macId) },
+      { key: 'phy', layer: '物理层', ...stackLayer('phy', form.phyId) },
       {
         key: 'channel',
         layer: '信道',
@@ -140,13 +143,16 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     ))
   }
 
-  const nextNodeId = () => {
-    const ids = editNodes.value.map((node) => Number(node.node_id)).filter(Number.isFinite)
-    return ids.length ? Math.max(...ids) + 1 : 1
-  }
-
   const addNode = (point?: { x: unknown; y: unknown; z?: unknown } | null) => {
-    const nodeId = nextNodeId()
+    if (!canAddNode.value) {
+      topologyError.value = `最多支持 ${MAX_NODE_COUNT} 个节点`
+      return false
+    }
+    const nodeId = nextAvailableNodeId(editNodes.value.map((node) => node.node_id))
+    if (nodeId === null) {
+      topologyError.value = '没有可用的节点编号'
+      return false
+    }
     const xs = editNodes.value.map((node) => Number(node.x) || 0)
     const ys = editNodes.value.map((node) => Number(node.y) || 0)
     const zs = editNodes.value.map((node) => Number(node.z) || 0)
@@ -169,21 +175,23 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
         y: round2(y),
         z: round2(z),
         role: 'node',
-        phyId: sample?.phyId || 'phy-fdm',
-        macId: selectedMacId.value || sample?.macId || 'swarm',
-        routingId: sample?.routingId || 'static',
+        phyId: experimentForm.value.phyId,
+        macId: experimentForm.value.macId,
+        routingId: experimentForm.value.routingId,
         appId: sample?.appId || 'none',
       },
     ]
     selectedIds.value = [nodeId]
+    topologyError.value = ''
+    return true
   }
 
   const removeSelected = () => {
-    const remaining = editNodes.value.length - selectedIds.value.length
-    if (remaining < 0 || !selectedIds.value.length) return
+    if (!selectedIds.value.length) return
     const drop = new Set(selectedIds.value.map(Number))
     editNodes.value = editNodes.value.filter((node) => !drop.has(Number(node.node_id)))
-    selectedIds.value = editNodes.value[0] ? [Number(editNodes.value[0].node_id)] : []
+    selectedIds.value = []
+    topologyError.value = ''
   }
 
   const assignItem = (payload: AssignPayload | null, ids: number[] = selectedIds.value) => {
@@ -191,17 +199,11 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     const layer = payload.layer || 'mac'
     const itemId = payload.id || payload.macId
     if (!itemId) return
+    const layerDefinition = layers.value.find((entry) => entry.id === layer)
     const item = catalogItemById(layer, itemId, layers.value)
-    if (!item) return
+    const field = item?.field || layerDefinition?.field
+    if (!item || !field) return
     activeCatalogId.value = `${layer}:${itemId}`
-
-    if (layer === 'channel' || payload.scope === 'scene') {
-      if ((item.field || 'channelId') === 'channelId') experimentForm.value = { ...experimentForm.value, channelId: itemId }
-      else experimentForm.value = { ...experimentForm.value, propagationId: itemId }
-      return
-    }
-
-    const field = payload.field || (layer === 'phy' ? 'phyId' : layer === 'routing' ? 'routingId' : layer === 'app' ? 'appId' : 'macId')
     if (field === 'appId') {
       if (!ids.length) return
       const idSet = new Set(ids.map(Number))
@@ -211,12 +213,8 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
       return
     }
 
-    const nextForm = { ...experimentForm.value, [field]: itemId }
-    if (field === 'macId') {
-      if (itemId === 'tdma') nextForm.slotNum = Math.min(8, Math.max(nextForm.slotNum || 4, editNodes.value.length))
-    }
-    experimentForm.value = nextForm
-    editNodes.value = editNodes.value.map((node) => ({ ...node, [field]: itemId }))
+    experimentForm.value = { ...experimentForm.value, [field]: itemId }
+    if (layerDefinition?.scope !== 'scene') editNodes.value = editNodes.value.map((node) => ({ ...node, [field]: itemId }))
   }
 
   const setProtocolAttribute = (typeId: string, name: string, value: string, nodeId?: number) => {
@@ -252,8 +250,16 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
   }
 
   const replaceTopology = (nodes: TopologyNode[]) => {
-    editNodes.value = nodes.map((node) => cloneNode(node))
+    const replacement = nodes.map((node) => cloneNode(node))
+    const issues = topologyIssues(replacement.map((node) => ({ ...node, id: node.node_id })))
+    if (issues.length) {
+      topologyError.value = issues.join('；')
+      return false
+    }
+    editNodes.value = replacement
     selectedIds.value = editNodes.value[0] ? [Number(editNodes.value[0].node_id)] : []
+    topologyError.value = ''
+    return true
   }
 
   const setField = (key: keyof ExperimentForm, value: unknown) => {
@@ -262,6 +268,8 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
 
   return {
     editNodes,
+    canAddNode,
+    topologyError,
     selectedIds,
     experimentForm,
     activeCatalogId,

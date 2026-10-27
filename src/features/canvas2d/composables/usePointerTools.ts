@@ -1,6 +1,7 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref, shallowRef, watch, type Ref } from 'vue'
 import { DRAG_THRESHOLD_PX_SQ, type CanvasView } from './useCanvasView'
 import type { MeasureTool } from './useMeasureTool'
+import { createSnapSession, snapNodeDrag, type SnapGuide, type SnapOptions, type SnapSession } from '../lib/nodeSnapping'
 
 export const TOOL_MODES = Object.freeze({
   PAN: 'pan',
@@ -23,6 +24,7 @@ interface PointerToolsDeps {
   toWorld: (sx: number, sy: number) => { x: number; y: number }
   getSelectedIdSet: () => Set<number>
   getViewBounds: () => { minX: number; maxX: number; minY: number; maxY: number; spanX: number; spanY: number }
+  getSnapOptions?: () => SnapOptions & { scale: number; gridStep: number }
   setHoveredNodeId: (nodeId: number | null) => void
   setHoverCursor: (x: number, y: number) => void
   updateHoveredNode: (sx: number, sy: number) => void
@@ -45,6 +47,7 @@ export const usePointerTools = ({
   toWorld,
   getSelectedIdSet,
   getViewBounds,
+  getSnapOptions,
   setHoveredNodeId,
   setHoverCursor,
   updateHoveredNode,
@@ -60,6 +63,42 @@ export const usePointerTools = ({
     origins: Map<number, { x: number; y: number }>
   } | null> = ref(null)
   let activePointerId: number | null = null
+  const snapGuides = shallowRef<SnapGuide[]>([])
+  let snapSession: SnapSession | null = null
+  let lastDragPointer: { x: number; y: number; altKey: boolean } | null = null
+
+  const clearDragSnapping = () => {
+    snapGuides.value = []
+    snapSession = null
+    lastDragPointer = null
+  }
+
+  const moveDragGroup = (x: number, y: number, altKey: boolean) => {
+    const group = dragGroup.value
+    if (!group) return
+    lastDragPointer = { x, y, altKey }
+    const world = toWorld(x, y)
+    const rawDelta = { x: world.x - group.start.x, y: world.y - group.start.y }
+    const options = getSnapOptions?.()
+    const snapped = snapSession && options && !altKey
+      ? snapNodeDrag(snapSession, rawDelta, options)
+      : { delta: rawDelta, guides: [] }
+    snapGuides.value = snapped.guides
+    const moves = [...group.origins.entries()].map(([nodeId, origin]) => ({
+      node_id: nodeId,
+      x: origin.x + snapped.delta.x,
+      y: origin.y + snapped.delta.y,
+    }))
+    emit('nodes-move', moves)
+    if (moves.length === 1) emit('node-move', moves[0])
+    scheduleDraw()
+  }
+
+  const onSnapModifierChange = (event: KeyboardEvent) => {
+    if (event.key !== 'Alt' || event.isComposing || event.defaultPrevented || !lastDragPointer || !dragGroup.value) return
+    event.preventDefault()
+    moveDragGroup(lastDragPointer.x, lastDragPointer.y, event.type === 'keydown')
+  }
 
   const capturePointer = (pointerId: number) => {
     try {
@@ -111,6 +150,7 @@ export const usePointerTools = ({
     const rect = canvas.getBoundingClientRect()
     const sx = event.clientX - rect.left
     const sy = event.clientY - rect.top
+    clearDragSnapping()
 
     if (event.button === 1 || (spaceHeld.value && toolMode.value !== TOOL_MODES.MEASURE)) {
       startPanGesture(event, sx, sy)
@@ -167,6 +207,13 @@ export const usePointerTools = ({
           nextIds = [clickedId]
         }
         emit('selection-change', nextIds)
+        // A modifier click can remove a node. Do not immediately select it
+        // again through node-select, or start dragging the remaining group.
+        if (!nextIds.includes(clickedId)) {
+          emit('pause-request')
+          scheduleDraw()
+          return
+        }
         emit('node-select', target)
         const origins = new Map<number, { x: number; y: number }>()
         for (const node of props.nodes) {
@@ -179,6 +226,7 @@ export const usePointerTools = ({
           start: toWorld(sx, sy),
           origins,
         }
+        if (getSnapOptions) snapSession = createSnapSession(props.nodes, nextIds, clickedId)
         draggingNodeId.value = target.node_id
         view.dragFrozenBounds.value = { ...getViewBounds() }
         activePointerId = event.pointerId
@@ -197,7 +245,7 @@ export const usePointerTools = ({
           y0: sy,
           x1: sx,
           y1: sy,
-          additive: event.shiftKey && (event.ctrlKey || event.metaKey),
+          additive: event.shiftKey,
         }
         activePointerId = event.pointerId
         view.hasDragged.value = false
@@ -238,19 +286,8 @@ export const usePointerTools = ({
       if ((x - view.panStart.value.x) ** 2 + (y - view.panStart.value.y) ** 2 > DRAG_THRESHOLD_PX_SQ || view.hasDragged.value) {
         view.hasDragged.value = true
       }
-      const world = toWorld(x, y)
-      const dx = world.x - dragGroup.value.start.x
-      const dy = world.y - dragGroup.value.start.y
-      const moves = [...dragGroup.value.origins.entries()].map(([nodeId, origin]) => ({
-        node_id: nodeId,
-        x: origin.x + dx,
-        y: origin.y + dy,
-      }))
-      emit('nodes-move', moves)
-      if (moves.length === 1) {
-        emit('node-move', moves[0])
-      }
-      scheduleDraw()
+      if (!view.hasDragged.value) return
+      moveDragGroup(x, y, !!event.altKey)
       return
     }
 
@@ -258,6 +295,7 @@ export const usePointerTools = ({
       if ((x - view.panStart.value.x) ** 2 + (y - view.panStart.value.y) ** 2 > DRAG_THRESHOLD_PX_SQ || view.hasDragged.value) {
         view.hasDragged.value = true
       }
+      if (!view.hasDragged.value) return
       const world = toWorld(x, y)
       emit('node-move', {
         node_id: draggingNodeId.value,
@@ -304,12 +342,13 @@ export const usePointerTools = ({
   }
 
   const onPointerUp = (event: PointerEvent | null) => {
+    clearDragSnapping()
     if (marquee.value) {
       const box = marquee.value
       const picked = nodesInMarquee(box).map((node) => Number(node.node_id))
       let nextIds: number[]
       if (!view.hasDragged.value) {
-        nextIds = []
+        nextIds = box.additive ? [...getSelectedIdSet()] : []
       } else if (box.additive) {
         nextIds = [...new Set([...getSelectedIdSet(), ...picked])]
       } else {
@@ -404,6 +443,7 @@ export const usePointerTools = ({
   }
 
   const cancelActiveTool = () => {
+    clearDragSnapping()
     if (dragGroup.value || draggingNodeId.value != null) emit('node-move-end')
     dragGroup.value = null
     draggingNodeId.value = null
@@ -433,6 +473,8 @@ export const usePointerTools = ({
     marquee,
     draggingNodeId,
     dragGroup,
+    snapGuides,
+    onSnapModifierChange,
     setNodeScreenInBox: (fn: typeof nodeScreenInBox) => {
       nodeScreenInBox = fn
     },

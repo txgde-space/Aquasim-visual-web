@@ -6,7 +6,7 @@ import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
 import SplitPane from '../components/SplitPane.vue'
 import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS } from '../shared/constants'
-import { session } from '../shared/sessionStore'
+import { session } from '../state/replaySession'
 import { buildExperimentSpec, validateExperiment } from '@/features/experiment/lib/experimentSpec'
 import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
 import { cloneNode, useTopologyEditor } from '@/features/experiment/composables/useTopologyEditor'
@@ -17,6 +17,8 @@ import ExperimentFiles from '@/features/experiment/components/ExperimentFiles.vu
 import NodeProtocolDetails from '@/features/experiment/components/NodeProtocolDetails.vue'
 import ProtocolAttributes from '@/features/experiment/components/ProtocolAttributes.vue'
 import SimulatorSettings from '@/features/experiment/components/SimulatorSettings.vue'
+import ProtocolSourceViewer from '@/features/experiment/components/ProtocolSourceViewer.vue'
+import type { CatalogItem } from '@/features/experiment/lib/typeIdCatalog'
 
 const router = useRouter()
 const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory } = useSimulatorSettings()
@@ -28,8 +30,9 @@ const {
   experimentForm,
   activeCatalogId,
   selectedEditNode,
-  selectedMacId,
   selectedSummary,
+  canAddNode,
+  topologyError,
   canvasNodes,
   nodeVisuals,
   protocolStack,
@@ -52,6 +55,8 @@ const {
 const copyHint = ref('')
 const protoOpen = ref(true)
 const inspectOpen = ref(true)
+const sourceItem = ref<CatalogItem | null>(null)
+const sourceDirectoryLabel = computed(() => simulatorResult.value?.home || aquaSimHome.value.trim() || defaultHome.value || '服务器默认目录')
 
 // 底部控制台：可折叠为标题条，拖拽上边缘调高
 const stageEl = ref<HTMLElement | null>(null)
@@ -68,6 +73,8 @@ const onConsoleGripMove = (event: PointerEvent) => {
 const onConsoleGripUp = () => {
   consoleDragging.value = false
   window.removeEventListener('pointermove', onConsoleGripMove)
+  window.removeEventListener('pointerup', onConsoleGripUp)
+  window.removeEventListener('pointercancel', onConsoleGripUp)
   document.body.style.userSelect = ''
 }
 const onConsoleGripDown = (event: PointerEvent) => {
@@ -78,14 +85,16 @@ const onConsoleGripDown = (event: PointerEvent) => {
   document.body.style.userSelect = 'none'
   window.addEventListener('pointermove', onConsoleGripMove)
   window.addEventListener('pointerup', onConsoleGripUp, { once: true })
+  window.addEventListener('pointercancel', onConsoleGripUp, { once: true })
 }
-onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', onConsoleGripMove)
-  document.body.style.userSelect = ''
-})
+onBeforeUnmount(onConsoleGripUp)
 
 const experimentSpec = computed(() => buildExperimentSpec(experimentForm.value, editNodes.value, catalog.value))
-const experimentWarnings = computed(() => validateExperiment(experimentSpec.value))
+const validationIssues = computed(() => validateExperiment(experimentSpec.value, catalog.value))
+const experimentWarnings = computed(() => [
+  ...validationIssues.value,
+  ...(topologyError.value ? [topologyError.value] : []),
+])
 const generatedScratch = computed(() => {
   try { return generateAquaVisualCc(experimentSpec.value, catalog.value) }
   catch (error) { return `// ${error instanceof Error ? error.message : String(error)}` }
@@ -110,7 +119,7 @@ const runStatusLabel = computed(
 )
 
 const onRun = async () => {
-  if (editNodes.value.length < 2 || !catalogReady.value || simulatorBusy.value) return
+  if (editNodes.value.length < 2 || !catalogReady.value || simulatorBusy.value || validationIssues.value.length) return
   await runExperiment()
   consoleOpen.value = true
 }
@@ -125,7 +134,9 @@ const syncFromReplay = () => {
     y: node.y,
     z: node.z ?? 0,
     role: node.role,
-    macId: 'swarm',
+    phyId: experimentForm.value.phyId,
+    macId: experimentForm.value.macId,
+    routingId: experimentForm.value.routingId,
   })))
 }
 
@@ -168,7 +179,8 @@ const copyJson = async () => {
           :theme-key="CANVAS_THEME_KEY"
           fx-level="standard"
           :edit-mode="true"
-          :allow-place-node="true"
+          :allow-delete-nodes="true"
+          :allow-place-node="canAddNode"
           :box-select="true"
           :original-positions="[]"
           :selected-node-id="selectedEditNode?.node_id ?? undefined"
@@ -180,6 +192,7 @@ const copyJson = async () => {
           @node-select="onNodeSelect"
           @node-place="addNode"
           @selection-change="onSelectionChange"
+          @nodes-delete="removeSelected"
           @protocol-drop="onProtocolDrop"
         >
           <template #node-details="{ node }">
@@ -195,7 +208,7 @@ const copyJson = async () => {
 
       <div class="dock-unit dock-unit-l" :class="{ closed: !protoOpen }">
         <div class="dock dock-left">
-          <ProtocolDrawer :layers="catalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem">
+          <ProtocolDrawer :layers="catalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem" @view-source="sourceItem = $event">
             <template #protocol-settings="{ layerId }">
               <ProtocolAttributes embedded scope="scene" :layer-id="layerId" :layers="catalog" :form="experimentForm" :node="null" :ready="catalogReady" @change="setProtocolAttribute" />
             </template>
@@ -216,14 +229,14 @@ const copyJson = async () => {
       </div>
 
       <div class="dock dock-top cmd-bar">
-        <button class="btn btn-compact" data-testid="exp-add-node" @click="addNode()">添加节点</button>
-        <button class="btn btn-compact" :disabled="selectedIds.length === 0" @click="removeSelected">删除选中</button>
+        <button class="btn btn-compact" data-testid="exp-add-node" :disabled="!canAddNode" @click="addNode()">添加节点</button>
+        <button class="btn btn-compact" :disabled="selectedIds.length === 0" aria-keyshortcuts="Delete Backspace" title="删除选中节点（Delete / Backspace）" @click="removeSelected">删除选中</button>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span class="stack-brief">{{ stackBrief }}</span>
         <span class="cmd-sep" aria-hidden="true"></span>
         <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
         <button class="btn btn-compact" :disabled="runStatus === 'running' || simulatorBusy || importing" @click="newExperiment">新建实验</button>
-        <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || simulatorBusy" @click="onRun">
+        <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || simulatorBusy || validationIssues.length > 0" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
       </div>
@@ -290,7 +303,6 @@ const copyJson = async () => {
             :warnings="experimentWarnings"
             :node-count="editNodes.length"
             :selected-count="selectedIds.length"
-            :selected-mac-id="selectedMacId"
             :selected-summary="selectedSummary"
             :run-status="runStatus"
             @update-field="setField"
@@ -340,6 +352,14 @@ const copyJson = async () => {
       </footer>
       </Transition>
     </div>
+
+    <ProtocolSourceViewer
+      v-if="sourceItem"
+      :item="sourceItem"
+      :aqua-sim-home="aquaSimHome"
+      :directory-label="sourceDirectoryLabel"
+      @close="sourceItem = null"
+    />
 
     <footer class="statusbar">
       <span class="sb-item"><span class="sb-dot" :class="`is-${runStatus}`"></span>{{ runStatusLabel || '就绪' }}</span>

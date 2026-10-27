@@ -1,3 +1,4 @@
+import { onScopeDispose } from 'vue'
 import {
   MAX_LOG_FILES,
   sanitizeFileName,
@@ -22,10 +23,16 @@ export const useLogImport = ({
   /** Bound apply that also exits edit mode (wired in ReplayPage). */
   applyParsedLog: (parsed: ParsedLog) => void
 }) => {
+  let importVersion = 0
+  onScopeDispose(() => { importVersion += 1 })
+
   const loadSampleLog = (key: string) => {
+    importVersion += 1
     const source = LOG_SOURCES[key] || LOG_SOURCES.default
-    state.logSourceKey.value = LOG_SOURCES[key] ? key : 'default'
     applyParsedLog(parseLog(source.raw))
+    state.logSourceKey.value = LOG_SOURCES[key] ? key : 'default'
+    state.uploadedLogName.value = ''
+    state.uploadedNodeLogNames.value = []
   }
 
   const onSampleLogChange = (event: Event) => {
@@ -43,45 +50,55 @@ export const useLogImport = ({
     return { ok: true, text, name: sanitizeFileName(file.name) }
   }
 
+  const importFiles = async (files: File[], mergeNodeLogs: boolean) => {
+    const version = ++importVersion
+    try {
+      const parsedLogs: ParsedLog[] = []
+      const fileNames: string[] = []
+      for (const file of files) {
+        const imported = await importLogFile(file)
+        // Reading a file can finish after a newer selection, sample switch, or
+        // page teardown. Only the latest mounted import may publish its result.
+        if (version !== importVersion) return
+        if (!imported.ok) {
+          state.rejectImportedLog(imported.error)
+          return
+        }
+        parsedLogs.push(parseLog(imported.text))
+        fileNames.push(imported.name)
+      }
+
+      const parsed = mergeNodeLogs ? mergeParsedNodeLogs(parsedLogs, fileNames) : parsedLogs[0]
+      const previousName = state.uploadedLogName.value
+      // The normalization fallback uses this name for per-node event sources.
+      state.uploadedLogName.value = mergeNodeLogs ? '' : fileNames[0]
+      try {
+        applyParsedLog(parsed)
+      } catch (error) {
+        state.uploadedLogName.value = previousName
+        throw error
+      }
+      state.uploadedNodeLogNames.value = mergeNodeLogs ? fileNames : []
+      state.logSourceKey.value = mergeNodeLogs ? 'node-upload' : 'upload'
+    } catch (error) {
+      if (version !== importVersion) return
+      const message = error instanceof Error ? error.message : '无法读取日志文件'
+      state.rejectImportedLog(`导入失败：${message}`)
+    }
+  }
+
   const onLogFileChange = async (event: Event) => {
     const target = event.target as HTMLInputElement
     const file = target?.files?.[0]
     if (target) target.value = ''
-    if (!file) return
-
-    const imported = await importLogFile(file)
-    if (!imported.ok) {
-      state.rejectImportedLog(imported.error)
-      return
-    }
-
-    state.uploadedLogName.value = imported.name
-    state.logSourceKey.value = 'upload'
-    applyParsedLog(parseLog(imported.text))
+    if (file) await importFiles([file], false)
   }
 
   const onNodeLogFilesChange = async (event: Event) => {
     const target = event.target as HTMLInputElement
     const files = [...(target?.files || [])].slice(0, MAX_LOG_FILES)
     if (target) target.value = ''
-    if (!files.length) return
-
-    const parsedLogs: ParsedLog[] = []
-    const fileNames: string[] = []
-    for (const file of files) {
-      const imported = await importLogFile(file)
-      if (!imported.ok) {
-        state.rejectImportedLog(imported.error)
-        return
-      }
-      parsedLogs.push(parseLog(imported.text))
-      fileNames.push(imported.name)
-    }
-
-    const mergedParsed = mergeParsedNodeLogs(parsedLogs, fileNames)
-    state.uploadedNodeLogNames.value = fileNames
-    state.logSourceKey.value = 'node-upload'
-    applyParsedLog(mergedParsed)
+    if (files.length) await importFiles(files, true)
   }
 
   return {

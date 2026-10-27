@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import type { ReplayNode } from './types/replay'
+import type { ReplayNode } from '../shared/types/replay'
 
 export interface ReplaySessionState {
   replayNodes: ReplayNode[] | null

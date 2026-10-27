@@ -1,6 +1,10 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { TYPEID_LAYERS, type CatalogLayer } from '../lib/typeIdCatalog'
 import { LOCAL_STORAGE_KEYS } from '../../../shared/constants'
+import { requestSimulator } from '../api/simulator'
+
+const PROGRESS_TIMEOUT_MS = 10_000
+const WAIT_STATUS_FAILURE_LIMIT = 3
 
 interface SimulatorCheck {
   ok: boolean
@@ -12,9 +16,17 @@ interface SimulatorCheck {
 }
 
 interface BuildProgress {
-  phase: 'configure' | 'build' | 'catalog' | 'done' | 'failed'
+  phase: 'waiting' | 'configure' | 'build' | 'catalog' | 'done' | 'failed'
   completed: number
   total: number
+}
+
+interface OperationResponse {
+  ok?: boolean
+  code?: string
+  stdout?: string
+  error?: string
+  catalog?: CatalogLayer[]
 }
 
 export const useSimulatorSettings = () => {
@@ -32,29 +44,66 @@ export const useSimulatorSettings = () => {
   const cleanError = ref('')
   const result = ref<SimulatorCheck | null>(null)
   let pending: AbortController | null = null
+  let operation: AbortController | null = null
+  let progressRequest: AbortController | null = null
+  let onRunnerAvailable: ((error?: Error) => void) | null = null
+  let waitingStatusFailures = 0
+  let disposed = false
+  let startupPrecompilePending = true
   let progressTimer: ReturnType<typeof setInterval> | null = null
-  let progressRequestPending = false
   const stopProgressPolling = () => {
     if (progressTimer) clearInterval(progressTimer)
     progressTimer = null
+    progressRequest?.abort()
+    progressRequest = null
+  }
+  const invalidateOperation = () => {
+    operation?.abort()
+    operation = null
+    stopProgressPolling()
+    // Release the suspended caller too; its controller check prevents a retry.
+    onRunnerAvailable?.()
+    onRunnerAvailable = null
   }
   const pollBuildProgress = async () => {
-    if (progressRequestPending || buildStatus.value !== 'building') return
-    progressRequestPending = true
+    if (disposed || progressRequest || !operation || buildStatus.value !== 'building') return
+    const currentOperation = operation
+    const wasWaiting = buildProgress.value?.phase === 'waiting'
+    const controller = new AbortController()
+    progressRequest = controller
+    const timeout = setTimeout(() => controller.abort(), PROGRESS_TIMEOUT_MS)
+    controller.signal.addEventListener('abort', () => clearTimeout(timeout), { once: true })
     try {
-      const response = await fetch('/api/simulator/build-progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
-      })
-      if (response.ok) {
-        const data = await response.json() as { progress?: BuildProgress | null }
-        if (buildStatus.value === 'building' && data.progress) buildProgress.value = data.progress
+      const { ok, data } = await requestSimulator<{
+        progress?: BuildProgress | null
+        task?: { kind: 'build' | 'run' | 'clean'; home: string } | null
+      }>('simulator/build-progress', {
+        aquaSimHome: aquaSimHome.value.trim(),
+      }, controller.signal)
+      if (!ok) throw new Error('任务状态请求失败')
+      if (ok && operation === currentOperation && !controller.signal.aborted) {
+        if (buildProgress.value?.phase === 'waiting') {
+          waitingStatusFailures = 0
+          // Only a fresh, explicit idle status can resume a rejected request.
+          // Completed progress may belong to a previous build, not this task.
+          if (wasWaiting && data.task === null) {
+            onRunnerAvailable?.()
+            onRunnerAvailable = null
+          }
+        } else if (data.progress) buildProgress.value = data.progress
       }
     } catch {
       // A transient progress request must not interrupt the actual build.
+      if (wasWaiting && operation === currentOperation && buildProgress.value?.phase === 'waiting') {
+        waitingStatusFailures += 1
+        if (waitingStatusFailures >= WAIT_STATUS_FAILURE_LIMIT) {
+          onRunnerAvailable?.(new Error('无法获取当前任务状态，请检查仿真服务后重新预编译。'))
+          onRunnerAvailable = null
+        }
+      }
     } finally {
-      progressRequestPending = false
+      clearTimeout(timeout)
+      if (progressRequest === controller) progressRequest = null
     }
   }
   try {
@@ -64,8 +113,10 @@ export const useSimulatorSettings = () => {
   }
 
   watch(aquaSimHome, (value) => {
+    startupPrecompilePending = false
     pending?.abort()
     pending = null
+    invalidateOperation()
     checking.value = false
     result.value = null
     catalog.value = TYPEID_LAYERS
@@ -85,28 +136,26 @@ export const useSimulatorSettings = () => {
     }
   }, { flush: 'sync' })
 
-  const checkDirectory = async () => {
+  const checkDirectory = async (precompileAfterCheck = false) => {
+    if (!precompileAfterCheck) startupPrecompilePending = false
+    if (disposed) return
     pending?.abort()
     const controller = new AbortController()
     pending = controller
     checking.value = true
     result.value = null
     try {
-      const response = await fetch('/api/simulator/check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
-        signal: controller.signal,
-      })
-      if (!response.headers.get('content-type')?.includes('application/json')) {
-        throw new Error('仿真服务不可用，请通过 yarn dev 启动服务。')
-      }
-      const data = await response.json() as SimulatorCheck
-      if (pending === controller) {
+      const { ok, data } = await requestSimulator<SimulatorCheck>('simulator/check', {
+        aquaSimHome: aquaSimHome.value.trim(),
+      }, controller.signal)
+      if (pending === controller && !controller.signal.aborted && !disposed) {
         if (data.defaultHome) defaultHome.value = data.defaultHome
-        result.value = { ...data, ok: response.ok && data.ok }
-        catalogReady.value = !!data.catalog
-        catalog.value = data.catalog || TYPEID_LAYERS
+        result.value = { ...data, ok: ok && data.ok }
+        catalogReady.value = ok && data.ok && !!data.catalog
+        catalog.value = catalogReady.value ? data.catalog! : TYPEID_LAYERS
+        // Only the initial check may build automatically. Explicit directory
+        // changes and operations consume this opportunity, including late replies.
+        if (precompileAfterCheck && startupPrecompilePending && ok && data.ok) void precompile()
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -121,10 +170,14 @@ export const useSimulatorSettings = () => {
   }
 
   const precompile = async () => {
-    if (buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    startupPrecompilePending = false
+    if (disposed || buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
     pending?.abort()
     pending = null
     checking.value = false
+    invalidateOperation()
+    const controller = new AbortController()
+    operation = controller
     buildStatus.value = 'building'
     buildLog.value = ''
     buildError.value = ''
@@ -133,46 +186,60 @@ export const useSimulatorSettings = () => {
     progressTimer = setInterval(() => { void pollBuildProgress() }, 600)
     void pollBuildProgress()
     try {
-      const response = await fetch('/api/simulator/build', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
-      })
-      if (!response.headers.get('content-type')?.includes('application/json')) {
-        throw new Error('仿真服务不可用，请通过 yarn dev 启动服务。')
+      while (operation === controller && !controller.signal.aborted) {
+        const { ok, status, data } = await requestSimulator<OperationResponse>('simulator/build', {
+          aquaSimHome: aquaSimHome.value.trim(),
+        }, controller.signal)
+        if (operation !== controller || controller.signal.aborted) return
+        if (status === 409 && data.code === 'SIMULATOR_BUSY') {
+          buildProgress.value = { phase: 'waiting', completed: 0, total: 0 }
+          waitingStatusFailures = 0
+          progressRequest?.abort()
+          progressRequest = null
+          await new Promise<void>((resolve, reject) => {
+            onRunnerAvailable = (error) => error ? reject(error) : resolve()
+            void pollBuildProgress()
+          })
+          if (operation !== controller || controller.signal.aborted) return
+          buildProgress.value = { phase: 'configure', completed: 0, total: 0 }
+          continue
+        }
+        buildLog.value = data.stdout || ''
+        if (!ok || !data.ok) throw new Error(data.error || '预编译失败，请查看编译输出')
+        catalog.value = data.catalog || TYPEID_LAYERS
+        catalogReady.value = !!data.catalog
+        buildStatus.value = 'ok'
+        buildProgress.value = { phase: 'done', completed: 1, total: 1 }
+        break
       }
-      const data = await response.json() as { ok?: boolean; stdout?: string; error?: string; catalog?: CatalogLayer[] }
-      buildLog.value = data.stdout || ''
-      if (!response.ok || !data.ok) throw new Error(data.error || '预编译失败，请查看编译输出')
-      catalog.value = data.catalog || TYPEID_LAYERS
-      catalogReady.value = !!data.catalog
-      buildStatus.value = 'ok'
-      buildProgress.value = { phase: 'done', completed: 1, total: 1 }
     } catch (error) {
+      if (operation !== controller || controller.signal.aborted) return
       buildStatus.value = 'fail'
       buildError.value = error instanceof Error ? error.message : String(error)
     } finally {
-      stopProgressPolling()
+      if (operation === controller) invalidateOperation()
     }
   }
 
   const clearBuild = async () => {
-    if (buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    startupPrecompilePending = false
+    if (disposed || buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    pending?.abort()
+    pending = null
+    checking.value = false
+    invalidateOperation()
+    const controller = new AbortController()
+    operation = controller
     cleanStatus.value = 'cleaning'
     cleanError.value = ''
     buildLog.value = ''
     try {
-      const response = await fetch('/api/simulator/clean', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aquaSimHome: aquaSimHome.value.trim() }),
-      })
-      if (!response.headers.get('content-type')?.includes('application/json')) {
-        throw new Error('仿真服务不可用，请通过 yarn dev 启动服务。')
-      }
-      const data = await response.json() as { ok?: boolean; stdout?: string; error?: string }
+      const { ok, data } = await requestSimulator<OperationResponse>('simulator/clean', {
+        aquaSimHome: aquaSimHome.value.trim(),
+      }, controller.signal)
+      if (operation !== controller || controller.signal.aborted) return
       buildLog.value = data.stdout || ''
-      if (!response.ok || !data.ok) throw new Error(data.error || '清除构建失败')
+      if (!ok || !data.ok) throw new Error(data.error || '清除构建失败')
       catalog.value = TYPEID_LAYERS
       catalogReady.value = false
       buildStatus.value = 'idle'
@@ -180,8 +247,11 @@ export const useSimulatorSettings = () => {
       buildError.value = ''
       cleanStatus.value = 'ok'
     } catch (error) {
+      if (operation !== controller || controller.signal.aborted) return
       cleanStatus.value = 'fail'
       cleanError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      if (operation === controller) invalidateOperation()
     }
   }
 
@@ -193,10 +263,12 @@ export const useSimulatorSettings = () => {
     aquaSimHome.value = path
     void checkDirectory()
   }
-  onMounted(checkDirectory)
+  onMounted(() => { void checkDirectory(true) })
   onBeforeUnmount(() => {
+    disposed = true
     pending?.abort()
-    stopProgressPolling()
+    pending = null
+    invalidateOperation()
   })
 
   return { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory }

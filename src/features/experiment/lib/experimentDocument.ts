@@ -1,6 +1,8 @@
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
 import { buildExperimentSpec, createDefaultExperimentForm } from './experimentSpec'
-import { TYPEID_LAYERS, type CatalogLayer } from './typeIdCatalog'
+import { catalogItemById, TYPEID_LAYERS, type CatalogLayer } from './typeIdCatalog'
+import { isNodeId, MAX_NODE_COUNT, MAX_NODE_ID, MIN_NODE_ID, topologyIssues } from './experimentValidation'
+import { legacyEnvironmentAttributes, legacyProtocolType, mergeProtocolAttributes, migrateLegacyApplications, migrateLegacyProtocolAttributes, readLegacyTrafficSettings } from './legacyExperiment'
 
 export interface ExperimentDraftData {
   form: ExperimentForm
@@ -36,7 +38,7 @@ const protocolAttributes = (value: unknown) => Object.fromEntries(
 export const serializeExperiment = (draft: ExperimentDraftData, layers: CatalogLayer[] = TYPEID_LAYERS): string => JSON.stringify({
   ...buildExperimentSpec(draft.form, draft.nodes, layers),
   editor: {
-    version: 2,
+    version: 3,
     form: draft.form,
     // Retain editor identifiers and unrounded coordinates for a lossless round trip.
     nodes: draft.nodes,
@@ -53,15 +55,21 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
   catch { throw new Error('JSON 格式错误，未修改当前实验') }
   const doc = object(parsed, '实验文件')
   if (doc.schema !== 'aqua-sim-experiment/v0') throw new Error('不支持的实验格式，请导入 aqua-sim-experiment/v0 文件')
+  const editor = doc.editor === undefined ? null : object(doc.editor, 'editor')
+  if (editor && editor.version !== 1 && editor.version !== 2 && editor.version !== 3) throw new Error('不支持的编辑器文件版本')
   const idFor = (layer: string, value: unknown) => {
     const typeId = string(value, `${layer} TypeId`)
     if (!typeId) return layer === 'app' ? 'none' : ''
+    const resolved = legacyProtocolType(layer, typeId, layers)
+    if (resolved !== typeId || catalogItemById(layer, typeId, layers)) return resolved || 'none'
+    // Editor documents also preserve unavailable selections for later correction.
+    if (editor) return typeId
     if (!/^ns3::[A-Za-z0-9_:]+$/.test(typeId)) throw new Error(`无效的 TypeId：${typeId}`)
-    return layers.find((item) => item.id === layer)?.items.find((item) => item.typeId === typeId)?.id || typeId
+    return typeId
   }
   const stack = object(doc.stack, 'stack')
   const phy = object(stack.phy, 'phy')
-  const phyAttrs = object(phy.attrs ?? {}, 'phy.attrs')
+  const phyAttrs = attributes(phy.attrs)
   const mac = object(stack.mac, 'mac')
   const macAttrs = attributes(mac.attrs)
   const routing = object(stack.routing, 'routing')
@@ -71,42 +79,59 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
     simStop: string(doc.simStop, 'simStop'),
     phyId: idFor('phy', phy.type), macId: idFor('mac', mac.type), routingId: idFor('routing', routing.type),
     channelId: idFor('channel', channel.type), propagationId: idFor('channel', channel.propagation),
-    protocolAttributes: protocolAttributes(doc.protocolAttributes),
+    protocolAttributes: mergeProtocolAttributes({
+      [legacyProtocolType('phy', String(phy.type), layers)]: Object.fromEntries(Object.entries(phyAttrs).filter(([key]) => key !== 'txPower')),
+      [legacyProtocolType('mac', String(mac.type), layers)]: macAttrs,
+    }, protocolAttributes(doc.protocolAttributes)),
   }
-  if (phyAttrs.transRange !== undefined) form.transRange = number(phyAttrs.transRange, 'transRange')
-  if (phyAttrs.txPower !== undefined) form.txPower = number(phyAttrs.txPower, 'txPower')
-  if (macAttrs.SlotNum !== undefined) form.slotNum = number(Number(macAttrs.SlotNum), 'SlotNum')
-  if (macAttrs.SlotLen !== undefined) form.slotLen = macAttrs.SlotLen
-  if (macAttrs.InitialRoundDelay !== undefined) form.initialRoundDelay = macAttrs.InitialRoundDelay
-  // Keep all serialized MAC settings, including those without a shortcut in the form.
-  form.protocolAttributes![String(mac.type)] = { ...macAttrs, ...form.protocolAttributes![String(mac.type)] }
-  const traffic = object(doc.traffic, 'traffic')
-  form.trafficId = string(traffic.preset, 'traffic.preset')
-  if (!['none', 'periodic', 'onoff-to'].includes(form.trafficId)) throw new Error('不支持的流量模式')
-  if (form.trafficId !== 'none') {
-    form.trafficSrc = number(traffic.src, 'traffic.src'); form.trafficDst = number(traffic.dst, 'traffic.dst')
-    form.trafficRateBps = number(traffic.rate_bps, 'traffic.rate_bps'); form.trafficPkt = number(traffic.pkt, 'traffic.pkt')
-    form.trafficStart = string(traffic.start, 'traffic.start'); form.trafficStop = string(traffic.stop, 'traffic.stop')
-  }
-  const editor = doc.editor === undefined ? null : object(doc.editor, 'editor')
+  if (phyAttrs.txPower !== undefined) form.txPower = number(Number(phyAttrs.txPower), 'txPower')
+  let legacyTraffic = readLegacyTrafficSettings(doc.traffic)
   if (editor) {
-    if (editor.version !== 1 && editor.version !== 2) throw new Error('不支持的编辑器文件版本')
     const saved = object(editor.form, 'editor.form')
+    legacyTraffic = readLegacyTrafficSettings(doc.traffic, saved)
     const defaults = createDefaultExperimentForm()
-    const fields = Object.fromEntries(Object.entries(defaults).map(([key, fallback]) => [key,
+    const fields = Object.fromEntries(Object.entries(defaults).filter(([key]) => key !== 'protocolAttributes').map(([key, fallback]) => [key,
       saved[key] === undefined ? fallback : typeof fallback === 'number' ? number(saved[key], key) : string(saved[key], key),
     ]))
     form = { ...defaults, ...fields, protocolAttributes: protocolAttributes(saved.protocolAttributes) }
-    if (!['none', 'periodic', 'onoff-to'].includes(form.trafficId)) throw new Error('不支持的流量模式')
+    for (const [field, layer] of [['phyId', 'phy'], ['macId', 'mac'], ['routingId', 'routing'], ['channelId', 'channel'], ['propagationId', 'channel']] as const) {
+      form[field] = legacyProtocolType(layer, form[field], layers)
+    }
+    if (editor.version !== 3) {
+      const selectedPhyType = legacyProtocolType('phy', form.phyId, layers)
+      const samePhy = selectedPhyType === legacyProtocolType('phy', String(phy.type), layers)
+      if (samePhy) form.protocolAttributes = mergeProtocolAttributes({
+        [selectedPhyType]: Object.fromEntries(Object.entries(phyAttrs).filter(([key]) => !['txPower', 'transRange'].includes(key))),
+      }, form.protocolAttributes || {})
+      const selectedMacType = legacyProtocolType('mac', form.macId, layers)
+      const sameMac = selectedMacType === legacyProtocolType('mac', String(mac.type), layers)
+      if (sameMac) form.protocolAttributes = mergeProtocolAttributes({
+        [selectedMacType]: Object.fromEntries(Object.entries(macAttrs).filter(([key]) => !['SlotNum', 'SlotLen', 'InitialRoundDelay'].includes(key))),
+      }, form.protocolAttributes || {})
+      form.protocolAttributes = migrateLegacyProtocolAttributes(form, {
+        ...saved,
+        ...(saved.slotNum === undefined && sameMac && macAttrs.SlotNum !== undefined ? { slotNum: macAttrs.SlotNum } : {}),
+        ...(saved.slotLen === undefined && sameMac && macAttrs.SlotLen !== undefined ? { slotLen: macAttrs.SlotLen } : {}),
+        ...(saved.initialRoundDelay === undefined && sameMac && macAttrs.InitialRoundDelay !== undefined ? { initialRoundDelay: macAttrs.InitialRoundDelay } : {}),
+        ...(saved.transRange === undefined && samePhy && phyAttrs.transRange !== undefined ? { transRange: phyAttrs.transRange } : {}),
+      }, layers)
+    } else {
+      form.protocolAttributes = mergeProtocolAttributes(legacyEnvironmentAttributes(saved.environmentStacks, layers), form.protocolAttributes || {})
+    }
+  } else {
+    form.protocolAttributes = migrateLegacyProtocolAttributes(form, {
+      transRange: phyAttrs.transRange, slotNum: macAttrs.SlotNum,
+      slotLen: macAttrs.SlotLen, initialRoundDelay: macAttrs.InitialRoundDelay,
+    }, layers)
   }
   const sourceNodes = editor?.nodes ?? doc.nodes
-  if (!Array.isArray(sourceNodes) || sourceNodes.length > 64) throw new Error('nodes 必须是最多 64 个节点的数组')
-  const nodes = sourceNodes.map((value): TopologyNode => {
+  if (!Array.isArray(sourceNodes) || sourceNodes.length > MAX_NODE_COUNT) throw new Error(`nodes 必须是最多 ${MAX_NODE_COUNT} 个节点的数组`)
+  let nodes = sourceNodes.map((value): TopologyNode => {
     const node = object(value, '节点')
     const id = number(editor?.nodes ? node.node_id : node.id, '节点编号')
-    if (!Number.isInteger(id) || id < 1 || id > 65534) throw new Error('节点编号必须是 1–65534 的整数')
+    if (!isNodeId(id)) throw new Error(`节点编号必须是 ${MIN_NODE_ID}–${MAX_NODE_ID} 的整数`)
     const appDestination = node.appDestination === undefined ? undefined : number(node.appDestination, '应用目的节点')
-    if (appDestination !== undefined && (!Number.isInteger(appDestination) || appDestination < 1 || appDestination > 65534)) throw new Error('应用目的节点编号无效')
+    if (appDestination !== undefined && !isNodeId(appDestination)) throw new Error('应用目的节点编号无效')
     return {
       ...(appDestination === undefined ? {} : { appDestination }),
       node_id: id, name: string(node.name ?? `Node-${id}`, '节点名称'), role: string(node.role ?? 'node', '节点角色'),
@@ -114,38 +139,13 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
       phyId: editor?.nodes ? string(node.phyId ?? form.phyId, 'phyId') : form.phyId,
       macId: editor?.nodes ? string(node.macId ?? form.macId, 'macId') : form.macId,
       routingId: editor?.nodes ? string(node.routingId ?? form.routingId, 'routingId') : form.routingId,
-      appId: editor?.nodes ? string(node.appId ?? 'none', 'appId') : idFor('app', node.app ?? ''),
+      appId: editor?.nodes ? legacyProtocolType('app', string(node.appId ?? 'none', 'appId'), layers) || 'none' : idFor('app', node.app ?? ''),
       appAttrs: attributes(node.appAttrs),
     }
   })
-  if (new Set(nodes.map((node) => node.node_id)).size !== nodes.length) throw new Error('节点编号不能重复')
-  // Freeze the old global preset/defaults into each application before removing it.
-  if (editor?.version !== 2) {
-    const active = form.trafficId !== 'none'
-    if (active && !nodes.some((node) => node.node_id === form.trafficSrc)) throw new Error('流量源不在拓扑中')
-    const rate = Math.max(1, Math.round(active ? form.trafficRateBps : 80))
-    const packetSize = Math.max(1, Math.round(active ? form.trafficPkt : 50))
-    for (const node of nodes) {
-      if ((!node.appId || node.appId === 'none') && active && node.node_id === form.trafficSrc) {
-        node.appId = idFor('app', 'ns3::OnOffNDApplication')
-      }
-      if (!node.appId || node.appId === 'none') continue
-      const typeId = layers.find((layer) => layer.id === 'app')?.items.find((item) => item.id === node.appId)?.typeId || node.appId
-      const defaults: Record<string, string> = typeId === 'ns3::AquaSimTrafficGen'
-        ? { Delay: String(packetSize * 8 / rate), PacketSize: String(packetSize) }
-        : typeId === 'ns3::OnOffNDApplication'
-          ? { DataRate: `${rate}bps`, PacketSize: String(packetSize), Nsend: String(nodes.length),
-              traffic: String(rate / (packetSize * 8)), mode: active && form.trafficId === 'periodic' ? '0' : '1',
-              OffTime: 'ns3::ConstantRandomVariable[Constant=0]' }
-          : {}
-      node.appAttrs = {
-        ...defaults, StartTime: active ? form.trafficStart : '1s', StopTime: active ? form.trafficStop : form.simStop,
-        ...form.protocolAttributes?.[typeId], ...node.appAttrs,
-      }
-      node.appDestination ??= active ? form.trafficDst : nodes[nodes.length - 1]?.node_id
-    }
-  }
-  form.trafficId = 'none'
+  const nodeIssues = topologyIssues(nodes.map((node) => ({ ...node, id: node.node_id })))
+  if (nodeIssues.length) throw new Error(nodeIssues.join('；'))
+  if (!editor || editor.version === 1) nodes = migrateLegacyApplications({ ...form, ...legacyTraffic }, nodes, layers)
   const selected = editor?.selectedIds
   if (selected !== undefined && (!Array.isArray(selected) || selected.some((id) => typeof id !== 'number'))) throw new Error('选中节点格式错误')
   return {

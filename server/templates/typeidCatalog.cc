@@ -29,20 +29,34 @@ int main() {
         else if (tid.IsChildOf(AquaSimRouting::GetTypeId())) layer = "routing";
         else if (tid == AquaSimChannel::GetTypeId() || tid.IsChildOf(AquaSimChannel::GetTypeId())) layer = "channel";
         else if (tid.IsChildOf(AquaSimPropagation::GetTypeId())) layer = "propagation";
-        else if (tid.IsChildOf(Application::GetTypeId()) &&
-                 (tid.GetName().find("ns3::AquaSim") == 0 || tid.GetName() == "ns3::OnOffNDApplication")) layer = "app";
+        else if (tid.IsChildOf(Application::GetTypeId())) layer = "app";
         else continue;
-        if (!first) std::cout << ','; first = false;
-        std::cout << "{\"layer\":" << Quote(layer) << ",\"typeId\":" << Quote(tid.GetName()) << ",\"attributes\":[";
+        if (!first) std::cout << ',';
+        first = false;
+        std::cout << "{\"layer\":" << Quote(layer) << ",\"typeId\":" << Quote(tid.GetName())
+                  << ",\"parentTypeId\":" << Quote(tid.GetParent().GetName())
+                  << ",\"groupName\":" << Quote(tid.GetGroupName()) << ",\"attributes\":[";
         bool firstAttr = true; std::set<std::string> seen;
         for (auto parent = tid; parent != ObjectBase::GetTypeId(); parent = parent.GetParent()) {
             for (uint32_t j = 0; j < parent.GetAttributeN(); ++j) {
                 auto attr = parent.GetAttribute(j);
-                if (!(attr.flags & TypeId::ATTR_CONSTRUCT) || !seen.insert(attr.name).second) continue;
-                if (!firstAttr) std::cout << ','; firstAttr = false;
+                if (!seen.insert(attr.name).second) continue;
+                if (!firstAttr) std::cout << ',';
+                firstAttr = false;
                 std::cout << "{\"name\":" << Quote(attr.name) << ",\"help\":" << Quote(attr.help)
                           << ",\"valueType\":" << Quote(attr.checker->GetValueTypeName())
-                          << ",\"defaultValue\":" << Quote(attr.initialValue->SerializeToString(attr.checker)) << '}';
+                          << ",\"defaultValue\":" << Quote(attr.initialValue->SerializeToString(attr.checker))
+                          << ",\"ownerTypeId\":" << Quote(parent.GetName())
+                          << ",\"constructible\":" << ((attr.flags & TypeId::ATTR_CONSTRUCT) ? "true" : "false")
+                          << ",\"readable\":" << ((attr.flags & TypeId::ATTR_GET) ? "true" : "false")
+                          << ",\"writable\":" << ((attr.flags & TypeId::ATTR_SET) ? "true" : "false");
+                if (attr.checker->HasUnderlyingTypeInformation()) {
+                    std::cout << ",\"underlyingType\":" << Quote(attr.checker->GetUnderlyingTypeInformation());
+                }
+                if (auto pointer = dynamic_cast<const PointerChecker*>(PeekPointer(attr.checker))) {
+                    std::cout << ",\"pointeeTypeId\":" << Quote(pointer->GetPointeeTypeId().GetName());
+                }
+                std::cout << '}';
             }
             if (parent.GetParent() == parent) break;
         }

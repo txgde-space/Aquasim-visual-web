@@ -8,9 +8,10 @@ export const distanceMeters = (a: Point3D | null | undefined, b: Point3D | null 
   return Math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
 }
 
-export const propagateDelayUs = (src: Point3D, dst: Point3D, soundSpeedMps?: number): number => {
+export const propagateDelayUs = (src: Point3D, dst: Point3D, soundSpeedMps?: number, fractionalTiming = false): number => {
   const speed = Math.max(1, Number(soundSpeedMps) || DEFAULT_SOUND_SPEED_MPS)
-  return Math.round((distanceMeters(src, dst) / speed) * 1_000_000)
+  const delay = (distanceMeters(src, dst) / speed) * 1_000_000
+  return fractionalTiming ? delay : Math.round(delay)
 }
 
 const intervalsOverlap = (a0: number, a1: number, b0: number, b1: number) => a0 < b1 && b0 < a1
@@ -19,6 +20,7 @@ export const recomputeReceiversFromGeometry = (
   packets: ReplayPacket[],
   nodes: ReplayNode[],
   soundSpeedMps: number,
+  fractionalTiming = false,
 ): ReplayPacket[] => {
   const nodeMap = new Map<number, ReplayNode>(nodes.map((node) => [node.node_id, node]))
   const txWindowsByNode = new Map<number, { start: number; end: number; packet_id: string }[]>()
@@ -49,9 +51,9 @@ export const recomputeReceiversFromGeometry = (
       .map((receiver): ReplayReceiver | null => {
         const dstNode = nodeMap.get(Number(receiver.dst))
         if (!dstNode) return null
-        const delayUs = propagateDelayUs(srcNode, dstNode, soundSpeedMps)
+        const delayUs = propagateDelayUs(srcNode, dstNode, soundSpeedMps, fractionalTiming)
         const rxStartUs = packet.tx_start_us + delayUs
-        const rxDurationUs = Math.max(1, packet.tx_duration_us)
+        const rxDurationUs = Math.max(fractionalTiming ? 0 : 1, packet.tx_duration_us)
         return {
           ...receiver,
           dst: Number(receiver.dst),

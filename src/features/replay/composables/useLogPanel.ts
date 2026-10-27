@@ -89,7 +89,7 @@ export const useLogPanel = ({
     playback.scrubStart()
 
     const startUs = Number(packet.startUs)
-    const durationUs = Math.max(1, Number(packet.endUs - startUs))
+    const durationUs = Math.max(state.fractionalTiming.value ? 0 : 1, Number(packet.endUs - startUs))
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
     const ratio = clampRatio(((event as PointerEvent).clientX - rect.left) / Math.max(rect.width, 1))
     playback.seekTime(startUs + (durationUs * ratio))
@@ -117,7 +117,7 @@ export const useLogPanel = ({
       }
     }
 
-    const durationUs = Math.max(1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
+    const durationUs = Math.max(state.fractionalTiming.value ? 0 : 1, activeDragEvent.value.maxUs - activeDragEvent.value.minUs)
     const ratio = clampRatio((event.clientX - activeDragEvent.value.left) / activeDragEvent.value.width)
     playback.queueSeek(activeDragEvent.value.minUs + (durationUs * ratio))
   }

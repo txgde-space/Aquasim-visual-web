@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
-import { AQUA_ITEM_MIME, TYPEID_LAYERS } from '@/features/experiment/lib/typeIdCatalog'
+import { AQUA_ITEM_MIME, orderCatalogLayers, TYPEID_LAYERS } from '@/features/experiment/lib/typeIdCatalog'
 
 const props = defineProps({
   layers: { type: Array, default: () => TYPEID_LAYERS },
@@ -9,7 +9,7 @@ const props = defineProps({
   appliedProtocols: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['assign'])
+const emit = defineEmits(['assign', 'view-source'])
 
 const openLayer = ref('mac')
 
@@ -17,6 +17,7 @@ const toggleLayer = (id) => {
   openLayer.value = openLayer.value === id ? '' : id
 }
 
+const orderedLayers = computed(() => orderCatalogLayers(props.layers))
 const currentLayer = computed(() => props.layers.find((layer) => layer.id === openLayer.value) || null)
 
 const onDragStart = (layer, item, event) => {
@@ -41,6 +42,7 @@ const onItemClick = (layer, item) => {
   emit('assign', { layer: layer.id, id: item.id, typeId: item.typeId, field: item.field || layer.field, scope: layer.scope || 'node' })
 }
 
+const isActive = (layer, item) => props.activeId === `${layer.id}:${item.id}` || props.activeId === `${layer.id}:${item.typeId}`
 const shortType = (typeId) => (typeId ? typeId.replace(/^ns3::/, '') : '—')
 const shortLabel = (id) => ({
   phy: 'PHY',
@@ -58,7 +60,7 @@ const shortLabel = (id) => ({
       <div class="rail-wrap">
         <nav class="rail" aria-label="协议层">
           <button
-            v-for="layer in layers"
+            v-for="layer in orderedLayers"
             :key="layer.id"
             class="rail-btn"
             :class="{ on: openLayer === layer.id }"
@@ -73,11 +75,15 @@ const shortLabel = (id) => ({
           <header class="flyout-head">{{ currentLayer.label }}</header>
           <p v-if="!ready" class="catalog-hint">请先预编译，读取此目录实际注册的协议。</p>
           <div class="flyout-list">
-            <button
+            <div
               v-for="item in currentLayer.items"
               :key="item.id"
+              class="lib-item-row"
+            >
+            <button
               class="lib-item"
-              :class="{ active: activeId === `${currentLayer.id}:${item.id}` }"
+              type="button"
+              :class="{ active: isActive(currentLayer, item) }"
               :draggable="ready"
               :disabled="!ready"
               :data-layer="currentLayer.id"
@@ -88,8 +94,25 @@ const shortLabel = (id) => ({
             >
               <span class="lib-item-name">{{ item.label }}</span>
               <span class="lib-item-tid">{{ shortType(item.typeId) }}</span>
-
             </button>
+            <button
+              v-if="item.typeId && item.id !== 'none'"
+              class="protocol-source-button"
+              type="button"
+              :aria-label="`查看 ${item.label} 源码`"
+              :title="`查看 ${item.typeId} 源码`"
+              :data-source-type-id="item.typeId"
+              :draggable="false"
+              @pointerdown.stop
+              @dragstart.prevent.stop
+              @click.stop="emit('view-source', item)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+            </div>
           </div>
         </section>
         </Transition>
@@ -121,6 +144,12 @@ const shortLabel = (id) => ({
 </template>
 
 <style scoped>
+.lib-item-row { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+.lib-item-row .lib-item { flex: 1; min-width: 0; width: auto; }
+.lib-item-name, .lib-item-tid { max-width: 100%; overflow-wrap: anywhere; }
+.protocol-source-button { display: grid; place-items: center; flex: 0 0 28px; align-self: center; width: 28px; height: 30px; border: 1px solid transparent; border-radius: var(--r-sm); color: var(--muted); transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out); }
+.protocol-source-button:hover { color: var(--accent); background: var(--raised); }
+.protocol-source-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .catalog-hint { padding: 10px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .protocol-drawer {
   display: flex;

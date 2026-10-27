@@ -95,7 +95,6 @@ export interface PacketEntry extends ReplayPacket {
   packetKindClass: string
   packetDurationLabel: string
   prettyTime: string
-  progressPct: number
   blockedReasonText: string | null
   outcomeSummary: string
   startUs: number
@@ -120,7 +119,6 @@ export interface LifecycleGroup {
   packetKindClass: string
   packetDurationLabel: string
   prettyTime: string
-  progressPct: number
 }
 
 /** One tx/rx stage of a lifecycle group. */

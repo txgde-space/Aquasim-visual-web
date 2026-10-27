@@ -7,18 +7,7 @@ export interface ExperimentForm {
   channelId: string
   propagationId: string
   simStop: string
-  transRange: number
   txPower: number
-  slotNum: number
-  slotLen: string
-  initialRoundDelay: string
-  trafficId: string
-  trafficSrc: number
-  trafficDst: number
-  trafficRateBps: number
-  trafficPkt: number
-  trafficStart: string
-  trafficStop: string
   protocolAttributes?: Record<string, Record<string, string>>
 }
 
@@ -65,10 +54,7 @@ export interface ExperimentSpec {
   stack: {
     phy: {
       type: string
-      attrs: {
-        transRange: number
-        txPower: number
-      }
+      attrs: Record<string, unknown>
     }
     mac: {
       type: string

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
-import type { CatalogLayer } from '../lib/typeIdCatalog'
+import { catalogItemById, type CatalogLayer } from '../lib/typeIdCatalog'
+import { hasSocketInterface } from '../lib/protocolMetadata'
 import ProtocolAttributes from './ProtocolAttributes.vue'
 
 const props = defineProps<{ nodeId: number; nodes: TopologyNode[]; layers: CatalogLayer[]; form: ExperimentForm; ready: boolean; disabled: boolean }>()
@@ -12,7 +13,8 @@ const emit = defineEmits<{
 }>()
 const node = computed(() => props.nodes.find((item) => item.node_id === props.nodeId))
 const apps = computed(() => props.layers.find((layer) => layer.id === 'app')?.items || [])
-const selectedAppKnown = computed(() => apps.value.some((app) => app.id === node.value?.appId))
+const selectedApp = computed(() => catalogItemById('app', node.value?.appId || 'none', props.layers))
+const hasDestination = computed(() => hasSocketInterface(selectedApp.value || undefined))
 const destinationKnown = computed(() => node.value?.appDestination === undefined || props.nodes.some((target) => target.node_id === node.value?.appDestination))
 </script>
 
@@ -23,15 +25,15 @@ const destinationKnown = computed(() => node.value?.appDestination === undefined
     <fieldset :disabled="disabled">
       <label class="field field-compact">
         <span class="field-head"><span>应用</span><span class="field-param">Application</span></span>
-        <select class="select" aria-label="节点应用" :disabled="!ready" :value="node.appId || 'none'"
+        <select class="select" aria-label="节点应用" :disabled="!ready" :value="selectedApp?.id || node.appId || 'none'"
           @change="emit('application', node.node_id, ($event.target as HTMLSelectElement).value)">
-          <option v-if="!selectedAppKnown && node.appId" :value="node.appId">{{ node.appId }}（未注册）</option>
+          <option v-if="!selectedApp && node.appId" :value="node.appId">{{ node.appId }}（未注册）</option>
           <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.label }}</option>
         </select>
       </label>
       <p v-if="!ready" class="node-scope">预编译后可选择应用并编辑注册属性。</p>
       <template v-if="node.appId && node.appId !== 'none'">
-        <label class="field field-compact">
+        <label v-if="hasDestination" class="field field-compact">
           <span class="field-head"><span>目的节点</span><span class="field-param">Remote</span></span>
           <select class="select" aria-label="节点应用目的节点" :value="node.appDestination ?? ''"
             @change="emit('destination', node.node_id, ($event.target as HTMLSelectElement).value === '' ? undefined : Number(($event.target as HTMLSelectElement).value))">

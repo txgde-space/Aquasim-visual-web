@@ -1,37 +1,5 @@
 import { distanceMeters } from '@/shared/acousticSim'
-import { MIN_NODE_GAP_M } from '@/shared/constants'
 import type { ReplayNode, ReplayPacket } from '@/shared/types/replay'
-
-export const enforceMinGap = (nodes: ReplayNode[]): ReplayNode[] => {
-  if (nodes.length < 2) return nodes.map((node) => ({ ...node }))
-
-  let minGap = Infinity
-  for (let i = 0; i < nodes.length; i += 1) {
-    for (let j = i + 1; j < nodes.length; j += 1) {
-      const a = nodes[i]
-      const b = nodes[j]
-      const dx = a.x - b.x
-      const dy = a.y - b.y
-      const dz = (a.z ?? 0) - (b.z ?? 0)
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      if (d > 0 && d < minGap) minGap = d
-    }
-  }
-
-  if (!Number.isFinite(minGap) || minGap >= MIN_NODE_GAP_M || minGap <= 0) {
-    return nodes.map((node) => ({ ...node }))
-  }
-
-  const cx = nodes.reduce((sum, node) => sum + node.x, 0) / nodes.length
-  const cy = nodes.reduce((sum, node) => sum + node.y, 0) / nodes.length
-  const scale = MIN_NODE_GAP_M / minGap
-
-  return nodes.map((node) => ({
-    ...node,
-    x: cx + (node.x - cx) * scale,
-    y: cy + (node.y - cy) * scale,
-  }))
-}
 
 export interface PacketSummary {
   packetCount: number

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
 import SplitPane from '../components/SplitPane.vue'
-import { session } from '../shared/sessionStore'
+import { session } from '../state/replaySession'
 import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
 import { parseLog } from '@/features/replay/lib/logParser'
 import { timeDisplay } from '@/features/replay/lib/format'
@@ -15,8 +15,7 @@ import { useLogImport } from '@/features/replay/composables/useLogImport'
 import ReplayToolbar from '@/features/replay/components/ReplayToolbar.vue'
 import TimelineBar from '@/features/replay/components/TimelineBar.vue'
 import LogPanel from '@/features/replay/components/LogPanel.vue'
-
-const NodeScene3D = defineAsyncComponent(() => import('../features/scene3d/NodeScene3D.vue'))
+import AsyncNodeScene3D from '@/features/scene3d/AsyncNodeScene3D.vue'
 
 const FX_LEVEL_OPTIONS = Object.freeze([
   { key: 'standard', label: '标准' },
@@ -66,6 +65,8 @@ const {
   selectedLifecyclePacketId,
   showAllActivePackets,
   editSoundSpeed,
+  fractionalTiming,
+  successTraceOnly,
   baseNodesState,
   parseErrors,
   cycleEndUs,
@@ -78,12 +79,12 @@ const {
   selectedEditNode,
   originalEditPositions,
   selectedEditNodeId,
+  selectedEditNodeIds,
   lifecyclePacketOptions,
   lifecyclePacket,
   lifecycleStages,
   activeLifecycleStage,
   visiblePacketEntries,
-  currentPacketIds,
   summary,
   originalSummary,
   globalActiveEventId,
@@ -113,9 +114,12 @@ const {
 const {
   setInteractionMode,
   onEditNodeMove,
+  onEditNodesMove,
   onEditNodeMoveEnd,
   onEditNodeSelect,
-  restoreSelectedEditNode,
+  onEditSelectionChange,
+  removeSelectedEditNodes,
+  restoreSelectedEditNodes,
   restoreAllEditNodes,
   onEditSoundSpeedChange,
   onEditCoordChange,
@@ -150,7 +154,7 @@ const logSourceLabel = computed(() =>
    实验页应用拓扑时变化。 */
 watch(baseNodesState, (nodes) => {
   session.replayNodes = (nodes || []).map(cloneNode)
-}, { deep: true })
+}, { deep: true, immediate: true })
 
 onMounted(() => {
   if (typeof session.pendingReplayLog === 'string' && session.pendingReplayLog.length) {
@@ -196,6 +200,7 @@ onBeforeUnmount(() => {
              NodeCanvas 隐藏时宿主尺寸归零，其 updateViewport 会忽略并保持状态。 -->
         <NodeCanvas
           v-show="visualMode === '2d'"
+          :active="visualMode === '2d'"
           :nodes="nodesState"
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
@@ -203,40 +208,33 @@ onBeforeUnmount(() => {
           :theme-key="CANVAS_THEME_KEY"
           :fx-level="fxLevel"
           :edit-mode="isEditMode"
+          :allow-delete-nodes="isEditMode"
+          :box-select="isEditMode"
           :original-positions="originalEditPositions"
           :selected-node-id="selectedEditNodeId ?? undefined"
+          :selected-node-ids="selectedEditNodeIds"
           :sound-speed-mps="editSoundSpeed"
           :view-padding="{ top: 24, right: 340 }"
           @pause-request="pauseForTool"
           @node-move="onEditNodeMove"
+          @nodes-move="onEditNodesMove"
+          @nodes-delete="removeSelectedEditNodes"
           @node-move-end="onEditNodeMoveEnd"
           @node-select="onEditNodeSelect"
+          @selection-change="onEditSelectionChange"
         />
-        <Suspense v-if="hasOpened3D">
-          <template #default>
-            <NodeScene3D
-              v-show="visualMode === '3d'"
-              :active="visualMode === '3d'"
-              :nodes="nodesState"
-              :topology-nodes="baseNodesState"
-              :node-visuals="nodeVisuals"
-              :visible-packets="displayPackets"
-              :current-time="currentTime"
-              :theme-key="CANVAS_THEME_KEY"
-              :fx-level="fxLevel"
-            />
-          </template>
-          <template #fallback>
-            <div v-if="visualMode === '3d'" class="visual-loading">
-              <div class="visual-loading-core" aria-hidden="true">
-                <span class="visual-loading-ring ring-a"></span>
-                <span class="visual-loading-ring ring-b"></span>
-                <span class="visual-loading-dot"></span>
-              </div>
-              <p class="visual-loading-title">3D</p>
-            </div>
-          </template>
-        </Suspense>
+        <AsyncNodeScene3D
+          v-if="hasOpened3D"
+          v-show="visualMode === '3d'"
+          :active="visualMode === '3d'"
+          :nodes="nodesState"
+          :topology-nodes="baseNodesState"
+          :node-visuals="nodeVisuals"
+          :visible-packets="displayPackets"
+          :current-time="currentTime"
+          :theme-key="CANVAS_THEME_KEY"
+          :fx-level="fxLevel"
+        />
       </div>
 
       <ReplayToolbar
@@ -268,6 +266,8 @@ onBeforeUnmount(() => {
           :storage-key="LOCAL_STORAGE_KEYS.splitLog"
         >
         <LogPanel
+          :panel-active="logPanelOpen"
+          :current-time="currentTime"
           :show-all-active-packets="showAllActivePackets"
           :is-playing="isPlaying"
           :replay-mode="replayMode"
@@ -278,7 +278,10 @@ onBeforeUnmount(() => {
           :fx-level-options="FX_LEVEL_OPTIONS"
           :is-edit-mode="isEditMode"
           :edit-sound-speed="editSoundSpeed"
+          :fractional-timing="fractionalTiming"
+          :success-trace-only="successTraceOnly"
           :selected-edit-node="selectedEditNode"
+          :selected-edit-node-count="selectedEditNodeIds.length"
           :selected-lifecycle-packet-id="selectedLifecyclePacketId"
           :lifecycle-packet-options="lifecyclePacketOptions"
           :lifecycle-packet="lifecyclePacket"
@@ -286,7 +289,6 @@ onBeforeUnmount(() => {
           :lifecycle-stages="lifecycleStages"
           :parse-errors="parseErrors"
           :visible-packet-entries="visiblePacketEntries"
-          :current-packet-ids="currentPacketIds"
           :focused-packet-id="focusedPacketId"
           :summary="summary"
           :original-summary="originalSummary"
@@ -300,7 +302,7 @@ onBeforeUnmount(() => {
           @edit-sound-speed-change="onEditSoundSpeedChange"
           @fx-level-change="onFxLevelChange"
           @coord-change="onEditCoordChange"
-          @restore-selected="restoreSelectedEditNode"
+          @restore-selected="restoreSelectedEditNodes"
           @restore-all="restoreAllEditNodes"
           @lifecycle-packet-change="onLifecyclePacketChange"
           @log-select="onLogSelect"
@@ -311,6 +313,7 @@ onBeforeUnmount(() => {
       </div>
 
       <TimelineBar
+        :fractional-timing="fractionalTiming"
         :current-time="currentTime"
         :cycle-end-us="cycleEndUs"
         :range-progress-style="rangeProgressStyle"
@@ -327,11 +330,12 @@ onBeforeUnmount(() => {
 
     <footer class="statusbar">
       <span class="sb-item">{{ replayMode === 'lifecycle' ? '单包生命周期' : '全局' }} · {{ logSourceLabel }}</span>
+      <span v-if="isEditMode" class="sb-item">选中 <b>{{ selectedEditNodeIds.length }}</b> 个节点</span>
       <span class="sb-item">成功 <b>{{ summary.okReceivers }}</b></span>
       <span class="sb-item">rx-rx <b>{{ summary.rxrxCollisions }}</b></span>
       <span class="sb-item">rx-tx <b>{{ summary.rxtxCollisions }}</b></span>
       <span class="sb-spacer"></span>
-      <span class="sb-item">{{ timeDisplay(currentTime) }} / {{ timeDisplay(cycleEndUs) }} · {{ speed }}x</span>
+      <span class="sb-item">{{ timeDisplay(currentTime, fractionalTiming) }} / {{ timeDisplay(cycleEndUs, fractionalTiming) }} · {{ speed }}x</span>
     </footer>
   </section>
 </template>

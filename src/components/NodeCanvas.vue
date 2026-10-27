@@ -8,11 +8,13 @@
     @dragover.prevent="onDragOver"
     @drop.prevent="onDrop"
   >
-    <div class="canvas-toolbar" :class="{ 'zoom-open': zoomPanelOpen }" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
+    <div class="canvas-toolbar" :class="{ 'zoom-open': zoomPanelOpen || snapPanelOpen }" @pointerdown.stop @contextmenu.prevent="cancelActiveTool">
       <div class="toolbar-group">
         <button
           class="toolbar-btn"
           :class="{ active: toolMode === 'measure' }"
+          :aria-pressed="toolMode === 'measure'"
+          aria-keyshortcuts="Escape"
           title="测量节点间距离，Esc 取消"
           @click="activateMeasureTool"
         >
@@ -22,7 +24,8 @@
 
       <div ref="zoomControlEl" class="toolbar-group toolbar-zoom" @wheel.stop>
         <button class="toolbar-btn" :class="{ active: zoomPanelOpen }" :aria-expanded="zoomPanelOpen"
-          aria-haspopup="dialog" @click="zoomPanelOpen = !zoomPanelOpen">缩放调节</button>
+          aria-haspopup="dialog" aria-keyshortcuts="Escape" title="调节画布与节点大小，Esc 关闭"
+          @click="snapPanelOpen = false; zoomPanelOpen = !zoomPanelOpen">缩放调节</button>
         <Transition name="zoom-pop">
         <div v-if="zoomPanelOpen" class="zoom-panel" role="dialog" aria-label="缩放设置">
           <label class="zoom-column">
@@ -38,6 +41,22 @@
             <output>{{ nodeSizeScale.toFixed(1) }}×</output>
           </label>
         </div>
+        </Transition>
+      </div>
+
+      <div v-if="editMode" ref="snapControlEl" class="toolbar-group toolbar-snap">
+        <button class="toolbar-btn" :class="{ active: snapping.enabled && (snapping.grid || snapping.alignment || snapping.spacing) }"
+          :aria-expanded="snapPanelOpen" aria-haspopup="dialog" aria-label="移动吸附设置"
+          title="移动吸附：网格、节点对齐、等间距；Alt 临时关闭"
+          @click="zoomPanelOpen = false; snapPanelOpen = !snapPanelOpen">吸附</button>
+        <Transition name="zoom-pop">
+          <div v-if="snapPanelOpen" class="zoom-panel snap-panel" role="dialog" aria-label="移动吸附设置">
+            <label><input v-model="snapping.enabled" type="checkbox" />启用移动吸附</label>
+            <label><input v-model="snapping.grid" :disabled="!snapping.enabled" type="checkbox" />网格<span>{{ scaleBar.label }}</span></label>
+            <label><input v-model="snapping.alignment" :disabled="!snapping.enabled" type="checkbox" />节点水平 / 垂直对齐</label>
+            <label><input v-model="snapping.spacing" :disabled="!snapping.enabled" type="checkbox" />等间距排列</label>
+            <p>按住 <kbd>Alt</kbd> 自由移动</p>
+          </div>
         </Transition>
       </div>
 
@@ -94,6 +113,7 @@
     <canvas
       ref="canvasEl"
       class="canvas"
+      tabindex="0"
       :class="canvasCursorClass"
       :aria-label="`acoustic-node-canvas-${Math.round(displayWidth)}x${Math.round(displayHeight)}`"
       @pointerdown="onCanvasPointerDown"
@@ -126,7 +146,7 @@
     </form>
 
     <div
-      v-if="hoveredNodePos && hoveredNode && hoveredNodeStats"
+      v-if="active && hoveredNodePos && hoveredNode && hoveredNodeStats"
       ref="nodeCardEl"
       class="node-tooltip"
       role="dialog"
@@ -204,6 +224,7 @@ import { useMeasureTool } from '@/features/canvas2d/composables/useMeasureTool'
 import { TOOL_MODES, usePointerTools } from '@/features/canvas2d/composables/usePointerTools'
 import { useNodeCard } from '@/features/canvas2d/composables/useNodeCard'
 import { useNodeTooltip } from '@/features/canvas2d/composables/useNodeTooltip'
+import { drawSnapGuides } from '@/features/canvas2d/lib/draw/snapGuides'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -212,7 +233,9 @@ const props = defineProps({
   currentTime: { type: Number, required: true },
   themeKey: { type: String, default: 'industrial-scada' },
   fxLevel: { type: String, default: 'standard' },
+  active: { type: Boolean, default: true },
   editMode: { type: Boolean, default: false },
+  allowDeleteNodes: { type: Boolean, default: false },
   allowPlaceNode: { type: Boolean, default: false },
   boxSelect: { type: Boolean, default: false },
   originalPositions: { type: Array, default: () => [] },
@@ -237,8 +260,12 @@ const clampNodeSize = (value) => {
 const nodeSizeScale = ref(NODE_SIZE_DEFAULT)
 const zoomControlEl = ref(null)
 const zoomPanelOpen = ref(false)
+const snapControlEl = ref(null)
+const snapPanelOpen = ref(false)
+const snapping = ref({ enabled: true, grid: true, alignment: true, spacing: true })
 const onZoomOutside = (event) => {
   if (!zoomControlEl.value?.contains(event.target)) zoomPanelOpen.value = false
+  if (!snapControlEl.value?.contains(event.target)) snapPanelOpen.value = false
 }
 
 const themeProfile = computed(() => THEME_PROFILES[props.themeKey] || THEME_PROFILES['industrial-scada'])
@@ -272,7 +299,7 @@ const viewInsets = computed(() => {
 const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)) * nodeSizeScale.value)
 const emit = defineEmits([
   'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
-  'protocol-drop',
+  'protocol-drop', 'nodes-delete',
 ])
 let resizeObserver = null
 
@@ -291,13 +318,13 @@ const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, di
 
 const projection = computed(() => ({ bounds: bounds.value, origin: contentOrigin.value, scale: effectiveScale.value, pan: pan.value }))
 
-const loop = useCanvasLoop(() => draw)
+const loop = useCanvasLoop(() => draw, () => props.active)
 const { scheduleDraw } = loop
 
 const view = useCanvasView({
   getProjection: () => projection.value,
   getBaseScale: () => scale.value,
-  getDraw: () => draw,
+  scheduleDraw,
   getCanvasEl: () => canvasEl.value,
 })
 const {
@@ -452,6 +479,7 @@ pointer = usePointerTools({
   toWorld,
   getSelectedIdSet: () => selectedIdSet.value,
   getViewBounds: () => bounds.value,
+  getSnapOptions: () => ({ ...snapping.value, scale: effectiveScale.value, gridStep: pickWorldGridStep(effectiveScale.value) }),
   setHoveredNodeId: (id) => { hoveredNodeId.value = id },
   setHoverCursor: (x, y) => { hoverCursor.value = { x, y } },
   updateHoveredNode,
@@ -468,6 +496,7 @@ const {
   marquee,
   draggingNodeId,
   dragGroup,
+  snapGuides,
   onPointerDown,
   onPointerMove,
   onCanvasPointerMove,
@@ -498,6 +527,7 @@ const card = useNodeCard({
   element: nodeCardEl,
   pick: pickNodeAt,
   allowClick: () => toolMode.value !== TOOL_MODES.MEASURE && !spaceHeld.value,
+  isActive: () => props.active,
 })
 const onCanvasPointerDown = (event) => {
   card.beginClick(event)
@@ -542,6 +572,7 @@ const paintMeasurements = (ctx) => {
 }
 
 const draw = () => {
+  if (!props.active) return
   const ctx = syncCanvasContext(canvasEl.value, displayWidth.value, displayHeight.value)
   if (!ctx) return
 
@@ -569,6 +600,7 @@ const draw = () => {
 
   // Keep measurement endpoints below node bodies and their ID labels.
   paintMeasurements(ctx)
+  if (props.editMode) drawSnapGuides(ctx, snapGuides.value, toScreen, profile, { width: w, height: h })
 
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id) || {
@@ -592,7 +624,7 @@ const draw = () => {
 }
 
 const updateViewport = () => {
-  if (!containerEl.value) return
+  if (!props.active || !containerEl.value) return
   const rect = containerEl.value.getBoundingClientRect()
   /* 视图常驻（v-show）隐藏时宿主尺寸归零：保持既有视口与 backing store，
      重新显示时无需重设 canvas 尺寸，切换无缝 */
@@ -603,12 +635,41 @@ const updateViewport = () => {
 }
 
 watch(
-  () => [props.currentTime, props.nodes, props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.originalPositions, props.selectedNodeId, props.selectedNodeIds],
-  () => {
-    scheduleDraw()
-  },
-  { deep: true, immediate: true },
+  () => props.active ? [props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.selectedNodeId] : null,
+  scheduleDraw,
+  { immediate: true },
 )
+
+// Playback already advances in rAF. Paint after the accompanying props update
+// in the same frame; another scheduled rAF would halve the canvas frame rate.
+// Mounting still paints through onMounted, and pointer/view changes stay batched.
+watch(() => props.currentTime, loop.flushDraw, { flush: 'post' })
+
+// Track the fields actually drawn, including in-place coordinate edits. Do not
+// traverse application settings or packet display metadata on every clock tick.
+watch(
+  () => props.active ? [
+    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role]),
+    props.originalPositions.map((node) => [node.node_id, node.x, node.y]),
+    props.selectedNodeIds.slice(),
+  ] : null,
+  scheduleDraw,
+)
+
+watch(() => props.active, (active) => {
+  loop.cancelDraw()
+  if (!active) {
+    closeContextMenu()
+    zoomPanelOpen.value = false
+    snapPanelOpen.value = false
+    cancelActiveTool()
+    return
+  }
+  // v-show has restored the host size; retain pan/zoom and paint current data.
+  updateViewport()
+  loop.cancelDraw()
+  draw()
+}, { flush: 'post' })
 
 watch(nodeSizeScale, (next) => {
   nodeSizeScale.value = clampNodeSize(next)
@@ -620,7 +681,13 @@ watch(nodeSizeScale, (next) => {
   scheduleDraw()
 })
 
+watch(snapping, (value) => {
+  try { localStorage.setItem(LOCAL_STORAGE_KEYS.nodeSnapping, JSON.stringify(value)) } catch { /* storage can be unavailable */ }
+}, { deep: true })
+
 watch(() => props.editMode, (next, previous) => {
+  if (previous !== undefined) cancelActiveTool()
+  if (!next) snapPanelOpen.value = false
   // Freeze on initial mount too; entering edit mode preserves the current view.
   const editBounds = next
     ? { ...(previous === undefined ? computeEditBounds(props.nodes) : bounds.value) }
@@ -631,10 +698,34 @@ watch(() => props.editMode, (next, previous) => {
 }, { immediate: true })
 
 const onKeyDown = (event) => {
+  if (!props.active || event.defaultPrevented || event.isComposing) return
+  pointer.onSnapModifierChange(event)
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (!props.editMode || !props.allowDeleteNodes || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+    const blocksDeletion = (element) => element?.isContentEditable || element?.closest?.(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"], [role="spinbutton"], dialog, [role="dialog"], [role="alertdialog"]',
+    )
+    if (blocksDeletion(event.target) || blocksDeletion(document.activeElement)
+      || document.querySelector?.('dialog[open], [aria-modal="true"]')) return
+    const hasSelectedNode = props.nodes.some((node) => selectedIdSet.value.has(Number(node.node_id))
+      || (props.selectedNodeId != null && Number(props.selectedNodeId) === Number(node.node_id)))
+    if (!hasSelectedNode) return
+    event.preventDefault()
+    cancelActiveTool()
+    card.close()
+    emit('nodes-delete')
+    return
+  }
   if (event.key === 'Escape') {
+    const hasActiveTool = toolMode.value === TOOL_MODES.MEASURE || zoomPanelOpen.value || snapPanelOpen.value || contextMenu.value
+      || marquee.value || draggingNodeId.value != null || dragGroup.value || isPanning.value
+    const returnToCanvas = hasActiveTool && containerEl.value?.contains(document.activeElement)
     closeContextMenu()
     zoomPanelOpen.value = false
+    snapPanelOpen.value = false
     cancelActiveTool()
+    if (hasActiveTool) event.preventDefault()
+    if (returnToCanvas) canvasEl.value?.focus({ preventScroll: true })
     return
   }
   if (event.code !== 'Space') return
@@ -644,10 +735,19 @@ const onKeyDown = (event) => {
 }
 
 const onKeyUp = (event) => {
+  if (props.active) pointer.onSnapModifierChange(event)
   if (event.code === 'Space') spaceHeld.value = false
 }
 
 onMounted(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.nodeSnapping) || 'null')
+    if (saved && typeof saved === 'object') {
+      for (const key of Object.keys(snapping.value)) {
+        if (typeof saved[key] === 'boolean') snapping.value[key] = saved[key]
+      }
+    }
+  } catch { /* keep defaults when storage is unavailable or malformed */ }
   try {
     const savedNodeSize = localStorage.getItem(LOCAL_STORAGE_KEYS.nodeSize)
     if (savedNodeSize !== null) nodeSizeScale.value = clampNodeSize(savedNodeSize)
@@ -729,6 +829,14 @@ onBeforeUnmount(() => {
 
 .canvas-toolbar.zoom-open { z-index: 30; }
 .toolbar-zoom { position: relative; }
+.toolbar-snap { position: relative; }
+.zoom-panel.snap-panel { flex-direction: column; width: 228px; gap: 10px; }
+.snap-panel label { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 12px; cursor: pointer; }
+.snap-panel input { accent-color: var(--accent); margin: 0; }
+.snap-panel label:has(input:disabled) { opacity: 0.5; }
+.snap-panel label span { margin-left: auto; color: var(--muted); font: 11px var(--font-mono); }
+.snap-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.snap-panel kbd { color: var(--text); font-family: var(--font-mono); }
 .zoom-panel {
   position: absolute;
   bottom: calc(100% + 6px);

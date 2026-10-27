@@ -1,3 +1,4 @@
+import { usesFractionalTiming } from './propagation'
 import type { ParsedLog, ParsedNodeEventRecord, ParsedNodeRecord } from '@/shared/types/log'
 import type { ReplayPacket } from '@/shared/types/replay'
 import { capParsedLog } from '@/shared/logSafety'
@@ -55,7 +56,7 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
   merged.movements = normalizeMovements(merged.movements, merged.nodes)
 
   const packets = txEvents
-    .map((event, index) => normalizeNodeTxEvent(event as unknown as ParsedNodeEventRecord, index))
+    .map((event, index) => normalizeNodeTxEvent(event as unknown as ParsedNodeEventRecord, index, usesFractionalTiming(merged.meta)))
     .filter((packet) => Number.isFinite(packet.src))
     .sort((a, b) => a.tx_start_us - b.tx_start_us)
 
@@ -68,16 +69,23 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
   }
 
   rxEvents
-    .map((event, index) => normalizeNodeRxEvent(event as unknown as ParsedNodeEventRecord, index))
+    .map((event, index) => normalizeNodeRxEvent(event as unknown as ParsedNodeEventRecord, index, usesFractionalTiming(merged.meta)))
     .filter((receiver) => Number.isFinite(receiver.dst))
     .sort((a, b) => a.rx_start_us - b.rx_start_us)
     .forEach((receiver) => {
       const directPacket = receiver.tx_key ? packetsByTxKey.get(receiver.tx_key) : undefined
       const candidatePackets = receiver.packet_id ? (packetsByPacketId.get(receiver.packet_id) || []) : []
-      const matchedPacket = directPacket || candidatePackets
-        .filter((packet) => (!Number.isFinite(receiver.src) || packet.src === receiver.src) && packet.tx_start_us <= receiver.rx_start_us)
-        .sort((a, b) => Math.abs(receiver.rx_start_us - a.tx_start_us) - Math.abs(receiver.rx_start_us - b.tx_start_us))[0]
-        || candidatePackets[0]
+      let matchedPacket = directPacket
+      if (!matchedPacket) {
+        // Nearest preceding TX, preserving the first candidate when times tie.
+        // A scan avoids allocating and sorting the same candidate list per RX.
+        for (const packet of candidatePackets) {
+          if (Number.isFinite(receiver.src) && packet.src !== receiver.src) continue
+          if (packet.tx_start_us > receiver.rx_start_us) continue
+          if (!matchedPacket || packet.tx_start_us > matchedPacket.tx_start_us) matchedPacket = packet
+        }
+        matchedPacket ||= candidatePackets[0]
+      }
 
       if (!matchedPacket) {
         const sourceLabel = receiver.source_file ? String(receiver.source_file) : 'node-log'
@@ -88,10 +96,26 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
       matchedPacket.receivers.push(receiver)
     })
 
-  merged.packets.push(...packets.map((packet) => ({
-    ...packet,
-    receivers: packet.receivers.slice().sort((a, b) => a.rx_start_us - b.rx_start_us),
-  })))
+  for (const packet of packets) {
+    merged.packets.push({
+      ...packet,
+      receivers: packet.receivers.slice().sort((a, b) => a.rx_start_us - b.rx_start_us),
+    })
+  }
+
+  // Supported multi-file inputs can exceed JavaScript's function-argument limit
+  // before the final record cap. Accumulate bounds without spreading arrays.
+  let simEndUs = normalizeTime(merged.meta.sim_end_us)
+  for (const packet of merged.packets) {
+    simEndUs = Math.max(simEndUs, normalizeTime(packet.tx_end_us ?? packet.end_us))
+    for (const receiver of (packet.receivers || []) as Array<Record<string, unknown>>) {
+      simEndUs = Math.max(simEndUs,
+        normalizeTime(receiver.rx_start_us ?? receiver.start_us) + normalizeTime(receiver.rx_duration_us ?? receiver.duration_us))
+    }
+  }
+  for (const movement of merged.movements) {
+    simEndUs = Math.max(simEndUs, normalizeTime(movement.end_us))
+  }
 
   merged.meta = {
     ...merged.meta,
@@ -99,14 +123,7 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
     source_schema: merged.meta.schema,
     log_scope: 'merged-node',
     node_log_count: parsedLogs.length,
-    sim_end_us: Math.max(
-      normalizeTime(merged.meta.sim_end_us),
-      ...merged.packets.map((packet) => Math.max(
-        normalizeTime(packet.tx_end_us ?? packet.end_us),
-        ...((packet.receivers || []) as Array<Record<string, unknown>>).map((receiver) => normalizeTime(receiver.rx_start_us ?? receiver.start_us) + normalizeTime(receiver.rx_duration_us ?? receiver.duration_us)),
-      )),
-      ...merged.movements.map((movement) => normalizeTime(movement.end_us)),
-    ),
+    sim_end_us: simEndUs,
   }
 
   return capParsedLog(merged)
@@ -118,7 +135,7 @@ export const normalizePacketsFromParsed = (parsed: ParsedLog, fallbackLogName: s
       ? parsed.packets
       : (parsed.nodeEvents?.length > 0
         ? mergeParsedNodeLogs([parsed], [fallbackLogName]).packets
-        : buildPacketsFromLegacy(parsed.tx, parsed.rx))
+        : buildPacketsFromLegacy(parsed.tx, parsed.rx, usesFractionalTiming(parsed.meta)))
   )
-    .map((packet, index) => normalizePacket(packet, index))
+    .map((packet, index) => normalizePacket(packet, index, usesFractionalTiming(parsed.meta)))
 )

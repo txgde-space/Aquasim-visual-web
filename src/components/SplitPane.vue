@@ -54,6 +54,8 @@ const onPointerMove = (event: PointerEvent) => {
 const onPointerUp = () => {
   dragging.value = false
   window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
   document.body.style.userSelect = ''
   persist()
 }
@@ -65,6 +67,7 @@ const onPointerDown = (event: PointerEvent) => {
   startWidth = width.value
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp, { once: true })
+  window.addEventListener('pointercancel', onPointerUp, { once: true })
   document.body.style.userSelect = 'none'
 }
 
@@ -87,6 +90,8 @@ const onKeydown = (event: KeyboardEvent) => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
   document.body.style.userSelect = ''
 })
 </script>
@@ -132,7 +137,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   width: 7px;
   cursor: col-resize;
-  z-index: 5;
+  z-index: 2;
   touch-action: none;
 }
 .split-handle::after {
@@ -144,7 +149,7 @@ onBeforeUnmount(() => {
   width: 2px;
   border-radius: 2px;
   background: transparent;
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .split-handle:hover::after,
 .split-handle:focus-visible::after,

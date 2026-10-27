@@ -8,6 +8,7 @@ defineProps<{
   rangeProgressStyle: string
   isPlaying: boolean
   speed: number
+  fractionalTiming?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -47,8 +48,8 @@ const onInput = (event: Event) => {
       </svg>
     </button>
     <div class="tp-time">
-      <span class="tp-now">{{ timeDisplay(currentTime) }}</span>
-      <span class="tp-total">/ {{ timeDisplay(cycleEndUs) }}</span>
+      <span class="tp-now">{{ timeDisplay(currentTime, fractionalTiming) }}</span>
+      <span class="tp-total">/ {{ timeDisplay(cycleEndUs, fractionalTiming) }}</span>
     </div>
     <label class="range-wrap">
       <input
@@ -56,7 +57,7 @@ const onInput = (event: Event) => {
         type="range"
         :min="0"
         :max="cycleEndUs"
-        :step="1000"
+        :step="fractionalTiming ? 0.001 : 1000"
         :value="currentTime"
         :style="{ '--range-progress': rangeProgressStyle }"
         aria-label="回放进度"

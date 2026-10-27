@@ -40,6 +40,14 @@ const appendParsedObject = (raw: unknown, parsed: ParsedLog): void => {
       time_unit: sanitizeDisplayText(meta.time_unit || parsed.meta.time_unit, 16),
       distance_unit: sanitizeDisplayText(meta.distance_unit || parsed.meta.distance_unit, 16),
       sim_end_us: Number(meta.sim_end_us ?? parsed.meta.sim_end_us) || 0,
+      ...(meta.trace_scope === 'phy-success' ? { trace_scope: meta.trace_scope } : {}),
+      ...(typeof meta.time_precision_us === 'number'
+        && Number.isFinite(meta.time_precision_us) && meta.time_precision_us > 0
+        ? { time_precision_us: meta.time_precision_us } : {}),
+      ...(meta.medium === 'acoustic' || meta.medium === 'radio' ? { medium: meta.medium } : {}),
+      ...(typeof meta.propagation_speed_mps === 'number'
+        && Number.isFinite(meta.propagation_speed_mps) && meta.propagation_speed_mps > 0
+        ? { propagation_speed_mps: meta.propagation_speed_mps } : {}),
     }
   } else if (obj.type === 'node' && Number.isFinite(Number(obj.node_id))) {
     const nodeId = Number(obj.node_id)

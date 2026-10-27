@@ -42,8 +42,10 @@ interface BabylonSceneDeps {
   getActive?: () => boolean
   /** Called for POINTERPICK with the picked mesh's nodeId, or null on empty pick. */
   onPick: (nodeId: number | null) => void
-  /** Called every render frame before scene.render() (tooltip sync, axes widget). */
+  /** Called before scene.render() to flush pending mesh data and sync overlays. */
   onFrame: () => void
+  /** Report initialization/render failures to the scene's loading boundary. */
+  onError?: (error: unknown) => void
   /** Called first during disposal so owned meshes/materials release before the scene. */
   cleanup?: () => void
 }
@@ -60,6 +62,7 @@ export const useBabylonScene = ({
   getActive,
   onPick,
   onFrame,
+  onError,
   cleanup,
 }: BabylonSceneDeps) => {
   let engine: Engine | null = null
@@ -70,6 +73,7 @@ export const useBabylonScene = ({
   let defaultCameraState: CameraPose | null = null
   const pressedKeys = new Set<string>()
   let lastFrameTime = 0
+  let failed = false
 
   const getEngine = () => engine
   const getScene = () => scene
@@ -99,13 +103,17 @@ export const useBabylonScene = ({
   }
 
   const renderLoop = () => {
-    if (!scene || !camera) return
-    const now = performance.now()
-    const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, CAMERA_MAX_FRAME_SECONDS) : 0
-    lastFrameTime = now
-    moveFromKeyboard(dt)
-    onFrame()
-    scene.render()
+    if (!scene || !camera || getActive?.() === false) return
+    try {
+      const now = performance.now()
+      const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, CAMERA_MAX_FRAME_SECONDS) : 0
+      lastFrameTime = now
+      moveFromKeyboard(dt)
+      onFrame()
+      scene.render()
+    } catch (error) {
+      reportFailure(error)
+    }
   }
 
   /* 视图常驻（v-show）时隐藏期间停掉 renderLoop，避免不可见场景的 GPU/CPU
@@ -143,8 +151,12 @@ export const useBabylonScene = ({
 
   const resize = () => {
     if (!engine) return
-    engine.resize()
-    onFrame()
+    try {
+      engine.resize()
+      onFrame()
+    } catch (error) {
+      reportFailure(error)
+    }
   }
 
   const onCanvasPointerDown = () => canvasRef.value?.focus()
@@ -222,26 +234,56 @@ export const useBabylonScene = ({
   }
 
   const dispose = () => {
+    engine?.stopRenderLoop()
     canvasRef.value?.removeEventListener('pointerdown', onCanvasPointerDown)
     canvasRef.value?.removeEventListener('keydown', onCanvasKeyDown)
     canvasRef.value?.removeEventListener('blur', clearKeys)
     window.removeEventListener('keyup', onWindowKeyUp)
     window.removeEventListener('blur', clearKeys)
     pressedKeys.clear()
-    cleanup?.()
     if (scene && pointerObserver) scene.onPointerObservable.remove(pointerObserver)
     pointerObserver = null
     if (resizeObserver) resizeObserver.disconnect()
     resizeObserver = null
-    if (scene) scene.dispose()
+    const oldScene = scene
+    const oldEngine = engine
     scene = null
     camera = null
     defaultCameraState = null
-    if (engine) engine.dispose()
     engine = null
+    // Release partial initialization too, and still dispose the engine if an
+    // owned mesh or scene throws during cleanup.
+    try {
+      cleanup?.()
+    } finally {
+      try {
+        oldScene?.dispose()
+      } finally {
+        oldEngine?.dispose()
+      }
+    }
   }
 
-  onMounted(mount)
+  const reportFailure = (error: unknown) => {
+    if (failed) return
+    failed = true
+    let failure = error
+    try {
+      dispose()
+    } catch (cleanupError) {
+      failure = new AggregateError([error, cleanupError], error instanceof Error ? error.message : '3D 场景初始化失败')
+    }
+    if (onError) onError(failure)
+    else throw failure
+  }
+
+  onMounted(() => {
+    try {
+      mount()
+    } catch (error) {
+      reportFailure(error)
+    }
+  })
   onBeforeUnmount(dispose)
 
   return {

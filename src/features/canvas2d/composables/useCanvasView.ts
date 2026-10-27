@@ -10,7 +10,7 @@ export const DRAG_THRESHOLD_PX_SQ = 16
 export interface CanvasViewOptions {
   getProjection: () => Projection
   getBaseScale: () => number
-  getDraw: () => (() => void)
+  scheduleDraw: () => void
   getCanvasEl: () => HTMLCanvasElement | null
 }
 
@@ -21,7 +21,7 @@ export interface CanvasViewOptions {
  * - sessionFrozenBounds: pinned for the whole edit session so the view stays
  *   stable while the user rearranges the topology.
  */
-export const useCanvasView = ({ getProjection, getBaseScale, getDraw, getCanvasEl }: CanvasViewOptions) => {
+export const useCanvasView = ({ getProjection, getBaseScale, scheduleDraw, getCanvasEl }: CanvasViewOptions) => {
   const pan: Ref<{ x: number; y: number }> = ref({ x: 0, y: 0 })
   const isPanning: Ref<boolean> = ref(false)
   const panStart: Ref<{ x: number; y: number }> = ref({ x: 0, y: 0 })
@@ -71,7 +71,7 @@ export const useCanvasView = ({ getProjection, getBaseScale, getDraw, getCanvasE
       x: cx - ((anchorWorld.x - proj.bounds.minX) * proj.scale) - proj.origin.x,
       y: cy - ((proj.bounds.maxY - anchorWorld.y) * proj.scale) - proj.origin.y,
     }
-    requestAnimationFrame(() => getDraw()())
+    scheduleDraw()
   }
 
   const onWheel = (event: WheelEvent) => {

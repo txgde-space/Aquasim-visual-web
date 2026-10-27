@@ -21,6 +21,7 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
     editor.editNodes.value = draft.nodes
     editor.selectedIds.value = draft.selectedIds
     editor.activeCatalogId.value = draft.activeCatalogId
+    editor.topologyError.value = ''
     onReplace()
   }
   const newExperiment = () => {

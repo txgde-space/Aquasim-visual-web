@@ -72,7 +72,8 @@ export const drawPacketRect = (
   const uy = dy / pathLength
   const nx = -uy
   const ny = ux
-  const pathDuration = Math.max(1, receiver.rx_start_us - packet.tx_start_us)
+  const propagationDelay = receiver.rx_start_us - packet.tx_start_us
+  const pathDuration = propagationDelay > 0 ? propagationDelay : 1
   const frontRatio = Math.max(0, Math.min(1, (now - packet.tx_start_us) / pathDuration))
   const tailRatio = Math.max(0, Math.min(1, (now - (packet.tx_start_us + packet.tx_duration_us)) / pathDuration))
   const startRatio = Math.min(tailRatio, frontRatio)
@@ -155,7 +156,8 @@ export const drawPacketRect = (
     if (receiver.status !== 'ok') {
       const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
       if (now >= collisionAt) {
-        const impactRatio = Math.max(0, Math.min(1, (now - collisionAt) / Math.max(1, receiver.rx_duration_us)))
+        const impactDuration = receiver.rx_duration_us > 0 ? receiver.rx_duration_us : 1
+        const impactRatio = Math.max(0, Math.min(1, (now - collisionAt) / impactDuration))
         const shellX = src.x + (dx * (0.72 + (impactRatio * 0.28)))
         const shellY = src.y + (dy * (0.72 + (impactRatio * 0.28)))
         fillCircle(ctx, shellX, shellY, 3.6, '#fb923c', 0.92)

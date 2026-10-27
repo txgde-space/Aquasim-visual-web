@@ -117,9 +117,10 @@ export const normalizeReceiver = (
   receiver: Record<string, unknown>,
   index: number,
   fallbackDurationUs: number,
+  fractionalTiming = false,
 ): ReplayReceiver => {
   const startUs = normalizeTime(pickAlias(receiver, ['rx_start_us', 'start_us']))
-  const durationUs = Math.max(1, normalizeTime(pickAlias(receiver, ['rx_duration_us', 'duration_us']) ?? fallbackDurationUs))
+  const durationUs = Math.max(fractionalTiming ? 0 : 1, normalizeTime(pickAlias(receiver, ['rx_duration_us', 'duration_us']) ?? fallbackDurationUs))
   const rawStatus = receiver.status
   const status: ReceiverStatus = rawStatus === 'ok' || receiver.result === 'ok' ? 'ok' : 'fail'
 
@@ -144,22 +145,22 @@ export const normalizeCommitted = (value: unknown): boolean => !(value === false
 
 const PACKET_ID_KEYS = ['packet_id', 'tx_id'] as const
 
-export const normalizePacket = (packet: Record<string, unknown>, index: number): ReplayPacket => {
+export const normalizePacket = (packet: Record<string, unknown>, index: number, fractionalTiming = false): ReplayPacket => {
   const packetId = sanitizeDisplayText(pickTruthy(packet, PACKET_ID_KEYS) || `pkt-${index + 1}`, 80)
   const eventId = sanitizeDisplayText(packet.event_id || packet.tx_id || `${packetId}-seg-${index + 1}`, 100)
   const txStartUs = normalizeTime(pickAlias(packet, ['tx_start_us', 'start_us']))
   const txCommitted = normalizeCommitted(packet.tx_committed)
   const txDurationRawUs = normalizeTime(pickAlias(packet, ['tx_duration_us', 'duration_us']))
-  const txDurationUs = txCommitted ? Math.max(1, txDurationRawUs) : Math.max(0, txDurationRawUs)
+  const txDurationUs = txCommitted ? Math.max(fractionalTiming ? 0 : 1, txDurationRawUs) : Math.max(0, txDurationRawUs)
   const txEndUs = normalizeTime(packet.tx_end_us ?? packet.end_us ?? (txStartUs + txDurationUs))
   const receivers = Array.isArray(packet.receivers)
     ? (packet.receivers as Array<Record<string, unknown>>)
-      .map((receiver, receiverIndex) => normalizeReceiver(packetId, receiver, receiverIndex, txDurationUs))
+      .map((receiver, receiverIndex) => normalizeReceiver(packetId, receiver, receiverIndex, txDurationUs, fractionalTiming))
       .filter((receiver) => Number.isFinite(receiver.dst))
       .sort((a, b) => a.rx_start_us - b.rx_start_us)
     : []
 
-  const packetEndUs = Math.max(txEndUs, ...receivers.map((receiver) => receiver.rx_end_us))
+  const packetEndUs = receivers.reduce((endUs, receiver) => Math.max(endUs, receiver.rx_end_us), txEndUs)
   return {
     ...packet,
     type: 'packet',
@@ -177,7 +178,7 @@ export const normalizePacket = (packet: Record<string, unknown>, index: number):
   }
 }
 
-export const buildPacketsFromLegacy = (txRows: Array<Record<string, unknown>>, rxRows: Array<Record<string, unknown>>): ParsedPacketRecord[] => {
+export const buildPacketsFromLegacy = (txRows: Array<Record<string, unknown>>, rxRows: Array<Record<string, unknown>>, fractionalTiming = false): ParsedPacketRecord[] => {
   const rxByTx = new Map<unknown, Array<Record<string, unknown>>>()
   for (const item of rxRows) {
     const list = rxByTx.get(item.tx_id) || []
@@ -192,12 +193,14 @@ export const buildPacketsFromLegacy = (txRows: Array<Record<string, unknown>>, r
     packet_id: String(txItem.packet_uid || txItem.tx_id || `pkt-${index + 1}`),
     src: Number(txItem.src),
     tx_start_us: normalizeTime(txItem.start_us),
-    tx_duration_us: Math.max(1, normalizeTime(txItem.duration_us)),
+    tx_duration_us: Math.max(fractionalTiming ? 0 : 1, normalizeTime(txItem.duration_us)),
     receivers: (rxByTx.get(txItem.tx_id) || []).map((rxItem) => ({
       receiver_id: String(rxItem.rx_id || `${txItem.tx_id || `tx-${index + 1}`}-rx-${rxItem.dst || 'x'}`),
       dst: Number(rxItem.dst),
       rx_start_us: normalizeTime(rxItem.start_us),
-      rx_duration_us: Math.max(1, normalizeTime(rxItem.duration_us || txItem.duration_us)),
+      rx_duration_us: Math.max(fractionalTiming ? 0 : 1, normalizeTime(fractionalTiming
+        ? (rxItem.duration_us ?? txItem.duration_us)
+        : (rxItem.duration_us || txItem.duration_us))),
       status: rxItem.result === 'ok' ? 'ok' : 'fail',
       reason: rxItem.result === 'ok' ? null : deriveReasonFromLegacy(rxItem.result),
       with: Array.isArray(rxItem.collided_with) ? rxItem.collided_with.map(String) : [],
@@ -248,7 +251,7 @@ export interface MergedTxEvent {
   receivers: MergedRxEvent[]
 }
 
-export const normalizeNodeTxEvent = (event: ParsedNodeEventRecord, index: number): MergedTxEvent => {
+export const normalizeNodeTxEvent = (event: ParsedNodeEventRecord, index: number, fractionalTiming = false): MergedTxEvent => {
   const packetId = nodeEventPacketId(event, index)
   const txStartUs = normalizeTime(pickAlias(event, ['tx_start_us', 'start_us', 'time_us', 'utc_us']))
   const txDurationUs = Math.max(0, normalizeTime(pickAlias(event, ['tx_duration_us', 'duration_us'])))
@@ -261,7 +264,7 @@ export const normalizeNodeTxEvent = (event: ParsedNodeEventRecord, index: number
     packet_id: packetId,
     src: Number(event.src ?? event.node_id),
     tx_start_us: txStartUs,
-    tx_duration_us: txCommitted ? Math.max(1, txDurationUs) : txDurationUs,
+    tx_duration_us: txCommitted ? Math.max(fractionalTiming ? 0 : 1, txDurationUs) : txDurationUs,
     tx_end_us: normalizeTime(event.tx_end_us ?? event.end_us ?? (txStartUs + txDurationUs)),
     tx_committed: txCommitted,
     tx_blocked_reason: txCommitted ? null : String(event.tx_blocked_reason || event.reason || 'busy'),
@@ -269,10 +272,10 @@ export const normalizeNodeTxEvent = (event: ParsedNodeEventRecord, index: number
   }
 }
 
-export const normalizeNodeRxEvent = (event: ParsedNodeEventRecord, index: number): MergedRxEvent => {
+export const normalizeNodeRxEvent = (event: ParsedNodeEventRecord, index: number, fractionalTiming = false): MergedRxEvent => {
   const packetId = nodeEventPacketId(event, index)
   const rxStartUs = normalizeTime(pickAlias(event, ['rx_start_us', 'start_us', 'time_us', 'utc_us']))
-  const rxDurationUs = Math.max(1, normalizeTime(pickAlias(event, ['rx_duration_us', 'duration_us'])))
+  const rxDurationUs = Math.max(fractionalTiming ? 0 : 1, normalizeTime(pickAlias(event, ['rx_duration_us', 'duration_us'])))
   const status: ReceiverStatus = event.status === 'ok' || event.result === 'ok' ? 'ok' : 'fail'
   const rawTxKey = event.event_id || event.tx_id
 

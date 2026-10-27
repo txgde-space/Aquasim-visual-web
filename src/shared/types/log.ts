@@ -5,6 +5,10 @@ export interface LogMeta {
   time_unit: string
   distance_unit: string
   sim_end_us: number
+  medium?: 'acoustic' | 'radio'
+  propagation_speed_mps?: number
+  time_precision_us?: number
+  trace_scope?: 'phy-success'
 }
 
 /** Raw record as read from a structured log / JSONL line, before normalization. */

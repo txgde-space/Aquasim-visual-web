@@ -2,6 +2,7 @@ import type { Plugin } from 'vite'
 import { clearSimulatorBuildGuarded, precompileSimulatorGuarded, readJsonBody, readPrecompileProgress, runExperimentGuarded } from './runner'
 import { browseSimulatorDirectories, inspectSimulator } from './simulatorConfig'
 import { cachedCatalog } from './protocolCatalog'
+import { readProtocolSource } from './protocolSource'
 
 /**
  * Thin middleware: routing, body reading and unified error shape only.
@@ -11,7 +12,7 @@ export const ns3RunPlugin = (): Plugin => ({
   name: 'ns3-run',
   configureServer(server) {
     server.middlewares.use(async (req, res, next) => {
-      if (req.method !== 'POST' || !['/api/run', '/api/simulator/check', '/api/simulator/directories', '/api/simulator/build', '/api/simulator/build-progress', '/api/simulator/clean'].includes(req.url || '')) {
+      if (req.method !== 'POST' || !['/api/run', '/api/simulator/check', '/api/simulator/directories', '/api/simulator/build', '/api/simulator/build-progress', '/api/simulator/clean', '/api/simulator/source'].includes(req.url || '')) {
         next()
         return
       }
@@ -24,6 +25,12 @@ export const ns3RunPlugin = (): Plugin => ({
         const request = body as Record<string, unknown>
         if (request.aquaSimHome !== undefined && typeof request.aquaSimHome !== 'string') {
           throw new Error('仿真目录必须是字符串')
+        }
+        if (req.url === '/api/simulator/source') {
+          const { status, payload } = await readProtocolSource(request)
+          res.statusCode = status
+          res.end(JSON.stringify(payload))
+          return
         }
         if (req.url === '/api/simulator/directories') {
           res.end(JSON.stringify(await browseSimulatorDirectories(request.aquaSimHome)))

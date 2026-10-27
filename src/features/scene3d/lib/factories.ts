@@ -332,6 +332,30 @@ export interface PacketMeshEntry {
   line: LinesMesh
   block: Mesh
   marker: Mesh
+  sourcePosition: Vector3
+  destinationPosition: Vector3
+  direction: Vector3
+  pathLength: number
+}
+
+const orientPacketPath = (entry: PacketMeshEntry): void => {
+  entry.block.position.copyFrom(entry.sourcePosition)
+  entry.block.rotationQuaternion = null
+  entry.block.lookAt(entry.destinationPosition)
+  entry.block.rotate(Vector3.Right(), Math.PI / 2)
+  entry.marker.position.copyFrom(entry.destinationPosition)
+}
+
+/** Time/progress/color changes do not require rewriting the path vertex buffer. */
+export const syncPacketGeometry = (entry: PacketMeshEntry, source: Vector3, destination: Vector3): boolean => {
+  if (entry.sourcePosition.equals(source) && entry.destinationPosition.equals(destination)) return false
+  entry.sourcePosition.copyFrom(source)
+  entry.destinationPosition.copyFrom(destination)
+  destination.subtractToRef(source, entry.direction)
+  entry.pathLength = entry.direction.length()
+  MeshBuilder.CreateLines(entry.line.name, { points: [source, destination], instance: entry.line })
+  orientPacketPath(entry)
+  return true
 }
 
 /** Create the three meshes (with materials) that visualize one packet path. */
@@ -364,7 +388,14 @@ export const createPacketEntry = (
   }, scene)
   marker.material = makeMaterial(scene, `packet-${packetId}-${dst}-marker-mat`, color, color.scale(0.12), palette.markerAlpha)
 
-  return { line, block, marker }
+  const direction = dstPos.subtract(srcPos)
+  const entry = {
+    line, block, marker,
+    sourcePosition: srcPos.clone(), destinationPosition: dstPos.clone(),
+    direction, pathLength: direction.length(),
+  }
+  orientPacketPath(entry)
+  return entry
 }
 
 /** Dispose a packet path's meshes AND their materials. */
