@@ -1,7 +1,11 @@
 import type { Projection } from '../coordinate'
 import type { ThemeProfile } from '../themes'
-import { colorMix, fillCircle, strokeCircle } from './primitives'
-import { drawCarrierNode, drawSubmarineNode } from './nodes'
+import { fillCircle, roundedRectPath, strokeCircle } from './primitives'
+import { drawNodeModel } from './nodes'
+import { resolveNodeModel, type NodeModelType } from '@/shared/nodeModel'
+import { motionAngles } from '@/shared/nodeMotion'
+import type { Point3D } from '@/shared/types/replay'
+import { nodeSpriteLayout } from '../nodeSpriteLayout'
 import { drawWorldGrid } from './grid'
 import { drawPacketRect } from './packets'
 import { drawMeasurementLines } from './measure'
@@ -18,6 +22,8 @@ export interface SceneNode {
   z?: number
   role?: string
   name?: string
+  modelType?: NodeModelType
+  motionDirection?: Point3D
 }
 
 export interface SceneNodeVisual {
@@ -51,48 +57,6 @@ export interface ScenePacketReceiver {
   collision_start_us?: number
 }
 
-/** Extra pixels beyond the radius of the idle gradient around a node. */
-const IDLE_GRADIENT_OUTER_EXTRA_PX = 6
-/** Base extra pixels beyond the node radius for the ambient pulse ring. */
-const PULSE_RING_BASE_EXTRA_PX = 4
-/** Extra pixels added to the pulse ring radius by the pulse animation. */
-const PULSE_RING_PULSE_EXTRA_PX = 3
-/** Base extra pixels beyond the node radius for the fx-level outer ring. */
-const FX_RING_BASE_EXTRA_PX = 10
-/** Extra pixels added to the fx outer ring radius by the pulse animation. */
-const FX_RING_PULSE_EXTRA_PX = 6
-/** Base extra pixels beyond the node radius for the tx progress ring. */
-const TX_RING_BASE_EXTRA_PX = 8
-/** Extra pixels added to the tx ring radius by the pulse animation. */
-const TX_RING_PULSE_EXTRA_PX = 5
-/** Base extra pixels beyond the node radius for the rx progress ring. */
-const RX_RING_BASE_EXTRA_PX = 7
-/** Extra pixels added to the rx ring radius by the pulse animation. */
-const RX_RING_PULSE_EXTRA_PX = 4
-/** Base extra pixels beyond the node radius for the collision ring. */
-const COLLISION_RING_BASE_EXTRA_PX = 10
-/** Extra pixels added to the collision ring radius by the pulse animation. */
-const COLLISION_RING_PULSE_EXTRA_PX = 4
-/** Number of expanding collision wave rings at fx level above 1. */
-const COLLISION_WAVE_COUNT = 3
-/** Base extra pixels beyond the node radius for the first collision wave. */
-const COLLISION_WAVE_BASE_EXTRA_PX = 13
-/** Extra pixels between successive collision wave rings. */
-const COLLISION_WAVE_STEP_EXTRA_PX = 7
-/** Modulo applied to the phase offset so wave radii wrap within this span. */
-const COLLISION_WAVE_PHASE_MODULO_PX = 10
-/** Screen-space speed of the collision wave phase animation. */
-const COLLISION_WAVE_PHASE_SPEED_PX = 42
-/** Per-wave phase offset for the collision wave animation. */
-const COLLISION_WAVE_PHASE_OFFSET_PX = 8
-/** Vertical offset of the node id text at fx level above 1. */
-const ID_TEXT_OFFSET_FX_PX = 20
-/** Label offset beyond the node radius for the node name at fx level above 1. */
-const LABEL_NAME_OFFSET_FX_EXTRA_PX = 14
-/** Label offset beyond the node radius for the node name at standard fx. */
-const LABEL_NAME_OFFSET_EXTRA_PX = 10
-/** Vertical offset of the depth label below the node name. */
-const LABEL_DEPTH_OFFSET_EXTRA_PX = 16
 /** Radius of the circle marking an original (pre-drag) node position. */
 const GHOST_CIRCLE_RADIUS_PX = 8
 const GHOST_STROKE_STYLE = 'rgba(245, 158, 11, 0.78)'
@@ -108,8 +72,7 @@ const HUD_TIME_BASELINE_Y_PX = 22
 /** Baseline y of the HUD focus line. */
 const HUD_FOCUS_BASELINE_Y_PX = 42
 
-const ID_FONT_FX = '700 10px "IBM Plex Sans", "Segoe UI", sans-serif'
-const ID_FONT_STANDARD = '600 11px "IBM Plex Sans", "Segoe UI", sans-serif'
+const ID_FONT = '600 11px "IBM Plex Mono", monospace'
 const NAME_FONT = '12px "IBM Plex Sans", "Segoe UI", sans-serif'
 const DEPTH_FONT = '10px "IBM Plex Sans", "Segoe UI", sans-serif'
 
@@ -215,7 +178,7 @@ export const drawEditGhosts = (
   ctx.restore()
 }
 
-/** Full node sprite: idle body, mode fill/rings, fx hull, id and labels. */
+/** Model and status share the same projected anchor; model type never changes coordinates. */
 export const drawNodeBody = (
   ctx: CanvasRenderingContext2D,
   node: SceneNode,
@@ -227,80 +190,70 @@ export const drawNodeBody = (
   p: ScreenPoint,
   selected = false,
 ): void => {
-  const r = radius
-  const idleGradient = ctx.createRadialGradient(p.x - 5, p.y - 6, 2, p.x, p.y, r + IDLE_GRADIENT_OUTER_EXTRA_PX)
-  idleGradient.addColorStop(0, profile.idleInner)
-  idleGradient.addColorStop(1, profile.idleOuter)
-
-  const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
-  fillCircle(ctx, p.x, p.y, r, idleGradient, 0.92)
-  strokeCircle(ctx, p.x, p.y, r, profile.nodeStroke, 1.4, 0.9)
-
-  const pulse = 0.5 + (Math.sin((phase * (4.2 + (fx * 0.8))) + (node.node_id * 0.6)) * 0.5)
-  strokeCircle(ctx, p.x, p.y, r + PULSE_RING_BASE_EXTRA_PX + (pulse * PULSE_RING_PULSE_EXTRA_PX), profile.ring, selected ? SELECTED_OUTER_RING_LINE_WIDTH_PX : 1, 0.35 + (pulse * 0.3))
-  if (fx > 1) {
-    strokeCircle(ctx, p.x, p.y, r + FX_RING_BASE_EXTRA_PX + (pulse * FX_RING_PULSE_EXTRA_PX), profile.ring, 1.2, 0.3)
-  }
-
-  if (visual.mode === 'tx') {
-    const progressRadius = 3 + ((r - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, profile.tx, 0.98)
-    strokeCircle(ctx, p.x, p.y, r + TX_RING_BASE_EXTRA_PX + (pulse * TX_RING_PULSE_EXTRA_PX), profile.tx, 1.2, 0.35)
-
-    if (visual.overlay?.kind === 'collision_rx_tx') {
-      fillCircle(ctx, p.x, p.y, r * 0.8, profile.bad, 0.78)
-    }
-  } else if (visual.mode === 'rx' || visual.mode === 'rx-done') {
-    const progressRadius = visual.mode === 'rx-done'
-      ? r
-      : 3 + ((r - 3) * visual.fillProgress)
-    fillCircle(ctx, p.x, p.y, progressRadius, profile.rx, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, r + RX_RING_BASE_EXTRA_PX + (pulse * RX_RING_PULSE_EXTRA_PX), profile.rx, 1, 0.28)
-  } else if (visual.mode === 'collision' || visual.mode === 'collision-linger') {
-    fillCircle(ctx, p.x, p.y, r, profile.bad, visual.fade ?? 1)
-    strokeCircle(ctx, p.x, p.y, r + COLLISION_RING_BASE_EXTRA_PX + (pulse * COLLISION_RING_PULSE_EXTRA_PX), profile.bad, 1.6, 0.5)
-    if (fx > 1) {
-      for (let i = 0; i < COLLISION_WAVE_COUNT; i += 1) {
-        const rr = r + COLLISION_WAVE_BASE_EXTRA_PX + (i * COLLISION_WAVE_STEP_EXTRA_PX)
-          + (((phase * COLLISION_WAVE_PHASE_SPEED_PX) + (i * COLLISION_WAVE_PHASE_OFFSET_PX)) % COLLISION_WAVE_PHASE_MODULO_PX)
-        strokeCircle(ctx, p.x, p.y, rr, profile.bad, 1.1, 0.22 - (i * 0.05))
-      }
-    }
-  }
-
-  if (fx > 1) {
-    const baseColor = visual.mode === 'collision' || visual.mode === 'collision-linger'
-      ? profile.bad
-      : visual.mode === 'tx'
-        ? profile.tx
-        : visual.mode === 'rx' || visual.mode === 'rx-done'
-          ? profile.rx
-          : profile.idleInner
-    const strokeColor = colorMix(baseColor, '#ffffff', 0.32)
-    ctx.save()
-    if (isSink) drawCarrierNode(ctx, p, baseColor, strokeColor, profile, phase)
-    else drawSubmarineNode(ctx, p, baseColor, strokeColor, profile, pulse)
-    ctx.restore()
-  }
+  const layout = nodeSpriteLayout(radius, node.node_id)
+  const collision = visual.mode === 'collision' || visual.mode === 'collision-linger'
+    || (visual.mode === 'tx' && visual.overlay?.kind === 'collision_rx_tx')
+  const receiving = visual.mode === 'rx' || visual.mode === 'rx-done'
+  const statusColor = collision ? profile.bad : visual.mode === 'tx' ? profile.tx : receiving ? profile.rx : null
+  const fade = Math.max(0, Math.min(1, visual.fade ?? 1))
+  const progress = Math.max(0, Math.min(1, visual.fillProgress))
+  const pulse = 0.5 + Math.sin(phase * 5 + node.node_id * 0.6) * 0.5
 
   ctx.save()
-  ctx.fillStyle = '#f8fafc'
-  ctx.font = fx > 1 ? ID_FONT_FX : ID_FONT_STANDARD
+  // Keep a single existing outline for selection; status arcs sit outside it.
+  strokeCircle(ctx, p.x, p.y, layout.ringRadius, profile.nodeStroke,
+    selected ? SELECTED_OUTER_RING_LINE_WIDTH_PX : 1, selected ? 1 : 0.42)
+  if (statusColor) {
+    fillCircle(ctx, p.x, p.y, layout.ringRadius - 1, statusColor, 0.1 * fade)
+    const ringRadius = layout.ringRadius + 4
+    strokeCircle(ctx, p.x, p.y, ringRadius, statusColor, 1, 0.18 * fade)
+    ctx.strokeStyle = statusColor
+    ctx.lineWidth = collision ? 2.5 : 2
+    ctx.globalAlpha = fade
+    ctx.beginPath()
+    const amount = collision || visual.mode === 'rx-done' ? 1 : progress
+    ctx.arc(p.x, p.y, ringRadius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * amount)
+    ctx.stroke()
+    ctx.globalAlpha = 1
+    if (fx > 1) strokeCircle(ctx, p.x, p.y, ringRadius + 3 + pulse * 4, statusColor, 1, 0.22 * fade)
+  }
+
+  ctx.lineWidth = 1.2
+  const kind = resolveNodeModel(node)
+  const motion = motionAngles(node.motionDirection)
+  // A network diagram uses readable device symbols at every map scale.
+  const modelAt = (point: ScreenPoint) => drawNodeModel(ctx, kind, point, radius, profile, profile.idleInner, profile.label)
+  // Rotate equipment only. Labels, the ID plate, hit circle and state arc stay upright.
+  if (motion && (kind === 'auv' || kind === 'vessel' || kind === 'rov')) {
+    ctx.save()
+    ctx.translate(p.x, p.y)
+    ctx.rotate(-motion.heading)
+    modelAt({ x: 0, y: 0 })
+    ctx.restore()
+  } else {
+    modelAt(p)
+  }
+
+  // A separate ID plate stays legible for the full 1–65534 ID range at small node sizes.
+  const idY = p.y + layout.idY
+  roundedRectPath(ctx, p.x - layout.idWidth / 2, idY - layout.idHeight / 2,
+    layout.idWidth, layout.idHeight, 4)
+  ctx.fillStyle = profile.bg[2]
+  ctx.fill()
+  ctx.fillStyle = profile.label
+  ctx.font = ID_FONT
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(String(node.node_id), p.x, p.y + (fx > 1 ? ID_TEXT_OFFSET_FX_PX : 0.5))
-  ctx.restore()
+  ctx.fillText(String(node.node_id), p.x, idY)
 
-  ctx.save()
   ctx.fillStyle = profile.label
   ctx.font = NAME_FONT
   ctx.textAlign = 'left'
   ctx.textBaseline = 'alphabetic'
-  const labelOffset = fx > 1 ? r + LABEL_NAME_OFFSET_FX_EXTRA_PX : r + LABEL_NAME_OFFSET_EXTRA_PX
-  ctx.fillText(String(node.name), p.x + labelOffset, p.y + 2)
+  ctx.fillText(String(node.name ?? ''), p.x + layout.labelX, p.y + 2)
   ctx.fillStyle = profile.depth
   ctx.font = DEPTH_FONT
-  ctx.fillText(`z ${Number(node.z ?? 0).toFixed(2)}m`, p.x + labelOffset, p.y + LABEL_DEPTH_OFFSET_EXTRA_PX)
+  ctx.fillText(`z ${Number(node.z ?? 0).toFixed(2)}m`, p.x + layout.labelX, p.y + 18)
   ctx.restore()
 }
 

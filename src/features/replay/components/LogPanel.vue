@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type {
   LifecycleGroup,
   LifecycleStage,
@@ -7,6 +7,7 @@ import type {
   ReplayNode,
 } from '@/shared/types/replay'
 import { DEFAULT_RADIO_PROPAGATION_SPEED_MPS, SOUND_SPEED_OPTIONS_MPS } from '@/shared/constants'
+import { parseQuantity } from '@/shared/quantity'
 import { LOG_SOURCES } from '../lib/sources'
 import { timeDisplay } from '../lib/format'
 import { receiverPillClass } from '../lib/packetEntries'
@@ -28,7 +29,6 @@ const props = defineProps<{
   fxLevelOptions: ReadonlyArray<{ key: string; label: string }>
   isEditMode: boolean
   fractionalTiming?: boolean
-  successTraceOnly?: boolean
   editSoundSpeed: number
   selectedEditNode: ReplayNode | null
   selectedEditNodeCount: number
@@ -42,6 +42,7 @@ const props = defineProps<{
   focusedPacketId: string | null
   summary: PacketSummary
   originalSummary: PacketSummary
+  focusedNodeId: number | null
   globalActiveEventId: string | null
   lifecycleActiveEventId: string | null
 }>()
@@ -59,7 +60,6 @@ const emit = defineEmits<{
   replayModeChange: [event: Event]
   editSoundSpeedChange: [event: Event]
   fxLevelChange: [event: Event]
-  coordChange: [axis: 'x' | 'y' | 'z', event: Event]
   restoreSelected: []
   restoreAll: []
   lifecyclePacketChange: [event: Event]
@@ -67,6 +67,19 @@ const emit = defineEmits<{
   stageSelect: [stage: LifecycleStage]
   trackPointerDown: [packet: PacketTrackTarget, event: Event]
 }>()
+
+const speedError = ref('')
+watch(() => [props.isEditMode, props.editSoundSpeed], () => { speedError.value = '' })
+const changeSpeed = (event: Event) => {
+  try {
+    const value = parseQuantity((event.target as HTMLInputElement).value, 'm/s').value
+    if (value < 1 || value > DEFAULT_RADIO_PROPAGATION_SPEED_MPS) throw new Error('range')
+    speedError.value = ''
+    emit('editSoundSpeedChange', event)
+  } catch {
+    speedError.value = `请输入 1–${DEFAULT_RADIO_PROPAGATION_SPEED_MPS} m/s，支持 km/s`
+  }
+}
 
 const logFileInput = useTemplateRef<HTMLInputElement>('logFileInput')
 const nodeLogFileInput = useTemplateRef<HTMLInputElement>('nodeLogFileInput')
@@ -170,7 +183,6 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
             </option>
           </select>
         </label>
-        <p v-if="successTraceOnly" class="trace-scope">仅记录物理层发送与成功接收，不含丢包原因。</p>
         <div class="control-fields-grid">
           <label class="field field-compact">
             <div class="field-head"><span>回放模式</span></div>
@@ -192,9 +204,10 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
             </select>
           </label>
           <label v-if="isEditMode" class="field field-compact">
-            <div class="field-head"><span>{{ fractionalTiming ? '传播速度' : '声速' }}</span><span v-if="fractionalTiming" class="field-param">m/s</span></div>
-            <input v-if="fractionalTiming" class="select" type="number" min="1" :max="DEFAULT_RADIO_PROPAGATION_SPEED_MPS" step="any"
-              :value="editSoundSpeed" @change="emit('editSoundSpeedChange', $event)" />
+            <div class="field-head"><span>{{ fractionalTiming ? '传播速度' : '声速' }}</span><span v-if="fractionalTiming" class="field-param">默认 m/s</span></div>
+            <input v-if="fractionalTiming" class="select" type="text" spellcheck="false" placeholder="如 1500 或 1.5km/s" title="无单位按 m/s"
+              :value="editSoundSpeed" :aria-invalid="!!speedError" @input="speedError = ''" @change="changeSpeed" />
+            <span v-if="fractionalTiming && speedError" class="speed-error" role="alert">{{ speedError }}</span>
             <select v-else class="select" :value="String(editSoundSpeed)" @change="emit('editSoundSpeedChange', $event)">
               <option v-if="!SOUND_SPEED_OPTIONS_MPS.includes(editSoundSpeed)" :value="editSoundSpeed">{{ editSoundSpeed }} m/s</option>
               <option v-for="option in SOUND_SPEED_OPTIONS_MPS" :key="option" :value="option">{{ option }} m/s</option>
@@ -224,24 +237,6 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
       </details>
       <details v-if="isEditMode" class="panel-section" open>
         <summary>节点编辑 · 已选 {{ selectedEditNodeCount }} 个</summary>
-        <div v-if="selectedEditNode" class="field field-compact">
-          <div class="field-head"><span>{{ selectedEditNode.name }}（{{ selectedEditNode.node_id }}）</span></div>
-          <div class="coord-grid">
-            <label class="field field-compact">
-              <div class="field-head"><span>X (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.x.toFixed(2)" @change="emit('coordChange', 'x', $event)" />
-            </label>
-            <label class="field field-compact">
-              <div class="field-head"><span>Y (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.y.toFixed(2)" @change="emit('coordChange', 'y', $event)" />
-            </label>
-            <label class="field field-compact">
-              <div class="field-head"><span>Z (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="(selectedEditNode.z ?? 0).toFixed(2)" @change="emit('coordChange', 'z', $event)" />
-            </label>
-          </div>
-        </div>
-        <p v-else class="edit-selection-hint">{{ selectedEditNodeCount ? '拖动任一选中节点可整体移动；单独选择一个节点可编辑坐标。' : '单击节点选择；按住 Shift 点击或框选可追加选择。' }}</p>
         <div class="control-btn-row coord-actions">
           <button class="btn btn-compact" :disabled="!selectedEditNodeCount" @click="emit('restoreSelected')">{{ selectedEditNodeCount === 1 ? '恢复该点' : '恢复选中' }}</button>
           <button class="btn btn-compact" @click="emit('restoreAll')">恢复全部</button>
@@ -267,9 +262,10 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
 
     <div
       v-if="replayMode === 'lifecycle'"
-      v-memo="[panelActive, lifecyclePacket, panelActive ? lifecycleStages : null]"
+      v-memo="[panelActive, lifecyclePacket, panelActive ? lifecycleStages : null, focusedNodeId]"
       class="lifecycle-panel"
     >
+      <p v-if="!lifecyclePacket" class="empty-state">{{ focusedNodeId !== null ? '暂无相关数据包。' : '暂无生命周期数据。' }}</p>
       <div v-if="lifecyclePacket" class="lifecycle-summary">
         <div>当前包：<strong>{{ lifecyclePacket.packet_id }}</strong></div>
         <div>源节点：{{ lifecyclePacket.sourceLabel }}</div>
@@ -313,14 +309,14 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
     <ul
       v-if="replayMode === 'global'"
       ref="globalLogListEl"
-      v-memo="[windowItems, topPadding, bottomPadding, startIndex, parseErrors, logSourceKey, isEditMode, focusedPacketId]"
+      v-memo="[windowItems, topPadding, bottomPadding, startIndex, parseErrors, logSourceKey, isEditMode, focusedPacketId, focusedNodeId]"
       class="log-list"
     >
       <li v-if="parseErrors.length" class="log-item parse-error">
         日志解析失败：{{ parseErrors.length }} 条
       </li>
       <li v-if="visiblePacketEntries.length === 0" class="log-item empty">
-        {{ logSourceKey === 'topology' ? '仅导入了实验拓扑，尚无发包记录。请在实验页运行仿真后查看回放。' : '暂无日志...' }}
+        {{ logSourceKey === 'topology' ? '暂无发包记录。' : (focusedNodeId !== null ? '暂无相关数据包。' : '暂无日志。') }}
       </li>
       <li v-if="topPadding" class="log-spacer" :style="{ height: `${topPadding}px` }" aria-hidden="true"></li>
       <li
@@ -380,8 +376,8 @@ watch([() => props.panelActive, () => props.replayMode, () => props.lifecycleAct
 </template>
 
 <style scoped>
-.trace-scope { margin: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.edit-selection-hint { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.speed-error { color: var(--bad); font-size: 11px; line-height: 1.5; }
+.empty-state { margin: 6px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .log-spacer {
   padding: 0;
   margin: 0;

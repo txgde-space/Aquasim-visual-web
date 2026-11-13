@@ -1,3 +1,4 @@
+import { geoToLocal, geographic, localToGeo, mercator, type GeoPoint } from '../gps/geometry'
 import type { ReplayNode } from '@/shared/types/replay'
 
 export interface ViewInsets {
@@ -19,6 +20,7 @@ export interface Bounds {
 /** Complete world -> screen projection context. */
 export interface Projection {
   bounds: Bounds
+  geoOrigin?: GeoPoint
   origin: { x: number; y: number }
   /** Effective scale (fit scale * zoom). */
   scale: number
@@ -126,15 +128,19 @@ export const computeContentOrigin = (
   }
 }
 
-export const toScreenPoint = (x: number, y: number, proj: Projection): { x: number; y: number } => ({
-  x: proj.origin.x + ((x - proj.bounds.minX) * proj.scale) + proj.pan.x,
-  y: proj.origin.y + ((proj.bounds.maxY - y) * proj.scale) + proj.pan.y,
-})
+export const toScreenPoint = (x: number, y: number, proj: Projection): { x: number; y: number } => {
+  if (proj.geoOrigin) ({ x, y } = mercator(localToGeo({ x, y }, proj.geoOrigin)))
+  return {
+    x: proj.origin.x + ((x - proj.bounds.minX) * proj.scale) + proj.pan.x,
+    y: proj.origin.y + ((proj.bounds.maxY - y) * proj.scale) + proj.pan.y,
+  }
+}
 
 export const toWorldPoint = (x: number, y: number, proj: Projection): { x: number; y: number } => {
   const s = Math.max(proj.scale, 1e-6)
-  return {
+  const projected = {
     x: proj.bounds.minX + ((x - proj.origin.x - proj.pan.x) / s),
     y: proj.bounds.maxY - ((y - proj.origin.y - proj.pan.y) / s),
   }
+  return proj.geoOrigin ? geoToLocal(geographic(projected), proj.geoOrigin) : projected
 }

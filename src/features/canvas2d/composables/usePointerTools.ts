@@ -23,6 +23,7 @@ interface PointerToolsDeps {
   pickNodeAt: (sx: number, sy: number) => { node_id: number; x: number; y: number } | null
   toWorld: (sx: number, sy: number) => { x: number; y: number }
   getSelectedIdSet: () => Set<number>
+  isNodeLocked?: (nodeId: number) => boolean
   getViewBounds: () => { minX: number; maxX: number; minY: number; maxY: number; spanX: number; spanY: number }
   getSnapOptions?: () => SnapOptions & { scale: number; gridStep: number }
   setHoveredNodeId: (nodeId: number | null) => void
@@ -46,6 +47,7 @@ export const usePointerTools = ({
   pickNodeAt,
   toWorld,
   getSelectedIdSet,
+  isNodeLocked = () => false,
   getViewBounds,
   getSnapOptions,
   setHoveredNodeId,
@@ -84,7 +86,7 @@ export const usePointerTools = ({
       ? snapNodeDrag(snapSession, rawDelta, options)
       : { delta: rawDelta, guides: [] }
     snapGuides.value = snapped.guides
-    const moves = [...group.origins.entries()].map(([nodeId, origin]) => ({
+    const moves = [...group.origins.entries()].filter(([id])=>!isNodeLocked(id)).map(([nodeId, origin]) => ({
       node_id: nodeId,
       x: origin.x + snapped.delta.x,
       y: origin.y + snapped.delta.y,
@@ -215,18 +217,22 @@ export const usePointerTools = ({
           return
         }
         emit('node-select', target)
+        if (isNodeLocked(clickedId)) {
+          emit('pause-request'); scheduleDraw(); return
+        }
+        const movingIds = nextIds.filter(id=>!isNodeLocked(id))
         const origins = new Map<number, { x: number; y: number }>()
         for (const node of props.nodes) {
-          if (nextIds.includes(Number(node.node_id))) {
+          if (movingIds.includes(Number(node.node_id))) {
             origins.set(Number(node.node_id), { x: node.x, y: node.y })
           }
         }
         dragGroup.value = {
-          ids: nextIds,
+          ids: movingIds,
           start: toWorld(sx, sy),
           origins,
         }
-        if (getSnapOptions) snapSession = createSnapSession(props.nodes, nextIds, clickedId)
+        if (getSnapOptions) snapSession = createSnapSession(props.nodes, movingIds, clickedId)
         draggingNodeId.value = target.node_id
         view.dragFrozenBounds.value = { ...getViewBounds() }
         activePointerId = event.pointerId
@@ -297,6 +303,7 @@ export const usePointerTools = ({
       }
       if (!view.hasDragged.value) return
       const world = toWorld(x, y)
+      if (isNodeLocked(draggingNodeId.value)) return
       emit('node-move', {
         node_id: draggingNodeId.value,
         x: world.x,
@@ -332,7 +339,8 @@ export const usePointerTools = ({
     }
   }
 
-  const onCanvasPointerLeave = () => {
+  const onCanvasPointerLeave = (event?: PointerEvent) => {
+    if ((event?.relatedTarget as Element | null)?.closest?.('[data-node-pin]')) return
     setHoveredNodeId(null)
     setHoverCursor(0, 0)
     if (toolMode.value === TOOL_MODES.MEASURE) {

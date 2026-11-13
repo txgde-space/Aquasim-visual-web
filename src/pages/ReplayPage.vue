@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NodeCanvas from '../components/NodeCanvas.vue'
+import NodeModelSelect from '../components/NodeModelSelect.vue'
 import SplitPane from '../components/SplitPane.vue'
 import { session } from '../state/replaySession'
 import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '../shared/constants'
@@ -12,9 +13,13 @@ import { useReplayState } from '@/features/replay/composables/useReplayState'
 import { useLogPanel } from '@/features/replay/composables/useLogPanel'
 import { cloneNode, useEditMode } from '@/features/replay/composables/useEditMode'
 import { useLogImport } from '@/features/replay/composables/useLogImport'
+import { useReplayResume } from '@/features/replay/composables/useReplayResume'
+import { useReplayScenery } from '@/features/replay/composables/useReplayScenery'
+import SceneAssetsPanel from '@/features/replay/components/SceneAssetsPanel.vue'
 import ReplayToolbar from '@/features/replay/components/ReplayToolbar.vue'
 import TimelineBar from '@/features/replay/components/TimelineBar.vue'
 import LogPanel from '@/features/replay/components/LogPanel.vue'
+import NodeFocusSwitch from '@/features/replay/components/NodeFocusSwitch.vue'
 import AsyncNodeScene3D from '@/features/scene3d/AsyncNodeScene3D.vue'
 
 const FX_LEVEL_OPTIONS = Object.freeze([
@@ -41,6 +46,28 @@ const logImport = useLogImport({
   state,
   applyParsedLog: (parsed) => state.applyParsedLog(parsed, editMode.exitEditMode),
 })
+const replayResume = useReplayResume({ state, playback, panel })
+// A newly completed simulation or explicitly synchronized topology replaces
+// the saved replay. Restore before the immediate topology watcher below.
+if (typeof session.pendingReplayLog === 'string' && session.pendingReplayLog.length) {
+  state.logSourceKey.value = 'upload'
+  state.uploadedLogName.value = session.pendingReplayName || 'ns3.log'
+  state.applyParsedLog(parseLog(session.pendingReplayLog), editMode.exitEditMode)
+  session.pendingReplayLog = null
+  session.pendingReplayName = ''
+  session.pendingReplayApply = null
+} else if (Array.isArray(session.pendingReplayApply)) {
+  state.applyTopology(session.pendingReplayApply, editMode.exitEditMode)
+  session.pendingReplayApply = null
+} else {
+  replayResume.restore(session.lastReplay)
+}
+session.lastReplay = null
+const scenery = useReplayScenery({ assets: state.sceneAssets, visible: state.sceneAssetsVisible,
+  selectedId: state.selectedSceneAssetId, getNodes: () => state.staticModelNodes.value })
+const { sceneAssets, sceneAssetsVisible, selectedSceneAssetId, scenePanelOpen } = state
+const { selected: selectedSceneAsset, error: sceneryError, focusRequest: sceneFocusRequest } = scenery
+const selectSceneAsset = (id: string) => { selectedSceneAssetId.value = id; scenePanelOpen.value = true }
 
 const {
   currentTime,
@@ -59,15 +86,18 @@ const {
 
 const {
   logSourceKey,
-  uploadedLogName,
   fxLevel,
   replayMode,
   selectedLifecyclePacketId,
   showAllActivePackets,
+  focusedNodeId,
+  focusedNodeLabel,
   editSoundSpeed,
   fractionalTiming,
-  successTraceOnly,
   baseNodesState,
+  staticModelNodes,
+  trajectoryViewNodes,
+  onNodeModelChange,
   parseErrors,
   cycleEndUs,
   nodesState,
@@ -122,7 +152,8 @@ const {
   restoreSelectedEditNodes,
   restoreAllEditNodes,
   onEditSoundSpeedChange,
-  onEditCoordChange,
+  onEditNodeCoordinate,
+  onEditNodeRename,
 } = editMode
 
 const onFxLevelChange = (event: Event) => {
@@ -150,24 +181,12 @@ const logSourceLabel = computed(() =>
 
 /* 同步给实验页「从回放同步」的是静态拓扑，不是播放中 movement 插值的瞬时
    帧位置——之前 watch nodesState（moving 播放时每帧都是新数组）+ deep，
-   导致播放期间每帧 clone 全部节点，纯浪费。baseNodesState 只在换日志 /
-   实验页应用拓扑时变化。 */
-watch(baseNodesState, (nodes) => {
+   导致播放期间每帧 clone 全部节点。这里只跟踪静态拓扑及模型显示选择。 */
+watch(staticModelNodes, (nodes) => {
   session.replayNodes = (nodes || []).map(cloneNode)
 }, { deep: true, immediate: true })
 
 onMounted(() => {
-  if (typeof session.pendingReplayLog === 'string' && session.pendingReplayLog.length) {
-    logSourceKey.value = 'upload'
-    uploadedLogName.value = session.pendingReplayName || 'ns3.log'
-    state.applyParsedLog(parseLog(session.pendingReplayLog), editMode.exitEditMode)
-    session.pendingReplayLog = null
-    session.pendingReplayName = ''
-    session.pendingReplayApply = null
-  } else if (Array.isArray(session.pendingReplayApply)) {
-    state.applyTopology(session.pendingReplayApply, editMode.exitEditMode)
-    session.pendingReplayApply = null
-  }
   try {
     const savedFx = localStorage.getItem(LOCAL_STORAGE_KEYS.fxLevel)
     if (savedFx && FX_LEVEL_OPTIONS.some((item) => item.key === savedFx)) {
@@ -184,6 +203,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  session.lastReplay = markRaw(replayResume.capture())
   playback.dispose()
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('pointermove', onGlobalPointerMove)
@@ -201,7 +221,16 @@ onBeforeUnmount(() => {
         <NodeCanvas
           v-show="visualMode === '2d'"
           :active="visualMode === '2d'"
+          :scene-assets="sceneAssets"
+          :scene-assets-visible="sceneAssetsVisible"
+          :selected-scene-asset-id="selectedSceneAssetId ?? undefined"
+          :scene-focus-request="sceneFocusRequest ?? undefined"
+          :editable-scene-assets="scenePanelOpen"
+          @scene-asset-select="selectSceneAsset"
+          @scene-asset-move="({ id, x, y }) => scenery.patch(id, { x, y })"
           :nodes="nodesState"
+          :view-nodes="trajectoryViewNodes"
+          :range-scope="baseNodesState"
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
           :current-time="currentTime"
@@ -209,6 +238,8 @@ onBeforeUnmount(() => {
           :fx-level="fxLevel"
           :edit-mode="isEditMode"
           :allow-delete-nodes="isEditMode"
+          :allow-rename="isEditMode"
+          :allow-coordinate-edit="isEditMode"
           :box-select="isEditMode"
           :original-positions="originalEditPositions"
           :selected-node-id="selectedEditNodeId ?? undefined"
@@ -219,30 +250,54 @@ onBeforeUnmount(() => {
           @node-move="onEditNodeMove"
           @nodes-move="onEditNodesMove"
           @nodes-delete="removeSelectedEditNodes"
+          @node-rename="onEditNodeRename"
+          @node-coordinate="onEditNodeCoordinate"
           @node-move-end="onEditNodeMoveEnd"
           @node-select="onEditNodeSelect"
           @selection-change="onEditSelectionChange"
-        />
+        >
+          <template #node-actions="{ node }">
+            <NodeModelSelect :node="node" @change="onNodeModelChange" />
+            <NodeFocusSwitch v-model="focusedNodeId" :node-id="node.node_id" />
+          </template>
+        </NodeCanvas>
         <AsyncNodeScene3D
           v-if="hasOpened3D"
           v-show="visualMode === '3d'"
           :active="visualMode === '3d'"
+          :scene-assets="sceneAssets"
+          :scene-assets-visible="sceneAssetsVisible"
+          :scene-focus-request="sceneFocusRequest"
+          @scene-asset-select="selectSceneAsset"
           :nodes="nodesState"
           :topology-nodes="baseNodesState"
+          :view-nodes="trajectoryViewNodes"
           :node-visuals="nodeVisuals"
           :visible-packets="displayPackets"
           :current-time="currentTime"
           :theme-key="CANVAS_THEME_KEY"
           :fx-level="fxLevel"
-        />
+        >
+          <template #node-actions="{ node }">
+            <NodeModelSelect :node="node" @change="onNodeModelChange" />
+            <NodeFocusSwitch v-model="focusedNodeId" :node-id="node.node_id" />
+          </template>
+        </AsyncNodeScene3D>
       </div>
 
       <ReplayToolbar
+        :scene-panel-open="scenePanelOpen"
         :is-edit-mode="isEditMode"
         :visual-mode="visualMode"
         @set-interaction-mode="setInteractionMode"
         @update:visual-mode="onVisualModeChange"
+        @toggle-scene="scenePanelOpen = !scenePanelOpen"
       />
+
+      <SceneAssetsPanel :open="scenePanelOpen" :assets="sceneAssets" :visible="sceneAssetsVisible" :selected="selectedSceneAsset" :error="sceneryError"
+        @close="scenePanelOpen = false" @add="scenery.add" @select="selectSceneAsset" @locate="scenery.locate"
+        @remove="scenery.remove" @duplicate="scenery.duplicate" @patch="scenery.patch" @field="scenery.setField"
+        @update:visible="sceneAssetsVisible = $event" @import="scenery.importScene" @export="scenery.download" @import-error="sceneryError = $event" />
 
       <div class="dock-unit dock-unit-r" :class="{ closed: !logPanelOpen }">
         <button
@@ -266,6 +321,7 @@ onBeforeUnmount(() => {
           :storage-key="LOCAL_STORAGE_KEYS.splitLog"
         >
         <LogPanel
+          :focused-node-id="focusedNodeId"
           :panel-active="logPanelOpen"
           :current-time="currentTime"
           :show-all-active-packets="showAllActivePackets"
@@ -279,7 +335,6 @@ onBeforeUnmount(() => {
           :is-edit-mode="isEditMode"
           :edit-sound-speed="editSoundSpeed"
           :fractional-timing="fractionalTiming"
-          :success-trace-only="successTraceOnly"
           :selected-edit-node="selectedEditNode"
           :selected-edit-node-count="selectedEditNodeIds.length"
           :selected-lifecycle-packet-id="selectedLifecyclePacketId"
@@ -301,7 +356,6 @@ onBeforeUnmount(() => {
           @replay-mode-change="onReplayModeChange"
           @edit-sound-speed-change="onEditSoundSpeedChange"
           @fx-level-change="onFxLevelChange"
-          @coord-change="onEditCoordChange"
           @restore-selected="restoreSelectedEditNodes"
           @restore-all="restoreAllEditNodes"
           @lifecycle-packet-change="onLifecyclePacketChange"
@@ -330,6 +384,7 @@ onBeforeUnmount(() => {
 
     <footer class="statusbar">
       <span class="sb-item">{{ replayMode === 'lifecycle' ? '单包生命周期' : '全局' }} · {{ logSourceLabel }}</span>
+      <span v-if="focusedNodeId !== null" class="sb-item">关注 {{ focusedNodeLabel }}</span>
       <span v-if="isEditMode" class="sb-item">选中 <b>{{ selectedEditNodeIds.length }}</b> 个节点</span>
       <span class="sb-item">成功 <b>{{ summary.okReceivers }}</b></span>
       <span class="sb-item">rx-rx <b>{{ summary.rxrxCollisions }}</b></span>

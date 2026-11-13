@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { SPEED_OPTIONS } from '@/shared/constants'
 import { timeDisplay } from '../lib/format'
 
-defineProps<{
+const props = defineProps<{
   currentTime: number
   cycleEndUs: number
   rangeProgressStyle: string
@@ -10,6 +11,16 @@ defineProps<{
   speed: number
   fractionalTiming?: boolean
 }>()
+
+// Reserve every digit the replay can display, including unit changes. This
+// depends on the log duration, never on the moving playback clock.
+const timeWidth = computed(() => {
+  const end = Number.isFinite(props.cycleEndUs) ? Math.max(0, props.cycleEndUs) : 0
+  const secondsDigits = Math.floor(Math.log10(Math.max(1, Math.ceil(end / 1_000_000)))) + 1
+  return `${props.fractionalTiming
+    ? Math.max(13, secondsDigits + 12)
+    : Math.max(10, secondsDigits + 5)}ch`
+})
 
 const emit = defineEmits<{
   seek: [us: number]
@@ -36,8 +47,9 @@ const onInput = (event: Event) => {
     </button>
     <button
       class="tp-play"
-      :title="isPlaying ? '暂停' : '播放'"
+      :title="isPlaying ? '暂停（P）' : '播放（P）'"
       :aria-label="isPlaying ? '暂停' : '播放'"
+      aria-keyshortcuts="P"
       @click="emit('togglePlay')"
     >
       <svg v-if="!isPlaying" viewBox="0 0 24 24" aria-hidden="true">
@@ -48,7 +60,7 @@ const onInput = (event: Event) => {
       </svg>
     </button>
     <div class="tp-time">
-      <span class="tp-now">{{ timeDisplay(currentTime, fractionalTiming) }}</span>
+      <span class="tp-now" :style="{ width: timeWidth }">{{ timeDisplay(currentTime, fractionalTiming) }}</span>
       <span class="tp-total">/ {{ timeDisplay(cycleEndUs, fractionalTiming) }}</span>
     </div>
     <label class="range-wrap">
@@ -74,3 +86,14 @@ const onInput = (event: Event) => {
     </label>
   </div>
 </template>
+
+<style scoped>
+.tp-now {
+  flex: none;
+  text-align: right;
+}
+
+.range-wrap {
+  min-width: 0;
+}
+</style>

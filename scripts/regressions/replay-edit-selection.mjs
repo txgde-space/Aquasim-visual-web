@@ -36,10 +36,17 @@ export async function checkReplayEditSelection(server) {
     assert.equal(state.selectedEditNode.value, null)
     assert.equal(state.editNodes.value[0].x, 50, 'edit snapshots retain the current moving-node position')
     const originals = snapshot(state.editNodes.value)
+    const packetsBeforeRename = state.simulatedPacketRows.value
+    edit.onEditNodeRename({ node_id: 0, name: '  编辑备注  ' })
+    assert.equal(state.editNodes.value[0].name, '编辑备注')
+    assert.equal(state.editNodes.value[0].node_id, 0)
+    assert.equal(state.simulatedPacketRows.value, packetsBeforeRename, 'name edits do not recompute packet timing')
+    assert.deepEqual(snapshot(state.baseNodesState.value), originalLogNodes, 'renaming never mutates the original log')
+    edit.restoreAllEditNodes()
 
     edit.onEditSelectionChange([2])
     edit.onEditNodeMove({ node_id: 2, x: 2100, y: 190 })
-    edit.onEditCoordChange('z', input(25))
+    edit.onEditNodeCoordinate({ node_id: 2, axis: 'z', value: 25 })
     const unselectedPose = snapshot(state.editNodes.value[2])
     edit.onEditSelectionChange([0, 1, 1, 999])
     assert.deepEqual(state.selectedEditNodeIds.value, [0, 1], 'selection deduplicates and excludes unknown nodes, retaining node zero')
@@ -48,7 +55,7 @@ export async function checkReplayEditSelection(server) {
     assert.equal(state.selectedEditNodeId.value, null)
     assert.equal(state.selectedEditNode.value, null, 'multiple selection exposes no single-node coordinate form')
     const beforeIgnored = snapshot(state.editNodes.value)
-    edit.onEditCoordChange('x', input(999))
+    edit.onEditNodeCoordinate({ node_id: 999, axis: 'x', value: 999 })
     edit.onEditNodeMove({ node_id: 0, x: 999, y: 999 })
     assert.deepEqual(state.editNodes.value, beforeIgnored, 'a single-point edit cannot accidentally change one member of a selected group')
 
@@ -71,8 +78,8 @@ export async function checkReplayEditSelection(server) {
 
     edit.onEditSelectionChange([1])
     assert.equal(state.selectedEditNodeId.value, 1)
-    edit.onEditCoordChange('x', input(123.456))
-    assert.equal(state.selectedEditNode.value.x, 123.46, 'single selection retains coordinate editing')
+    edit.onEditNodeCoordinate({ node_id: 1, axis: 'x', value: 123.456 })
+    assert.equal(state.selectedEditNode.value.x, 123.46, 'card coordinates target their explicit node ID')
     edit.onEditSelectionChange([])
     assert.equal(state.selectedEditNode.value, null)
     edit.onEditNodeSelect(state.editNodes.value[0])
@@ -121,7 +128,11 @@ export async function checkReplayEditSelection(server) {
     assert.equal(state.selectedEditNode.value, null)
     assert.deepEqual(state.editNodes.value, [])
     assert.equal(state.simulatedPacketRows.value, null)
-    assert.deepEqual(state.nodesState.value, originalLogNodes, 'leaving edit mode restores the original topology')
+    assert.equal(playback.currentTime.value, 0, 'leaving edit mode returns to the start of the original timeline')
+    assert.deepEqual(state.nodesState.value, originalLogNodes.map((node) => node.node_id === 0
+      ? { ...node, motionDirection: { x: 100, y: 0, z: 0 } } : node),
+    'leaving edit mode restores every original topology field and derives the recorded first-segment heading only for the moving node')
+    assert.deepEqual(state.baseNodesState.value, originalLogNodes, 'derived model heading never writes into the original topology')
     assert.deepEqual(state.packetRows.value, originalLogPackets, 'leaving edit mode restores all original transmissions')
     playback.currentTime.value = 500000
     assert.equal(state.nodesState.value[0].x, 50, 'leaving edit mode restores the original movement timeline')

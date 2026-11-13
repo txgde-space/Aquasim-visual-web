@@ -34,7 +34,7 @@ export const buildNodeVisual = (node: ReplayNode, txEvents: ReplayPacket[], rxEv
         if (time < receiver.collision_start_us
           && (!preCollisionReceive || receiver.rx_start_us >= preCollisionReceive.rx_start_us)) preCollisionReceive = receiver
       }
-      if (receiver.status === 'ok'
+      if ((receiver.status === 'ok' || receiver.reason === 'reception_incomplete' || receiver.reason === 'outcome_unreported')
         && (!activeReceive || receiver.rx_start_us >= activeReceive.rx_start_us)) activeReceive = receiver
     }
     if (time > receiver.rx_end_us) {
@@ -61,6 +61,8 @@ export const buildNodeVisual = (node: ReplayNode, txEvents: ReplayPacket[], rxEv
     fillProgress: clampRatio((time - receiving.rx_start_us) / durationForProgress(receiving.rx_duration_us, fractionalTiming)),
     statusText: '接收中', packetId: receiving.packet_id,
   })
+  if (recentFailure && (recentFailure.reason === 'reception_incomplete' || recentFailure.reason === 'outcome_unreported'))
+    return makeVisual(node, { statusText: reasonLabel(recentFailure.reason), packetId: recentFailure.packet_id })
   if (recentFailure) {
     const fade = clampRatio(1 - ((time - recentFailure.rx_end_us) / RX_FAIL_HOLD_US))
     return makeVisual(node, {

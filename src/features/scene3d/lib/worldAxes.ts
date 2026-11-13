@@ -9,6 +9,8 @@ import {
   type Mesh,
   type Scene,
 } from '@babylonjs/core'
+import { SEA_LEVEL_METERS } from './oceanCoordinates'
+import { SEABED_LEVEL_METERS, SEABED_RELIEF_METERS } from './seabedTerrain'
 import { makeMaterial } from './factories'
 import {
   AXIS_X_COLOR,
@@ -39,14 +41,14 @@ const AXIS_PADDING_FRACTION = 0.08
 const AXIS_TICK_MIN_LEN = 36
 /** Tick length as a fraction of the axis length. */
 const AXIS_TICK_LEN_FRACTION = 0.012
-const AXIS_LINE_ALPHA = 0.24
-const AXIS_TICK_ALPHA = 0.18
+const AXIS_LINE_ALPHA = 0.5
+const AXIS_TICK_ALPHA = 0.35
 const AXIS_TIP_DIAMETER = 34
 const AXIS_LABEL_WIDTH = 190
 const AXIS_LABEL_HEIGHT = 72
 const AXIS_LABEL_TEXTURE_WIDTH = 256
 const AXIS_LABEL_TEXTURE_HEIGHT = 96
-const AXIS_LABEL_ALPHA = 0.48
+const AXIS_LABEL_ALPHA = 0.94
 const AXIS_LABEL_FONT = '600 42px "IBM Plex Sans", sans-serif'
 const AXIS_LABEL_OFFSET_FACTOR = 2.35
 
@@ -64,19 +66,21 @@ export const syncWorldAxes = (
 
   const xs = nodes.map((node) => node.x)
   const ys = nodes.map((node) => node.y)
-  const zs = nodes.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
+  const zs = nodes.map((node) => (node.z ?? 0) * DEPTH_SCALE)
   const minX = Math.min(...xs)
   const maxX = Math.max(...xs)
   const minY = Math.min(...zs)
-  const maxY = Math.max(...zs)
   const minZ = Math.min(...ys)
   const maxZ = Math.max(...ys)
-  const span = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1)
+  const span = Math.max(maxX - minX, maxZ - minZ, 1)
   const padding = Math.max(AXIS_MIN_PADDING, span * AXIS_PADDING_FRACTION)
-  const axisLen = Math.max(maxX - minX, maxY - minY, maxZ - minZ) + (padding * 2)
+  const axisLen = span + (padding * 2)
+  const seaY = SEA_LEVEL_METERS * DEPTH_SCALE
+  const bottomY = Math.floor(Math.min(minY / DEPTH_SCALE, SEABED_LEVEL_METERS - SEABED_RELIEF_METERS) / 1000) * 1000 * DEPTH_SCALE
+  const verticalLen = seaY - bottomY
   const origin = new Vector3(
     minX - padding,
-    minY - padding,
+    seaY,
     minZ - padding,
   )
 
@@ -89,18 +93,17 @@ export const syncWorldAxes = (
     },
     {
       key: 'y',
-      color: AXIS_Y_COLOR,
-      end: new Vector3(origin.x, origin.y + axisLen, origin.z),
-      unit: new Vector3(0, 1, 0),
+      color: AXIS_Z_COLOR,
+      end: new Vector3(origin.x, bottomY, origin.z),
+      unit: new Vector3(0, -1, 0),
     },
     {
       key: 'z',
-      color: AXIS_Z_COLOR,
+      color: AXIS_Y_COLOR,
       end: new Vector3(origin.x, origin.y, origin.z + axisLen),
       unit: new Vector3(0, 0, 1),
     },
   ]
-  const tickSpacing = axisLen / AXIS_TICK_COUNT
   const tickLen = Math.max(AXIS_TICK_MIN_LEN, axisLen * AXIS_TICK_LEN_FRACTION)
   const tickOffsets: Record<string, Vector3> = {
     x: new Vector3(0, tickLen, 0),
@@ -109,7 +112,12 @@ export const syncWorldAxes = (
   }
 
   for (const spec of specs) {
+    const tickIndices = Array.from({ length: spec.key === 'y' ? AXIS_TICK_COUNT + 1 : AXIS_TICK_COUNT }, (_, index) => spec.key === 'y' ? index : index + 1)
+    const tickSpacing = (spec.key === 'y' ? verticalLen : axisLen) / AXIS_TICK_COUNT
     let entry = worldAxesMap.get(spec.key)
+    if (entry && entry.ticks.length !== tickIndices.length) {
+      disposeWorldAxisEntry(entry); worldAxesMap.delete(spec.key); entry = undefined
+    }
     if (!entry) {
       const line = MeshBuilder.CreateLines(`world-axis-${spec.key}`, {
         points: [origin, spec.end],
@@ -124,7 +132,7 @@ export const syncWorldAxes = (
       }, scene)
       tip.material = makeMaterial(scene, `world-axis-${spec.key}-tip-mat`, spec.color, spec.color.scale(0.08), 0.28)
 
-      const ticks = Array.from({ length: AXIS_TICK_COUNT - 1 }, (_, index) => {
+      const ticks = tickIndices.map((_, index) => {
         const tick = MeshBuilder.CreateLines(`world-axis-${spec.key}-tick-${index}`, {
           points: [origin, origin],
           updatable: true,
@@ -134,20 +142,28 @@ export const syncWorldAxes = (
         return tick
       })
 
-      const labels = Array.from({ length: AXIS_TICK_COUNT - 1 }, (_, index) => {
+      const labels = tickIndices.map((_, index) => {
         const plane = MeshBuilder.CreatePlane(`world-axis-${spec.key}-label-${index}`, {
           width: AXIS_LABEL_WIDTH,
           height: AXIS_LABEL_HEIGHT,
         }, scene)
         plane.billboardMode = 7
+        // Axis annotations remain readable above ocean terrain and translucent water.
+        plane.renderingGroupId = 2
+        plane.isPickable = false
         const texture = new DynamicTexture(`world-axis-${spec.key}-label-tex-${index}`, { width: AXIS_LABEL_TEXTURE_WIDTH, height: AXIS_LABEL_TEXTURE_HEIGHT }, scene, true)
+        texture.hasAlpha = true
         const material = new StandardMaterial(`world-axis-${spec.key}-label-mat-${index}`, scene)
         material.diffuseTexture = texture
         material.emissiveTexture = texture
-        material.opacityTexture = texture
+        material.useAlphaFromDiffuseTexture = true
+        material.emissiveColor = Color3.White()
+        material.disableLighting = true
+        material.fogEnabled = false
+        material.disableDepthWrite = true
         material.specularColor = Color3.Black()
         material.backFaceCulling = false
-        material.alpha = 0.52
+        material.alpha = AXIS_LABEL_ALPHA
         plane.material = material
         return { plane, texture, material }
       })
@@ -166,7 +182,7 @@ export const syncWorldAxes = (
 
     const tickOffset = tickOffsets[spec.key]
     entry.ticks.forEach((tick, index) => {
-      const tickCenter = origin.add(spec.unit.scale(tickSpacing * (index + 1)))
+      const tickCenter = origin.add(spec.unit.scale(tickSpacing * tickIndices[index]!))
       MeshBuilder.CreateLines('', {
         points: [tickCenter.subtract(tickOffset), tickCenter.add(tickOffset)],
         instance: tick,
@@ -175,23 +191,32 @@ export const syncWorldAxes = (
     })
 
     entry.labels.forEach((labelEntry, index) => {
-      const tickCenter = origin.add(spec.unit.scale(tickSpacing * (index + 1)))
+      const tickCenter = origin.add(spec.unit.scale(tickSpacing * tickIndices[index]!))
       const labelOffset = tickOffset.scale(AXIS_LABEL_OFFSET_FACTOR)
       labelEntry.plane.position.copyFrom(tickCenter.add(labelOffset))
       labelEntry.plane.setEnabled(true)
       labelEntry.material.alpha = AXIS_LABEL_ALPHA
       labelEntry.texture.clear()
       labelEntry.texture.drawText(
-        `${Math.round(tickSpacing * (index + 1))}`,
+        `${Math.round(spec.key === 'y' ? tickCenter.y / DEPTH_SCALE : spec.key === 'z' ? tickCenter.z : tickCenter.x)} m`,
         null,
         62,
         AXIS_LABEL_FONT,
-        spec.key === 'x' ? '#fca5a5' : spec.key === 'y' ? '#86efac' : '#93c5fd',
-        'transparent',
+        spec.key === 'x' ? '#fca5a5' : spec.key === 'y' ? '#93c5fd' : '#86efac',
+        AXES_WIDGET_BG,
         true,
         true,
       )
     })
+  }
+}
+
+/** Toggle the complete annotation without reallocating geometry or label textures. */
+export const setWorldAxesVisible = (axes: Map<string, WorldAxisEntry>, visible: boolean): void => {
+  for (const entry of axes.values()) {
+    entry.line.setEnabled(visible); entry.tip.setEnabled(visible)
+    for (const tick of entry.ticks) tick.setEnabled(visible)
+    for (const label of entry.labels) label.plane.setEnabled(visible)
   }
 }
 
@@ -243,8 +268,8 @@ export const drawAxesWidget = (canvas: HTMLCanvasElement, camera: ArcRotateCamer
   }
   const axes = [
     { label: 'X', color: '#f87171', vec: projectAxis(new Vector3(1, 0, 0)) },
-    { label: 'Y', color: '#4ade80', vec: projectAxis(new Vector3(0, 1, 0)) },
-    { label: 'Z', color: '#60a5fa', vec: projectAxis(new Vector3(0, 0, 1)) },
+    { label: 'Z', color: '#60a5fa', vec: projectAxis(new Vector3(0, 1, 0)) },
+    { label: 'Y', color: '#4ade80', vec: projectAxis(new Vector3(0, 0, 1)) },
   ]
 
   for (const axis of axes) {

@@ -2,6 +2,8 @@ import { ref, type Ref } from 'vue'
 import { recomputeReceiversFromGeometry } from '@/shared/acousticSim'
 import { DEFAULT_RADIO_PROPAGATION_SPEED_MPS } from '@/shared/constants'
 import type { ReplayNode } from '@/shared/types/replay'
+import { normalizeNodeName } from '@/shared/nodeName'
+import { parseQuantity } from '@/shared/quantity'
 import { resolveMovingNodes } from '../lib/logNormalize'
 import type { PlaybackEngine } from './usePlaybackEngine'
 import type { ReplayStateApi } from './useReplayState'
@@ -46,7 +48,7 @@ export const useEditMode = ({
 
   const snapshotReplayNodes = () => {
     const snapshot = resolveMovingNodes(
-      state.baseNodesState.value,
+      state.staticModelNodes.value,
       state.nodeMovementRows.value,
       playback.currentTime.value,
     ).map(cloneNode)
@@ -156,22 +158,26 @@ export const useEditMode = ({
   }
 
   const onEditSoundSpeedChange = (event: Event) => {
-    const next = Number((event.target as HTMLSelectElement).value)
-    if (!Number.isFinite(next) || next <= 0) return
-    state.editSoundSpeed.value = state.fractionalTiming.value
-      ? Math.max(1, Math.min(DEFAULT_RADIO_PROPAGATION_SPEED_MPS, next))
-      : Math.max(200, Math.min(2500, next))
+    let next: number
+    try { next = parseQuantity((event.target as HTMLInputElement).value, 'm/s').value }
+    catch { return }
+    const min = state.fractionalTiming.value ? 1 : 200
+    const max = state.fractionalTiming.value ? DEFAULT_RADIO_PROPAGATION_SPEED_MPS : 2500
+    if (next < min || next > max) return
+    state.editSoundSpeed.value = next
     refreshSimulatedPackets()
   }
 
-  const onEditCoordChange = (axis: 'x' | 'y' | 'z', event: Event) => {
+  const onEditNodeRename = ({ node_id, name }: { node_id: number; name: string }) => {
     if (!state.isEditMode.value) return
-    const node = state.selectedEditNode.value
-    if (!node) return
-    const next = Number((event.target as HTMLInputElement).value)
-    if (!Number.isFinite(next)) return
-    state.editNodes.value = state.editNodes.value.map((item) => (
-      item.node_id === node.node_id ? { ...item, [axis]: Math.round(next * 100) / 100 } : item
+    state.editNodes.value = state.editNodes.value.map((node) => node.node_id === node_id
+      ? { ...node, name: normalizeNodeName(name, node_id) } : node)
+  }
+
+  const onEditNodeCoordinate = ({ node_id, axis, value }: { node_id: number; axis: 'x' | 'y' | 'z'; value: number }) => {
+    if (!state.isEditMode.value || !['x', 'y', 'z'].includes(axis) || !Number.isFinite(value)) return
+    state.editNodes.value = state.editNodes.value.map((node) => (
+      node.node_id === node_id ? { ...node, [axis]: Math.round(value * 100) / 100 } : node
     ))
     refreshSimulatedPackets()
   }
@@ -191,7 +197,8 @@ export const useEditMode = ({
     restoreSelectedEditNodes,
     restoreAllEditNodes,
     onEditSoundSpeedChange,
-    onEditCoordChange,
+    onEditNodeCoordinate,
+    onEditNodeRename,
   }
 }
 

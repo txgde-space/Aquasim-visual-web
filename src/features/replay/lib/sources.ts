@@ -1,4 +1,4 @@
-import netLogDefaultText from '@/assets/net.json?raw'
+import netLogDefaultText from '@/assets/net_surface_survey.json?raw'
 import netLogMultiHopText from '@/assets/net_multihop.json?raw'
 import netLogMultiHopComplexText from '@/assets/net_multihop_complex.json?raw'
 import netLogChainNoConflictText from '@/assets/net_chain_5_no_conflict.log?raw'
@@ -14,7 +14,7 @@ export interface LogSource {
 export const LOG_SOURCES: Readonly<Record<string, LogSource>> = Object.freeze({
   default: {
     label: '默认示例',
-    fileName: 'net.json',
+    fileName: 'net_surface_survey.json',
     raw: netLogDefaultText,
   },
   multihop: {

@@ -3,6 +3,8 @@ import { createRenderer, h, nextTick, reactive, ref, shallowRef, ssrContextKey }
 import { Color3, NullEngine, Scene as BabylonScene, Vector3, VertexBuffer } from '@babylonjs/core'
 
 export async function checkCanvas(server) {
+  const { DEPTH_SCALE } = await server.ssrLoadModule('/src/features/scene3d/lib/themes3d.ts')
+  const { nodeCardPosition } = await server.ssrLoadModule('/src/features/scene3d/lib/nodeCardPosition.ts')
   const sceneState = await server.ssrLoadModule('/src/features/scene3d/lib/sceneState.ts')
   const coordinate = await server.ssrLoadModule('/src/features/canvas2d/lib/coordinate.ts')
   const { useCanvasLoop } = await server.ssrLoadModule('/src/features/canvas2d/composables/useCanvasLoop.ts')
@@ -10,6 +12,7 @@ export async function checkCanvas(server) {
   const { useNodeCard } = await server.ssrLoadModule('/src/features/canvas2d/composables/useNodeCard.ts')
   const { default: NodeScene3D } = await server.ssrLoadModule('/src/features/scene3d/NodeScene3D.vue')
   const { default: NodeCanvas } = await server.ssrLoadModule('/src/components/NodeCanvas.vue')
+  const { default: NodePositionEditor } = await server.ssrLoadModule('/src/features/canvas2d/NodePositionEditor.vue')
   const { worldAxisBounds, worldAxesNeedRefresh, packetPathKey } = sceneState
   const bounds = (maxX, offset = 0, z = 0) => worldAxisBounds([{ x: offset, y: 0 }, { x: maxX + offset, y: 0, z }], 38)
   const original = bounds(1000)
@@ -26,6 +29,21 @@ export async function checkCanvas(server) {
   assert.notEqual(packetPathKey(packet, 3), packetPathKey({ ...packet, src: 2 }, 3), 'legacy fallback distinguishes senders')
   assert.notEqual(packetPathKey(packet, 3), packetPathKey({ ...packet, tx_start_us: 200 }, 3), 'legacy fallback distinguishes retransmissions')
   assert.notEqual(packetPathKey(packet, 3), packetPathKey(packet, 4))
+
+  const cardViewport = { width: 640, height: 400 }, cardSize = { width: 260, height: 150 }
+  for (const point of [{ x: 2, y: 2, z: .5 }, { x: 638, y: 398, z: .5 }, { x: 320, y: 200, z: .5 }]) {
+    const position = nodeCardPosition(point, cardViewport, cardSize)
+    assert.ok(position, 'visible nodes keep their interactive card on screen')
+    assert.ok(position.x >= 8 && position.x + cardSize.width <= 632, 'both card sides fit within the host')
+    assert.ok(position.y >= 8 && position.y + cardSize.height <= 392, 'close and focus controls remain reachable vertically')
+  }
+  const narrow = nodeCardPosition({ x: 120, y: 70, z: .5 }, { width: 240, height: 140 }, cardSize)
+  assert.deepEqual(narrow, { x: 8, y: 8 }, 'small hosts use the CSS-constrained card dimensions')
+  for (const point of [{ x: -1, y: 100, z: .5 }, { x: 641, y: 100, z: .5 }, { x: 10, y: -1, z: .5 },
+    { x: 10, y: 401, z: .5 }, { x: 100, y: 100, z: -0.01 }, { x: 100, y: 100, z: 1.01 }, { x: NaN, y: 100, z: .5 }]) {
+    assert.equal(nodeCardPosition(point, cardViewport, cardSize), null, 'off-screen, clipped or invalid projections hide their card')
+  }
+  assert.equal(nodeCardPosition({ x: 0, y: 0, z: .5 }, { width: 0, height: 0 }, cardSize), null, 'hidden hosts have no card placement')
 
   const savedGlobals = new Map(['window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver'].map((key) => [key, globalThis[key]]))
   const frames = new Map()
@@ -69,13 +87,32 @@ export async function checkCanvas(server) {
     let view
     const projection = () => ({ bounds: { minX: 0, maxX: 1000, minY: 0, maxY: 1000, spanX: 1000, spanY: 1000 }, origin: { x: 20, y: 30 }, scale: 0.1 * view.zoom.value, pan: view.pan.value })
     let scheduled = 0
-    view = useCanvasView({ getProjection: projection, getBaseScale: () => 0.1, scheduleDraw: () => scheduled++, getCanvasEl: () => null })
+    view = useCanvasView({ getProjection: projection, getBaseScale: () => 0.1, scheduleDraw: () => scheduled++, getCanvasEl: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 400 }) }) })
     const before = coordinate.toWorldPoint(50, 60, projection())
     view.setZoomAt(100, 50, 60)
     const after = coordinate.toWorldPoint(50, 60, projection())
     assert.ok(Math.abs(before.x - after.x) < 1e-8 && Math.abs(before.y - after.y) < 1e-8, 'zoom preserves its screen anchor')
     assert.equal(projection().scale, coordinate.MAX_VIEW_SCALE, 'wheel/slider scale stays bounded')
     assert.equal(scheduled, 1, 'zoom delegates to the shared redraw scheduler')
+    view.resetView()
+    const pinchEvent = Object.assign(new Event('wheel', { cancelable: true }), { ctrlKey: true, deltaY: -20, clientX: 200, clientY: 150 })
+    const pinchAnchor = coordinate.toWorldPoint(200, 150, projection())
+    view.onWheel(pinchEvent)
+    assert.equal(pinchEvent.defaultPrevented, true)
+    assert.ok(view.zoom.value > 1, '2D pinch zooms the drawing instead of the page')
+    const zoomedAnchor = coordinate.toWorldPoint(200, 150, projection())
+    assert.ok(Math.abs(pinchAnchor.x - zoomedAnchor.x) < 1e-8 && Math.abs(pinchAnchor.y - zoomedAnchor.y) < 1e-8)
+    view.onGestureStart(Object.assign(new Event('gesturestart', { cancelable: true }), { scale: 1 }))
+    const beforeNative = view.zoom.value
+    const nativePinch = Object.assign(new Event('gesturechange', { cancelable: true }), { scale: 1.5, clientX: 200, clientY: 150 })
+    view.onGestureChange(nativePinch)
+    assert.equal(nativePinch.defaultPrevented, true)
+    assert.ok(Math.abs(view.zoom.value - beforeNative * 1.5) < 1e-8)
+    const duringNative = view.zoom.value; view.onWheel(pinchEvent)
+    assert.equal(view.zoom.value, duringNative, 'native pinch avoids duplicate wheel scaling')
+    view.cancelPinch(); view.onWheel(pinchEvent)
+    assert.ok(view.zoom.value > duringNative, 'hidden/ended gesture resets permit subsequent wheel zoom')
+
 
     let card
     const cardActive = ref(true)
@@ -105,13 +142,44 @@ export async function checkCanvas(server) {
     await nextTick()
     assert.equal(card.nodeId.value, null, 'deleted nodes close their cards')
 
-    const canvasProps = reactive({ nodes: [], nodeVisuals: [], currentTime: 0, editMode: true, active: true })
+    const placedNodes = []
+    const canvasProps = reactive({ nodes: [], nodeVisuals: [], currentTime: 0, editMode: true, active: true,
+      onNodePlace: (node) => placedNodes.push(node) })
     const Canvas = { ...NodeCanvas, render: () => null }
     const canvasApp = renderer.createApp({ render: () => h(Canvas, canvasProps) })
     canvasApp.provide(ssrContextKey, { modules: new Set() })
     canvasApp.mount({}); apps.push(canvasApp)
     const canvasState = canvasApp._instance.subTree.component.setupState
     assert.equal(canvasState.bounds.spanX, 4000, 'blank edit canvas starts with a 4 km range')
+    canvasState.contextMenu = { x: '-1.5km', y: '250cm', z: '0' }
+    canvasState.addNodeFromContext()
+    assert.deepEqual(placedNodes, [{ x: -1500, y: 2.5, z: 0 }], 'context coordinates use the same meter conversion as node cards')
+    canvasState.contextMenu = { x: '', y: '0', z: '0' }
+    canvasState.addNodeFromContext()
+    assert.equal(placedNodes.length, 1, 'an empty coordinate never becomes an implicit zero')
+    assert.ok(canvasState.contextError)
+    assert.ok(canvasState.contextMenu, 'invalid coordinates remain editable')
+    canvasState.closeContextMenu()
+
+    const positionChanges = []
+    const positionProps = reactive({ nodeId: 12, x: 10, y: 20, z: 30, disabled: false })
+    const Position = { ...NodePositionEditor, render: () => null }
+    const positionApp = renderer.createApp({ render: () => h(Position, { ...positionProps, onChange: (change) => positionChanges.push(change) }) })
+    positionApp.provide(ssrContextKey, { modules: new Set() })
+    positionApp.mount({}); apps.push(positionApp)
+    const positionState = positionApp._instance.subTree.component.setupState
+    positionState.change('x', { target: { value: '-2km' } })
+    assert.deepEqual(positionChanges, [{ node_id: 12, axis: 'x', value: -2000 }])
+    for (const value of ['', '5s', 'Infinity']) positionState.change('x', { target: { value } })
+    assert.equal(positionChanges.length, 1, 'invalid card coordinates do not change topology')
+    assert.ok(positionState.errors.x)
+    positionProps.nodeId = 13
+    await nextTick()
+    assert.deepEqual(positionState.errors, {}, 'switching cards clears stale coordinate errors')
+    positionProps.disabled = true
+    await nextTick()
+    positionState.change('y', { target: { value: '2km' } })
+    assert.equal(positionChanges.length, 1, 'read-only cards reject coordinate changes')
     canvasProps.nodes = [{ node_id: 1, x: 0, y: 0 }, { node_id: 2, x: 10000, y: 10000 }]
     await nextTick()
     assert.equal(canvasState.bounds.spanX, 4000, 'node edits retain the frozen view')
@@ -142,6 +210,21 @@ export async function checkCanvas(server) {
     await nextTick()
     assert.equal(frames.size, 1, '2D still redraws in-place node coordinate changes')
     assert.equal(metadataReads, 0)
+    flushFrames()
+    canvasState.nodeRanges.update(1, { visible: true, radiusM: '600' })
+    await nextTick()
+    assert.equal(frames.size, 1, 'node-card range controls request an actual canvas redraw')
+    assert.equal(canvasState.nodeRanges.ranges.value[0].radius, 600)
+    assert.equal(canvasState.bounds.spanX, 20000, 'range circles never alter the editing view')
+    flushFrames()
+    canvasProps.active = false
+    await nextTick()
+    canvasState.nodeRanges.update(1, { radiusM: '800' })
+    await nextTick()
+    assert.equal(frames.size, 0, 'range settings do not schedule hidden canvas paints')
+    canvasProps.active = true
+    await nextTick()
+    assert.equal(canvasState.nodeRanges.ranges.value[0].radius, 800, 'reactivation synchronizes current range controls')
     canvasApp.unmount(); apps.pop()
     assert.equal(frames.size, 0, '2D unmount cancels pending draw')
 
@@ -173,6 +256,25 @@ export async function checkCanvas(server) {
     state.hostEl = { contains: (element) => element === sceneFocus }
     state.canvasEl = { focus: (options) => focusCalls.push(options), removeEventListener() {} }
     try {
+      const cardInput = {}
+      state.nodeCardEl = { contains: (element) => element === cardInput }
+      state.selectedNodeId = 0
+      state.onOutsidePointerDown({ target: cardInput })
+      assert.equal(state.selectedNodeId, 0, 'focus-switch interaction inside the card keeps the node open')
+      state.onOutsidePointerDown({ target: state.canvasEl })
+      assert.equal(state.selectedNodeId, 0, 'canvas pointerdown waits for tap classification, preserving orbit drags')
+      document.dispatchEvent(new Event('pointerdown'))
+      assert.equal(state.selectedNodeId, null, 'outside pointerdown closes the actual mounted card')
+      assert.equal(focusCalls.length, 0, 'outside clicks retain focus at their destination')
+      state.selectedNodeId = 0
+      state.selectedNodePos = { x: 10, y: 20 }
+      state.closeNodeCard()
+      assert.equal(state.selectedNodeId, null)
+      assert.equal(state.selectedNodePos, null)
+      assert.deepEqual(focusCalls, [{ preventScroll: true }], 'the explicit close button returns focus to the canvas')
+      focusCalls.length = 0
+      state.nodeCardEl = null
+      state.selectedNodeId = 0
       document.activeElement = outsideFocus
       state.selectedNodePos = { x: 10, y: 20 }
       const escape = escapeKey()
@@ -228,6 +330,8 @@ export async function checkCanvas(server) {
     window.dispatchEvent(hiddenEscape)
     assert.equal(state.selectedNodeId, 0, 'a hidden 3D scene ignores Escape from the active 2D view')
     assert.equal(hiddenEscape.defaultPrevented, false)
+    document.dispatchEvent(new Event('pointerdown'))
+    assert.equal(state.selectedNodeId, 0, 'hidden 3D ignores pointer interaction with the active 2D page')
     sceneProps.currentTime = 500
     sceneProps.nodes = [{ node_id: 0, x: 900, y: 10 }]
     await nextTick()
@@ -293,13 +397,36 @@ export async function checkCanvas(server) {
         assert.equal(vertexUpdates, 2, 'appearance changes do not rebuild endpoint geometry')
         assert.equal(path.line.color, palette.line, 'palette changes still update the cached line')
         assert.equal(path.block.material.diffuseColor, palette.tx, 'palette changes still update the moving block')
-        assert.equal(path.line.alpha, 0.62, 'effect changes update cached path appearance')
+        assert.equal(path.line.alpha, 0.28, 'enhanced guides stay subtle instead of obscuring equipment')
       } finally {
         palette.line = oldLine
         palette.tx = oldTx
       }
       state.buildNodes()
-      const progressMaterial = state.nodeMeshMap.get(0).progress.material
+      const modelEntry = state.nodeMeshMap.get(0)
+      const progressMaterial = modelEntry.progress.material
+      const modelSurfaces = [modelEntry.base, ...modelEntry.details].map((mesh) => mesh.material)
+      const materialSnapshot = () => JSON.stringify(modelSurfaces.map((material) => ({
+        albedo: material.albedoColor?.asArray(), emissive: material.emissiveColor?.asArray(),
+        metallic: material.metallic, roughness: material.roughness, alpha: material.alpha,
+      })))
+      const originalModelMaterials = materialSnapshot()
+      const originalModelTime = sceneProps.currentTime
+      assert.ok(modelSurfaces.every((material) => material.getClassName() === 'PBRMaterial'))
+      for (const [mode, color] of [['tx', palette.tx], ['rx', palette.rx], ['collision', palette.bad], ['rx-done', palette.rx]]) {
+        sceneProps.nodeVisuals = [{ node_id: 0, mode, fillProgress: .6, fade: .8 }]
+        sceneProps.currentTime += 100_000
+        await nextTick()
+        state.buildNodes()
+        assert.equal(state.nodeMeshMap.get(0), modelEntry, 'traffic state reuses the equipment mesh')
+        assert.equal(materialSnapshot(), originalModelMaterials, 'traffic state cannot repaint equipment surfaces')
+        assert.equal(progressMaterial.diffuseColor, color, 'the independent overlay still reports the current traffic state')
+        assert.deepEqual(modelEntry.root.scaling.asArray(), [1, 1, 1], 'enhanced playback does not pulse equipment proportions')
+      }
+      sceneProps.currentTime = originalModelTime
+      sceneProps.nodeVisuals = [{ node_id: 0, mode: 'tx', fillProgress: 0.5 }]
+      await nextTick()
+      state.buildNodes()
       const materialState = progressMaterial.metadata
       state.buildNodes()
       assert.equal(progressMaterial.metadata, materialState, 'an unchanged active progress material is not reset/reapplied')
@@ -310,7 +437,7 @@ export async function checkCanvas(server) {
 
       // Drive the callback actually passed to Babylon, which runs before
       // scene.render(). Reuse the bounds to avoid DOM-only axis label textures.
-      state.drawnWorldAxisBounds = worldAxisBounds(sceneProps.nodes, 38)
+      state.drawnWorldAxisBounds = worldAxisBounds(sceneProps.viewNodes || sceneProps.topologyNodes || sceneProps.nodes, DEPTH_SCALE)
       let previousX = path.block.position.x
       for (const time of [1_600_000, 1_700_000, 1_800_000, 1_900_000]) {
         sceneProps.currentTime = time
@@ -346,7 +473,7 @@ export async function checkCanvas(server) {
       sceneProps.active = true
       await nextTick()
       assert.equal(path.block.position.x, 1387.5, 'activation refreshes current packets before restarting rendering')
-      assert.equal(path.line.alpha, 0.52, 'activation also restores the latest appearance')
+      assert.equal(path.line.alpha, 0.18, 'activation also restores the latest appearance')
       assert.equal(state.refreshPending, false)
       sceneProps.currentTime = 2_800_000
       await nextTick()
@@ -364,6 +491,8 @@ export async function checkCanvas(server) {
     window.dispatchEvent(unmountedEscape)
     assert.equal(state.selectedNodeId, 0, '3D unmount removes its Escape listener')
     assert.equal(unmountedEscape.defaultPrevented, false)
+    document.dispatchEvent(new Event('pointerdown'))
+    assert.equal(state.selectedNodeId, 0, '3D unmount removes its outside-pointer listener')
     console.log('Canvas regressions passed: bounds, packet identity, zoom, latest-frame scheduling, card gestures, editing view, shallow updates, 3D mesh caching, selection and visibility.')
   } finally {
     for (const app of apps.reverse()) app.unmount()

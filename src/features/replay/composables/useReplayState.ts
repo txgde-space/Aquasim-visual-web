@@ -1,7 +1,9 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { LOCAL_STORAGE_KEYS, MIN_SIM_TIME_US } from '@/shared/constants'
 import { sanitizeDisplayText } from '@/shared/logSafety'
+import { isNodeModelType, type NodeModelType } from '@/shared/nodeModel'
 import type { LogMeta, ParsedLog } from '@/shared/types/log'
+import type { SceneAsset } from '@/shared/sceneAssets'
 import type {
   LifecycleGroup,
   LifecycleStage,
@@ -15,12 +17,13 @@ import type {
 import { LOG_SOURCES } from '../lib/sources'
 import { clampRatio, durationForProgress, normalizeTime } from '../lib/format'
 import { propagationSpeedFromMeta, usesFractionalTiming } from '../lib/propagation'
-import { resolveMovingNodes } from '../lib/logNormalize'
+import { indexMovements, movementViewBounds, movingNodesAt } from '../lib/movementTimeline'
 import { normalizePacketsFromParsed } from '../lib/logMerge'
 import { createEmptyParsedLog, parseLog } from '../lib/logParser'
 import { summarizePackets } from '../lib/geometry'
 import { buildNodeVisual, type NodeRxEvent } from '../lib/nodeVisuals'
 import { activePacketsAt, indexPacketIntervals } from '../lib/packetTimeline'
+import { packetsForNode } from '../lib/nodePacketFilter'
 import {
   buildLifecycleGroups,
   buildLifecycleStages,
@@ -36,11 +39,17 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const replayMode: Ref<string> = ref('global')
   const selectedLifecyclePacketId: Ref<string> = ref('')
   const showAllActivePackets: Ref<boolean> = ref(true)
+  const focusedNodeId: Ref<number | null> = ref(null)
+  const sceneAssets = ref<SceneAsset[]>([])
+  const sceneAssetsVisible = ref(true)
+  const selectedSceneAssetId = ref<string | null>(null)
+  const scenePanelOpen = ref(false)
   const interactionMode: Ref<string> = ref('replay')
   const initialParsed: ParsedLog = parseLog(LOG_SOURCES.default.raw)
   const editSoundSpeed: Ref<number> = ref(propagationSpeedFromMeta(initialParsed.meta))
 
   const baseNodesState: Ref<ReplayNode[]> = ref(initialParsed.nodes.map((node) => ({ ...node })))
+  const nodeModelOverrides = ref(new Map<number, NodeModelType>())
   const nodeMovementRows: Ref<Movement[]> = ref(initialParsed.movements as unknown as Movement[])
   const sourcePacketRows: Ref<ReplayPacket[]> = ref(
     normalizePacketsFromParsed(initialParsed, uploadedLogName.value || 'node-log'),
@@ -50,6 +59,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const metaState: Ref<LogMeta> = ref(initialParsed.meta)
   const fractionalTiming = computed(() => usesFractionalTiming(metaState.value))
   const successTraceOnly = computed(() => metaState.value.trace_scope === 'phy-success')
+  const receiveEventTrace = computed(() => metaState.value.trace_scope === 'phy-events')
   const editNodes: Ref<ReplayNode[]> = ref([])
   const originalEditPoseById: Ref<Map<number, ReplayNode>> = ref(new Map())
   const selectedEditNodeIds: Ref<number[]> = ref([])
@@ -85,11 +95,29 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     const byId = new Map(nodes.map((node) => [node.node_id, node]))
     return byId.size === nodes.length ? nodes : [...byId.values()]
   })
+  const withNodeModels = (nodes: ReplayNode[]): ReplayNode[] => {
+    if (!nodeModelOverrides.value.size) return nodes
+    return nodes.map((node) => {
+      const modelType = nodeModelOverrides.value.get(node.node_id)
+      return modelType && modelType !== node.modelType ? { ...node, modelType } : node
+    })
+  }
+  const staticModelNodes = computed(() => withNodeModels(staticNodes.value))
+  const movementIndex = computed(() => indexMovements(nodeMovementRows.value))
+  const trajectoryViewNodes = computed(() => movementViewBounds(staticNodes.value, nodeMovementRows.value))
   const nodesState: ComputedRef<ReplayNode[]> = computed(() => {
-    if (isEditMode.value) return editNodes.value
-    if (!nodeMovementRows.value.length) return staticNodes.value
-    return resolveMovingNodes(baseNodesState.value, nodeMovementRows.value, playback.currentTime.value)
+    if (isEditMode.value) return withNodeModels(editNodes.value)
+    if (!nodeMovementRows.value.length) return staticModelNodes.value
+    return movingNodesAt(staticModelNodes.value, movementIndex.value, playback.currentTime.value)
   })
+  const onNodeModelChange = ({ node_id, modelType }: { node_id: number; modelType: NodeModelType }) => {
+    if (!isNodeModelType(modelType) || !nodesState.value.some((node) => node.node_id === node_id)) return
+    nodeModelOverrides.value.set(node_id, modelType)
+  }
+  const nodeFilterOptions = computed(() => (isEditMode.value ? editNodes.value : staticNodes.value)
+    .map((node) => ({ id: node.node_id, label: `${node.name || `Node-${node.node_id}`} · ID ${node.node_id}` }))
+    .sort((a, b) => a.id - b.id))
+  const focusedNodeLabel = computed(() => nodeFilterOptions.value.find((node) => node.id === focusedNodeId.value)?.label || '')
 
   const originalReceiverMap: ComputedRef<Map<string, ReplayReceiver>> = computed(() => {
     const map = new Map<string, ReplayReceiver>()
@@ -104,8 +132,8 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   const selectedEditNode: ComputedRef<ReplayNode | null> = computed(() => (
     editNodes.value.find((node) => node.node_id === selectedEditNodeId.value) || null
   ))
-  const originalSummary = computed(() => summarizePackets(sourcePacketRows.value))
-  const simulatedSummary = computed(() => summarizePackets(packetRows.value))
+  const originalSummary = computed(() => summarizePackets(packetsForNode(sourcePacketRows.value, focusedNodeId.value)))
+  const simulatedSummary = computed(() => summarizePackets(packetsForNode(packetRows.value, focusedNodeId.value)))
 
   // Packet labels depend on topology metadata, not interpolated frame positions.
   const nodeById: ComputedRef<Map<number, ReplayNode>> = computed(() => new Map(
@@ -129,7 +157,11 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
       .map((packet) => {
         const receivers = packet.receivers.map((receiver) => {
           let collisionStartUs = receiver.rx_start_us
-          if (receiver.reason === 'collision_rx_rx' && receiver.with.length) {
+          const observed = receiveEventTrace.value && typeof receiver.collision_start_us === 'number'
+            && Number.isFinite(receiver.collision_start_us) && receiver.collision_start_us >= receiver.rx_start_us
+            && receiver.collision_start_us <= receiver.rx_end_us
+          if (observed) collisionStartUs = receiver.collision_start_us as number
+          if (!observed && receiver.reason === 'collision_rx_rx' && receiver.with.length) {
             for (const packetId of receiver.with) {
               const otherPacket = packetMap.get(packetId)
               const otherReceiver = otherPacket?.receivers.find((item) => item.dst === receiver.dst)
@@ -154,6 +186,9 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
   })
 
   const packetsMaxEndUs = computed(() => packets.value.reduce((maxEnd, packet) => Math.max(maxEnd, packet.timeEnd), 0))
+  // Resolve collision timing against the complete trace first; filtering cannot
+  // hide an interferer and thereby rewrite the observed/legacy collision onset.
+  const scopedPackets = computed(() => packetsForNode(packets.value, focusedNodeId.value))
   const movementsMaxEndUs = computed(() => nodeMovementRows.value.reduce(
     (maxEnd, movement) => Math.max(maxEnd, movement.end_us),
     0,
@@ -165,7 +200,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     movementsMaxEndUs.value,
   ))
 
-  const packetEntries: ComputedRef<PacketEntry[]> = computed(() => buildPacketEntries(packets.value, {
+  const packetEntries: ComputedRef<PacketEntry[]> = computed(() => buildPacketEntries(scopedPackets.value, {
     nodeById: nodeById.value,
     originalReceiverMap: originalReceiverMap.value,
     packetRows: packetRows.value,
@@ -228,11 +263,11 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     return activePacket.value ? [activePacket.value] : []
   })
 
-  const summary = computed(() => summarizePackets(packets.value))
+  const summary = computed(() => summarizePackets(scopedPackets.value))
 
   const txEventsByNode = computed(() => {
     const map = new Map<number, ReplayPacket[]>()
-    for (const packet of packets.value) {
+    for (const packet of scopedPackets.value) {
       if (!packet.tx_committed) continue
       const list = map.get(packet.src) || []
       list.push(packet)
@@ -243,7 +278,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
 
   const rxEventsByNode = computed(() => {
     const map = new Map<number, NodeRxEvent[]>()
-    for (const packet of packets.value) {
+    for (const packet of scopedPackets.value) {
       for (const receiver of packet.receivers) {
         const list = map.get(receiver.dst) || []
         list.push({
@@ -273,6 +308,11 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     const nextNodes = parsed.nodes.map((node) => ({ ...node }))
     const nextPackets = normalizePacketsFromParsed(parsed, uploadedLogName.value || 'node-log')
     exitEdit()
+    nodeModelOverrides.value = new Map()
+    sceneAssets.value = []
+    sceneAssetsVisible.value = true
+    selectedSceneAssetId.value = null
+    focusedNodeId.value = null
     selectedEditNodeIds.value = []
     baseNodesState.value = nextNodes
     nodeMovementRows.value = parsed.movements as unknown as Movement[]
@@ -292,6 +332,11 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     parsed.nodes = nodes.map((node) => ({
       type: 'node', node_id: node.node_id, name: node.name || `Node-${node.node_id}`,
       role: node.role || 'node', x: node.x, y: node.y, z: node.z ?? 0,
+      ...(isNodeModelType(node.modelType) ? { modelType: node.modelType } : {}),
+      ...(node.mobility === undefined ? {} : { mobility: { ...node.mobility } }),
+      ...(node.protocolAttributes === undefined ? {} : {
+        protocolAttributes: Object.fromEntries(Object.entries(node.protocolAttributes).map(([typeId, attrs]) => [typeId, { ...attrs }])),
+      }),
     }))
     logSourceKey.value = 'topology'
     uploadedLogName.value = ''
@@ -311,6 +356,13 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     }
   })
 
+  watch(focusedNodeId, () => {
+    playback.focusedPacketId.value = null
+  }, { flush: 'sync' })
+  watch(nodeFilterOptions, (options) => {
+    if (focusedNodeId.value !== null && !options.some((node) => node.id === focusedNodeId.value)) focusedNodeId.value = null
+  }, { flush: 'sync' })
+
   watch(lifecyclePacketOptions, (options) => {
     if (!options.length) {
       selectedLifecyclePacketId.value = ''
@@ -321,7 +373,35 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     }
   }, { immediate: true })
 
+  // Transfer the data to the next page instance on route teardown. Keep the
+  // large normalized trace by reference; no playback watchers or renderers are
+  // retained, and no per-frame serialization or second log parsing is needed.
+  const resumableRefs = {
+    sceneAssets, sceneAssetsVisible, selectedSceneAssetId, scenePanelOpen,
+    logSourceKey, uploadedLogName, uploadedNodeLogNames,
+    baseNodesState, nodeMovementRows, sourcePacketRows, metaState, parseErrors,
+    nodeModelOverrides, editNodes, originalEditPoseById, simulatedPacketRows,
+    editSoundSpeed, interactionMode, selectedEditNodeIds,
+    fxLevel, replayMode, selectedLifecyclePacketId, showAllActivePackets,
+    // Restore the filter after topology/edit state, before packet focus.
+    focusedNodeId,
+  }
+  type Snapshot = { [K in keyof typeof resumableRefs]: (typeof resumableRefs)[K]['value'] }
+  const captureSnapshot = (): Snapshot => Object.fromEntries(
+    Object.entries(resumableRefs).map(([key, value]) => [key, value.value]),
+  ) as Snapshot
+  const restoreSnapshot = (snapshot: Snapshot) => {
+    for (const key of Object.keys(resumableRefs) as (keyof Snapshot)[]) {
+      if (!Object.prototype.hasOwnProperty.call(snapshot, key)) continue
+      const target: Ref<unknown> = resumableRefs[key]
+      target.value = snapshot[key]
+    }
+  }
+
   return {
+    sceneAssets, sceneAssetsVisible, selectedSceneAssetId, scenePanelOpen,
+    captureSnapshot,
+    restoreSnapshot,
     logSourceKey,
     uploadedLogName,
     uploadedNodeLogNames,
@@ -329,11 +409,18 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     replayMode,
     selectedLifecyclePacketId,
     showAllActivePackets,
+    focusedNodeId,
+    nodeFilterOptions,
+    focusedNodeLabel,
     interactionMode,
     editSoundSpeed,
     fractionalTiming,
     successTraceOnly,
+    receiveEventTrace,
     baseNodesState,
+    staticModelNodes,
+    trajectoryViewNodes,
+    onNodeModelChange,
     nodeMovementRows,
     sourcePacketRows,
     simulatedPacketRows,
@@ -357,6 +444,7 @@ export const useReplayState = ({ playback }: { playback: PlaybackEngine }) => {
     nodeById,
     packetByPacketId,
     packets,
+    scopedPackets,
     cycleEndUs,
     packetEntries,
     lifecycleGroups,

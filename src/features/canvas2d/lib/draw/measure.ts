@@ -24,7 +24,6 @@ export const drawMeasurementLines = (
   for (const item of lines) {
     const p1 = item.start
     const p2 = item.end
-    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x)
     const isSelected = item.isSelected
 
     ctx.save()
@@ -60,22 +59,6 @@ export const drawMeasurementLines = (
     ctx.fillText(labelText, midX, boxY + 9.5)
     ctx.restore()
 
-    ctx.save()
-    ctx.strokeStyle = isSelected ? '#fbbf24' : '#60a5fa'
-    ctx.lineWidth = 1.2
-    ctx.beginPath()
-    ctx.moveTo(midX - 5, midY - 12)
-    ctx.lineTo(midX + 5, midY - 12)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(midX - 5, midY - 12)
-    ctx.lineTo(midX - 5 + (Math.cos(angle) * 10), midY - 12 + (Math.sin(angle) * 10))
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(midX + 5, midY - 12)
-    ctx.lineTo(midX + 5 + (Math.cos(angle) * 10), midY - 12 + (Math.sin(angle) * 10))
-    ctx.stroke()
-    ctx.restore()
   }
 
   if (pendingPoint) {

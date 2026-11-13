@@ -14,7 +14,7 @@ export interface WorldAxisBounds {
   span: number
 }
 
-/** Babylon coordinates use planar y as Z and scaled depth as negative Y. */
+/** Babylon coordinates use planar y as Z and scaled physical z as Y. */
 export const worldAxisBounds = (nodes: ScenePoint[], depthScale: number): WorldAxisBounds | null => {
   if (!nodes.length) return null
   let minX = Infinity
@@ -24,7 +24,7 @@ export const worldAxisBounds = (nodes: ScenePoint[], depthScale: number): WorldA
   let minZ = Infinity
   let maxZ = -Infinity
   for (const node of nodes) {
-    const depth = -(node.z ?? 0) * depthScale
+    const depth = (node.z ?? 0) * depthScale
     minX = Math.min(minX, node.x)
     maxX = Math.max(maxX, node.x)
     minY = Math.min(minY, depth)

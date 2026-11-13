@@ -36,6 +36,13 @@ export async function checkRadioReplay(server) {
   }
   assert.equal(makeLog({ medium: 'unknown' }).meta.medium, undefined)
   const precise = makeLog({ time_precision_us: 0.001, propagation_speed_mps: 1480, trace_scope: 'phy-success' })
+  const processingLog = parser.parseLog(JSON.stringify({ meta: { time_unit: 'us', time_precision_us: 0.001 }, nodes,
+    packets: [{ ...rawPacket, receivers: [{ ...rawPacket.receivers[0], rx_processing_duration_us: 150000, rx_delivery_us: 150010.521 }] }] }))
+  const processingReceiver = merge.normalizePacketsFromParsed(processingLog, 'processing')[0].receivers[0]
+  close(processingReceiver.rx_start_us, 10.457, 'processing metadata cannot shift acoustic arrival')
+  close(processingReceiver.rx_end_us, 10.521, 'processing metadata cannot extend acoustic occupancy')
+  assert.equal(processingReceiver.rx_processing_duration_us, 150000)
+  assert.equal(processingReceiver.rx_delivery_us, 150010.521, 'delivery timing survives normalization separately')
   assert.equal(precise.meta.medium, undefined, 'precision does not require a named medium')
   assert.equal(precise.meta.trace_scope, 'phy-success', 'recording scope survives parsing for UI disclosure')
   assert.equal(propagation.usesFractionalTiming(precise.meta), true)
@@ -102,8 +109,15 @@ export async function checkRadioReplay(server) {
     assert.equal(rx.rx_duration_us, 0.064)
     edit.onEditSoundSpeedChange({ target: { value: String(speed) } })
     assert.equal(state.editSoundSpeed.value, speed, 'radio editing does not apply the acoustic 2500 m/s limit')
+    edit.onEditSoundSpeedChange({ target: { value: '1.5 km/s' } })
+    assert.equal(state.editSoundSpeed.value, 1500, 'explicit speed units convert to meters per second')
+    for (const value of ['', '0', '1ms', '400000km/s']) {
+      edit.onEditSoundSpeedChange({ target: { value } })
+      assert.equal(state.editSoundSpeed.value, 1500, 'invalid or out-of-range speeds keep the last valid preview')
+    }
+    edit.onEditSoundSpeedChange({ target: { value: String(speed) } })
     edit.onEditSelectionChange([2])
-    edit.onEditCoordChange('x', { target: { value: '200' } })
+    edit.onEditNodeCoordinate({ node_id: 2, axis: 'x', value: 200 })
     close(state.simulatedPacketRows.value[0].receivers[0].delay_us, 2 * delay, 'moving a receiver changes delay without stretching the packet')
     edit.restoreAllEditNodes()
     close(state.simulatedPacketRows.value[0].receivers[0].delay_us, delay, 'restoring coordinates restores the RF delay')

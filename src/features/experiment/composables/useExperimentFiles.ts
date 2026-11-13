@@ -12,11 +12,13 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
   onBeforeUnmount(() => { generation++ })
   const snapshot = (): ExperimentDraftData => JSON.parse(JSON.stringify({
     form: editor.experimentForm.value, nodes: editor.editNodes.value,
+    canvas: editor.canvas.value,
     selectedIds: editor.selectedIds.value, activeCatalogId: editor.activeCatalogId.value, aquaSimHome: home.value,
   }))
   const documentJson = computed(() => serializeExperiment(snapshot(), layers.value))
   const apply = (draft: ExperimentDraftData) => {
     if (draft.aquaSimHome !== undefined && draft.aquaSimHome !== home.value) selectHome(draft.aquaSimHome)
+    editor.canvas.value = draft.canvas
     editor.experimentForm.value = draft.form
     editor.editNodes.value = draft.nodes
     editor.selectedIds.value = draft.selectedIds
@@ -25,7 +27,7 @@ export const useExperimentFiles = (editor: TopologyEditor, layers: Ref<CatalogLa
     onReplace()
   }
   const newExperiment = () => {
-    apply({ form: createDefaultExperimentForm(), nodes: [], selectedIds: [], activeCatalogId: 'mac:swarm' })
+    apply({ form: createDefaultExperimentForm(), nodes: [], selectedIds: [], activeCatalogId: '' })
     failed.value = false
     message.value = '已新建空白实验，可添加节点或导入参数。'
   }

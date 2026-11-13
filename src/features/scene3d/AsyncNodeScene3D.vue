@@ -25,7 +25,11 @@ const reloadPage = () => window.location.reload()
       v-bind="$attrs"
       :active="active"
       @scene-error="reportError"
-    />
+    >
+      <template #node-actions="slotProps">
+        <slot name="node-actions" v-bind="slotProps" />
+      </template>
+    </component>
     <div v-else-if="error" class="scene-load-error" role="alert">
       <div class="scene-load-error-card">
         <h2>3D 视图加载失败</h2>

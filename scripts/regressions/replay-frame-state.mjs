@@ -51,7 +51,8 @@ export async function checkReplayFrameState(server, root) {
         assert.equal(state.lifecycleGroups.value, groups, 'lifecycle aggregation must not rebuild per frame')
         assert.equal(state.lifecyclePacketOptions.value, options)
         if (!state.nodeMovementRows.value.length) assert.equal(state.nodesState.value, staticNodes)
-        values.push({ t: time, nodes: state.nodesState.value, visuals: state.nodeVisuals.value,
+        // Heading is new display metadata; the frozen coordinates/events remain identical.
+        values.push({ t: time, nodes: state.nodesState.value.map(({ motionDirection, ...node }) => node), visuals: state.nodeVisuals.value,
           display: state.displayPackets.value.map((packet) => packet.eventId), active: state.globalActiveEventId.value,
           ids: [...state.currentPacketIds.value], stages: state.lifecycleStages.value, lifecycleActive: state.lifecycleActiveEventId.value })
       }

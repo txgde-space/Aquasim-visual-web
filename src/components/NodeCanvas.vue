@@ -104,24 +104,43 @@
           </svg>
         </button>
       </div>
-      <div class="canvas-scale" role="img" :aria-label="`比例尺 ${scaleBar.label}`" :style="{ width: `${scaleBar.width}px` }">
+      <div class="canvas-scale" :class="{ 'gps-scale': gps.active.value }" role="img" :aria-label="`比例尺 ${scaleBar.label}`" :style="{ width: `${scaleBar.width}px` }">
         <span>{{ scaleBar.label }}</span>
         <span class="canvas-scale-line" aria-hidden="true"></span>
       </div>
     </div>
 
+    <GpsMapControls v-if="allowGps" :map="gps" :cursor="gpsCursor" />
+
     <canvas
       ref="canvasEl"
+      @gesturestart="onGestureStart"
+      @gesturechange="onGestureChange"
+      @gestureend="onGestureEnd"
+      @blur="view.cancelPinch"
       class="canvas"
       tabindex="0"
       :class="canvasCursorClass"
       :aria-label="`acoustic-node-canvas-${Math.round(displayWidth)}x${Math.round(displayHeight)}`"
       @pointerdown="onCanvasPointerDown"
-      @pointermove="onCanvasPointerMove"
+      @click="onCanvasAssetClick"
+      @pointermove="onGpsPointerMove($event); onCanvasPointerMove($event)"
       @pointerup="onPointerUp"
-      @pointerleave="onCanvasPointerLeave"
+      @pointerleave="gpsPointer = null; onCanvasPointerLeave($event)"
       @contextmenu="onCanvasContextMenu"
     />
+
+    <button v-for="node in pinTargets" :key="`pin-${node.node_id}`" class="node-pin canvas-pin" data-node-pin
+      :style="pinStyle(node)" :class="{locked:positioning.isLocked(node.node_id)}"
+      :aria-label="`${positioning.isLocked(node.node_id)?'解除固定':'固定位置'} 节点 ${node.node_id}`"
+      :title="positioning.isLocked(node.node_id)?'解除固定':'固定位置'" :aria-pressed="positioning.isLocked(node.node_id)" :disabled="!allowCoordinateEdit"
+      @pointerdown.stop @click.stop="positioning.toggle(node.node_id)" @pointerenter="hoveredNodeId=node.node_id" @pointerleave="hoveredNodeId=null">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 8 3-2 5 3 4-1 2-6-2-4 6-1-1 3-6-3-4 1-2 2 1Z" /></svg>
+    </button>
+    <NodeDistanceEditor v-if="selectedDistanceLine" :style="distanceEditorStyle" :options="positioning.options.value" :moving-id="positioning.movingId.value"
+      :input="positioning.input.value" :distance="positioning.distance.value" :error="positioning.error.value" :disabled="!allowCoordinateEdit"
+      @update:moving-id="positioning.movingId.value=$event" @update:input="positioning.input.value=$event;positioning.error.value=''"
+      @apply="positioning.apply" @close="measure.selectedMeasurementId.value=null" />
 
     <form
       v-if="contextMenu"
@@ -138,10 +157,11 @@
         <button type="button" class="node-card-close" aria-label="关闭添加节点菜单" @click="closeContextMenu">×</button>
       </div>
       <div class="node-context-coords">
-        <label class="field field-compact"><span>X (m)</span><input ref="contextXEl" v-model="contextMenu.x" class="select" type="number" step="0.01" required /></label>
-        <label class="field field-compact"><span>Y (m)</span><input v-model="contextMenu.y" class="select" type="number" step="0.01" required /></label>
-        <label class="field field-compact"><span>Z (m)</span><input v-model="contextMenu.z" class="select" type="number" step="0.01" required /></label>
+        <label class="field field-compact"><span>X (m)</span><input ref="contextXEl" v-model="contextMenu.x" class="select" type="text" placeholder="默认 m" title="支持 m、km；无单位按 m" required @input="contextError = ''" /></label>
+        <label class="field field-compact"><span>Y (m)</span><input v-model="contextMenu.y" class="select" type="text" placeholder="默认 m" title="支持 m、km；无单位按 m" required @input="contextError = ''" /></label>
+        <label class="field field-compact"><span>Z (m)</span><input v-model="contextMenu.z" class="select" type="text" placeholder="默认 m" title="支持 m、km；无单位按 m" required @input="contextError = ''" /></label>
       </div>
+      <p v-if="contextError" class="node-context-error" role="alert">{{ contextError }}</p>
       <button type="submit" class="btn primary node-context-add">添加节点</button>
     </form>
 
@@ -159,17 +179,37 @@
       @drop.stop
     >
       <div class="node-tooltip-head">
-        <p class="node-tooltip-title">
-          {{ nodeTitle(hoveredNode) }}
+        <div class="node-tooltip-title">
+          <NodeNameEditor :key="hoveredNode.node_id" :node-id="hoveredNode.node_id" :name="hoveredNode.name" :editable="allowRename"
+            @change="(nodeId, name) => emit('node-rename', { node_id: nodeId, name })" />
           <span class="node-tooltip-role">{{ hoveredNode.role || 'relay' }}</span>
-        </p>
-        <span class="node-tooltip-chip">{{ card.pinned.value ? '已固定' : hoveredNodeStats.modeLabel }}</span>
+        </div>
+        <span v-if="!editMode" class="node-tooltip-chip">{{ hoveredNodeStats.modeLabel }}</span>
+        <button v-if="allowPositionLock && editMode" class="node-pin card-pin" :class="{locked:positioning.isLocked(hoveredNode.node_id)}"
+          :aria-label="`${positioning.isLocked(hoveredNode.node_id)?'解除固定':'固定位置'} 节点 ${hoveredNode.node_id}`" :aria-pressed="positioning.isLocked(hoveredNode.node_id)"
+          :disabled="!allowCoordinateEdit" @click.stop="positioning.toggle(hoveredNode.node_id)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 8 3-2 5 3 4-1 2-6-2-4 6-1-1 3-6-3-4 1-2 2 1Z" /></svg>
+        </button>
         <button class="node-card-close" aria-label="关闭节点卡片" @click.stop="card.close">×</button>
       </div>
 
+      <NodePositionEditor v-if="editMode" :node-id="hoveredNode.node_id" :x="hoveredNode.x" :y="hoveredNode.y" :z="hoveredNode.z ?? 0"
+        :disabled="!allowCoordinateEdit || positioning.isLocked(hoveredNode.node_id)" @change="onNodeCoordinate" />
+
+      <p v-if="gps.active.value" class="gps-node-coordinate">WGS84：{{ nodeGeographic(hoveredNode) }}<br />X 东 / Y 北 / Z 深度 · m</p>
+
+      <NodeRangeSettings
+        :key="hoveredNode.node_id"
+        :settings="nodeRanges.settingsFor(hoveredNode.node_id)"
+        :automatic-radius="automaticRangeFor(hoveredNode.node_id)"
+        @change="nodeRanges.update(hoveredNode.node_id, $event)"
+      />
+
+      <slot name="node-actions" :node="hoveredNode" />
+
       <slot name="node-details" :node="hoveredNode" :pinned="card.pinned.value">
       <div class="node-tooltip-grid">
-        <p class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(2) }} / y {{ hoveredNode.y.toFixed(2) }} / z {{ Number(hoveredNode.z ?? 0).toFixed(2) }} m</strong></p>
+        <p v-if="!editMode" class="node-tooltip-item"><span>坐标</span><strong>x {{ hoveredNode.x.toFixed(2) }} / y {{ hoveredNode.y.toFixed(2) }} / z {{ Number(hoveredNode.z ?? 0).toFixed(2) }} m</strong></p>
         <p class="node-tooltip-item"><span>仿真时刻</span><strong>{{ (props.currentTime / 1000).toFixed(1) }} ms</strong></p>
         <p class="node-tooltip-item"><span>最近关联包</span><strong>{{ hoveredNodeStats.packetText }}</strong></p>
         <p class="node-tooltip-item"><span>活跃方向</span><strong>TX {{ hoveredNodeStats.txLinks }} / RX {{ hoveredNodeStats.rxLinks }}</strong></p>
@@ -193,21 +233,25 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GpsMapControls from '@/features/canvas2d/gps/GpsMapControls.vue'
+import { useGpsMap } from '@/features/canvas2d/gps/useGpsMap'
+import { constrainMapPan, geographic, groundResolution, localToGeo, niceScaleBar, minimumMapScale, EARTH_RADIUS } from '@/features/canvas2d/gps/geometry'
 import { THEME_PROFILES } from '@/features/canvas2d/lib/themes'
 import { LOCAL_STORAGE_KEYS } from '@/shared/constants'
+import { parseQuantity } from '@/shared/quantity'
 import {
   computeBounds,
   computeEditBounds,
   computeContentOrigin,
   computeScale,
   MAX_VIEW_SCALE,
-  NODE_HIT_EXTRA_PX,
   nodeRadiusFor,
   toScreenPoint,
   toWorldPoint,
   viewInsetsFor,
 } from '@/features/canvas2d/lib/coordinate'
 import { pickWorldGridStep } from '@/features/canvas2d/lib/draw/grid'
+import { hitNodeSprite } from '@/features/canvas2d/lib/nodeSpriteLayout'
 import {
   drawEditGhosts,
   drawHudText,
@@ -218,13 +262,23 @@ import {
   paintSceneBackdrop,
   syncCanvasContext,
 } from '@/features/canvas2d/lib/draw/scene'
+import { useCanvasPersistence } from '@/features/canvas2d/composables/useCanvasPersistence'
 import { useCanvasLoop } from '@/features/canvas2d/composables/useCanvasLoop'
 import { useCanvasView, ZOOM_MIN } from '@/features/canvas2d/composables/useCanvasView'
+import NodeDistanceEditor from '@/features/canvas2d/NodeDistanceEditor.vue'
+import { useNodePositioning } from '@/features/canvas2d/composables/useNodePositioning'
 import { useMeasureTool } from '@/features/canvas2d/composables/useMeasureTool'
 import { TOOL_MODES, usePointerTools } from '@/features/canvas2d/composables/usePointerTools'
 import { useNodeCard } from '@/features/canvas2d/composables/useNodeCard'
 import { useNodeTooltip } from '@/features/canvas2d/composables/useNodeTooltip'
 import { drawSnapGuides } from '@/features/canvas2d/lib/draw/snapGuides'
+import NodeRangeSettings from '@/features/canvas2d/NodeRangeSettings.vue'
+import NodePositionEditor from '@/features/canvas2d/NodePositionEditor.vue'
+import NodeNameEditor from '@/features/canvas2d/NodeNameEditor.vue'
+import { useNodeRanges } from '@/features/canvas2d/composables/useNodeRanges'
+import { drawNodeRanges } from '@/features/canvas2d/lib/draw/ranges'
+import { drawSceneAssets, pickSceneAsset } from '@/features/canvas2d/lib/draw/sceneAssets'
+import { sceneAssetBounds } from '@/shared/sceneAssetGeometry'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -236,14 +290,30 @@ const props = defineProps({
   active: { type: Boolean, default: true },
   editMode: { type: Boolean, default: false },
   allowDeleteNodes: { type: Boolean, default: false },
+  allowRename: { type: Boolean, default: false },
+  allowCoordinateEdit: { type: Boolean, default: false },
+  allowPositionLock: { type: Boolean, default: false },
   allowPlaceNode: { type: Boolean, default: false },
+  allowGps: { type: Boolean, default: false },
   boxSelect: { type: Boolean, default: false },
   originalPositions: { type: Array, default: () => [] },
   selectedNodeId: { type: [Number, String], default: null },
   selectedNodeIds: { type: Array, default: () => [] },
   soundSpeedMps: { type: Number, default: 1500 },
+  defaultRangeM: { type: Number, default: null },
+  rangeByNode: { type: Object, default: null },
+  rangeScope: { type: [Object, Array, Number, String], default: null },
+  persistState: { type: Boolean, default: false },
+  initialState: { type: Object, default: null },
   /* 额外安全边距（px），为浮动 dock 留出默认视图空间：{ left, top, right, bottom } */
   viewPadding: { type: Object, default: null },
+  /* Static trajectory extents keep replay motion from moving/rescaling the camera. */
+  viewNodes: { type: Array, default: null },
+  sceneAssets: { type: Array, default: () => [] },
+  sceneAssetsVisible: { type: Boolean, default: true },
+  selectedSceneAssetId: { type: String, default: null },
+  sceneFocusRequest: { type: Object, default: null },
+  editableSceneAssets: { type: Boolean, default: false },
 })
 
 const NODE_SIZE_MIN = 0.5
@@ -281,6 +351,7 @@ const containerEl = ref(null)
 const contextMenuEl = ref(null)
 const contextXEl = ref(null)
 const contextMenu = ref(null)
+const contextError = ref('')
 const displayWidth = ref(900)
 const displayHeight = ref(520)
 const hoveredNodeId = ref(null)
@@ -299,31 +370,54 @@ const viewInsets = computed(() => {
 const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, displayHeight.value)) * nodeSizeScale.value)
 const emit = defineEmits([
   'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
-  'protocol-drop', 'nodes-delete',
+  'protocol-drop', 'nodes-delete', 'node-rename', 'node-coordinate', 'canvas-state',
+  'scene-asset-select', 'scene-asset-move',
 ])
 let resizeObserver = null
 
-const liveBounds = computed(() => computeBounds(props.nodes))
-const bounds = computed(() => dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
+const liveBounds = computed(() => computeBounds(props.viewNodes || props.nodes))
+const gps = useGpsMap(() => scheduleDraw())
+const bounds = computed(() => gps.active.value ? gps.bounds.value : dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
 
-const scale = computed(() => computeScale(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value))
+const scale = computed(() => gps.active.value
+  ? minimumMapScale(bounds.value, displayWidth.value, displayHeight.value, gps.info.value.zooms[0])
+  : computeScale(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value))
+const maxScale = computed(() => gps.active.value
+  ? Math.max(scale.value * 2, 256 * 2 ** gps.info.value.zooms.at(-1) / (2 * Math.PI * EARTH_RADIUS) * 4)
+  : MAX_VIEW_SCALE)
+const minZoom = computed(() => gps.active.value ? 1 : ZOOM_MIN)
 
-const effectiveScale = computed(() => Math.min(scale.value * zoom.value, MAX_VIEW_SCALE))
+const effectiveScale = computed(() => Math.min(scale.value * zoom.value, maxScale.value))
+const groundScale = computed(() => {
+  if (!gps.active.value) return effectiveScale.value
+  const y = bounds.value.maxY - (displayHeight.value / 2 - contentOrigin.value.y - pan.value.y) / effectiveScale.value
+  return 1 / groundResolution(effectiveScale.value, geographic({ x: 0, y }).lat)
+})
 const scaleBar = computed(() => {
+  if (gps.active.value) {
+    const y = bounds.value.maxY - (displayHeight.value - 30 - contentOrigin.value.y - pan.value.y) / effectiveScale.value
+    return niceScaleBar(groundResolution(effectiveScale.value, geographic({ x: 0, y }).lat))
+  }
   const meters = pickWorldGridStep(effectiveScale.value)
   return { width: meters * effectiveScale.value, label: meters >= 1000 ? `${meters / 1000} km` : `${meters} m` }
 })
 
-const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, displayHeight.value, viewInsets.value, bounds.value, scale.value))
+const contentOrigin = computed(() => computeContentOrigin(displayWidth.value, displayHeight.value, gps.active.value ? { left: 0, top: 0, right: 0, bottom: 0 } : viewInsets.value, bounds.value, scale.value))
 
-const projection = computed(() => ({ bounds: bounds.value, origin: contentOrigin.value, scale: effectiveScale.value, pan: pan.value }))
+const projection = computed(() => ({ bounds: bounds.value, origin: contentOrigin.value, scale: effectiveScale.value, pan: pan.value, geoOrigin: gps.active.value ? gps.origin.value : undefined }))
 
 const loop = useCanvasLoop(() => draw, () => props.active)
 const { scheduleDraw } = loop
+const automaticRangeFor = (id) => props.rangeByNode && Object.prototype.hasOwnProperty.call(props.rangeByNode, id)
+  ? props.rangeByNode[id] : props.defaultRangeM ?? null
+const nodeRanges = useNodeRanges(() => props.nodes, (node) => automaticRangeFor(node.node_id), () => props.active, () => props.rangeScope)
+watch(nodeRanges.ranges, scheduleDraw)
 
 const view = useCanvasView({
   getProjection: () => projection.value,
   getBaseScale: () => scale.value,
+  getZoomLimits: () => ({ min: minZoom.value, max: maxScale.value / scale.value }),
+  constrainPan: (next) => gps.active.value ? constrainMapPan(next, projection.value, displayWidth.value, displayHeight.value) : next,
   scheduleDraw,
   getCanvasEl: () => canvasEl.value,
 })
@@ -336,17 +430,17 @@ const {
   hasDragged,
   dragFrozenBounds,
   sessionFrozenBounds,
-  onWheel,
+  onWheel, onGestureStart, onGestureChange, onGestureEnd,
 } = view
 
 const canvasZoomPosition = computed({
   get: () => {
-    const minScale = scale.value * ZOOM_MIN
-    return Math.max(0, Math.min(100, Math.log(effectiveScale.value / minScale) / Math.log(MAX_VIEW_SCALE / minScale) * 100))
+    const minScale = scale.value * minZoom.value
+    return Math.max(0, Math.min(100, Math.log(effectiveScale.value / minScale) / Math.log(maxScale.value / minScale) * 100))
   },
   set: (position) => {
-    const minScale = scale.value * ZOOM_MIN
-    const targetScale = minScale * (MAX_VIEW_SCALE / minScale) ** (Number(position) / 100)
+    const minScale = scale.value * minZoom.value
+    const targetScale = minScale * (maxScale.value / minScale) ** (Number(position) / 100)
     const inset = viewInsets.value
     view.setZoomAt(targetScale / scale.value,
       (inset.left + displayWidth.value - inset.right) / 2,
@@ -356,8 +450,9 @@ const canvasZoomPosition = computed({
 
 const resetView = () => {
   dragFrozenBounds.value = null
-  if (props.editMode) sessionFrozenBounds.value = computeEditBounds(props.nodes)
+  if (props.editMode && !gps.active.value) sessionFrozenBounds.value = computeEditBounds(props.nodes)
   view.resetView()
+  if (gps.active.value) pan.value = constrainMapPan(pan.value, projection.value, displayWidth.value, displayHeight.value)
   hoveredNodeId.value = null
   scheduleDraw()
 }
@@ -383,8 +478,37 @@ const canvasCursorClass = computed(() => {
 const toScreen = (x, y) => toScreenPoint(x, y, projection.value)
 
 const toWorld = (x, y) => toWorldPoint(x, y, projection.value)
+const gpsPointer = ref(null)
+const onGpsPointerMove = (event) => {
+  if (!gps.active.value || !props.active) return
+  const rect = canvasEl.value.getBoundingClientRect()
+  gpsPointer.value = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+}
+const gpsCursor = computed(() => gps.active.value && gpsPointer.value
+  ? localToGeo(toWorld(gpsPointer.value.x, gpsPointer.value.y), gps.origin.value) : null)
+const nodeGeographic = (node) => {
+  const point = localToGeo(node, gps.origin.value)
+  return Number.isFinite(point.lon) ? `${point.lon.toFixed(6)}° 经度 / ${point.lat.toFixed(6)}° 纬度` : '超出本地坐标可映射范围'
+}
+let ordinaryView = null
+watch(() => gps.active.value, (active) => {
+  cancelActiveTool()
+  if (active) {
+    ordinaryView = { bounds: { ...boundsBeforeGps() }, center: null, scale: scaleBeforeGps(), zoom: zoom.value, pan: { ...pan.value } }
+    zoom.value = 1; pan.value = constrainMapPan({ x: 0, y: 0 }, projection.value, displayWidth.value, displayHeight.value)
+  } else if (ordinaryView) {
+    zoom.value = ordinaryView.zoom; pan.value = { ...ordinaryView.pan }; ordinaryView = null
+  }
+  scheduleDraw()
+}, { flush: 'sync' })
+const boundsBeforeGps = () => sessionFrozenBounds.value || liveBounds.value
+const scaleBeforeGps = () => computeScale(displayWidth.value, displayHeight.value, viewInsets.value, boundsBeforeGps())
+watch(() => [gps.info.value, gps.origin.value], () => {
+  if (!gps.active.value) return
+  cancelActiveTool(); zoom.value = 1; pan.value = constrainMapPan({ x: 0, y: 0 }, projection.value, displayWidth.value, displayHeight.value); scheduleDraw()
+})
 
-const closeContextMenu = () => { contextMenu.value = null }
+const closeContextMenu = () => { contextMenu.value = null; contextError.value = '' }
 const onCanvasContextMenu = (event) => {
   if (!props.editMode || !props.allowPlaceNode) return
   event.preventDefault()
@@ -393,6 +517,7 @@ const onCanvasContextMenu = (event) => {
   const sx = event.clientX - rect.left
   const sy = event.clientY - rect.top
   const point = toWorld(sx, sy)
+  contextError.value = ''
   const averageZ = props.nodes.length
     ? props.nodes.reduce((sum, node) => sum + (Number(node.z) || 0), 0) / props.nodes.length
     : 0
@@ -408,9 +533,14 @@ const onCanvasContextMenu = (event) => {
 const addNodeFromContext = () => {
   const menu = contextMenu.value
   if (!menu) return
-  const values = [menu.x, menu.y, menu.z]
-  if (values.some((value) => String(value).trim() === '' || !Number.isFinite(Number(value)))) return
-  emit('node-place', { x: Number(menu.x), y: Number(menu.y), z: Number(menu.z) })
+  let position
+  try {
+    position = Object.fromEntries(['x', 'y', 'z'].map((axis) => [axis, parseQuantity(menu[axis], 'm').value]))
+  } catch {
+    contextError.value = '请输入有效坐标，如 -1.5km；无单位按 m。'
+    return
+  }
+  emit('node-place', position)
   emit('pause-request')
   closeContextMenu()
 }
@@ -421,15 +551,13 @@ const onContextMenuOutside = (event) => {
 const pickNodeAt = (sx, sy) => {
   let picked = null
   let bestDist = Number.POSITIVE_INFINITY
-  const hit = nodeRadius.value + NODE_HIT_EXTRA_PX
-  const thresholdSq = hit * hit
 
   for (const node of props.nodes) {
     const p = toScreen(node.x, node.y)
     const dx = sx - p.x
     const dy = sy - p.y
     const d = (dx * dx) + (dy * dy)
-    if (d < bestDist && d <= thresholdSq) {
+    if (d < bestDist && hitNodeSprite(dx, dy, nodeRadius.value, node.node_id)) {
       bestDist = d
       picked = node
     }
@@ -446,6 +574,39 @@ const measure = useMeasureTool({
   scheduleDraw,
   onPauseRequest: () => emit('pause-request'),
 })
+
+const selectedDistanceLine = computed(() => {
+  if (!props.active || !props.editMode || !props.allowPositionLock) return undefined
+  const line = measure.measurementLines.value.find(item=>item.id===measure.selectedMeasurementId.value)
+  if (!line || line.start.nodeId===line.end.nodeId) return undefined
+  return [line.start.nodeId,line.end.nodeId].some(id=>nodeById.value.has(id)) ? line : undefined
+})
+const positioning = useNodePositioning({
+  getNodes: () => props.nodes,
+  editable: () => props.active && props.editMode && props.allowPositionLock && props.allowCoordinateEdit,
+  selectedLine: () => selectedDistanceLine.value,
+  resolve: measure.resolveMeasurePoint,
+  move: (node) => { emit('pause-request'); emit('nodes-move',[node]) },
+  finish: () => { emit('node-move-end'); scheduleDraw() },
+})
+const distanceEditorStyle = computed(() => {
+  const line=selectedDistanceLine.value
+  if (!line) return {}
+  const a=measure.resolveMeasurePoint(line.start), b=measure.resolveMeasurePoint(line.end)
+  const point=toScreen((a.x+b.x)/2,(a.y+b.y)/2)
+  const panelHeight=positioning.options.value.length ? (positioning.error.value ? 260 : 224) : 88
+  return {left:`${Math.max(8,Math.min(displayWidth.value-254,point.x+16))}px`,top:`${Math.max(8,Math.min(displayHeight.value-panelHeight-84,point.y-panelHeight-18))}px`}
+})
+const pinTargets = computed(() => props.active && props.editMode && props.allowPositionLock && !isPanning.value
+  ? props.nodes.filter(node=>positioning.isLocked(node.node_id) || node.node_id===hoveredNodeId.value || node.node_id===card.nodeId.value) : [])
+const pinStyle = (node) => {
+  const point=toScreen(node.x,node.y), offset=nodeRadius.value*1.15
+  return {left:`${Math.max(0,Math.min(displayWidth.value-24,point.x+offset))}px`,top:`${Math.max(0,Math.min(displayHeight.value-24,point.y-offset-16))}px`}
+}
+const onNodeCoordinate = (payload) => {
+  if (props.allowCoordinateEdit && !positioning.isLocked(payload.node_id)) emit('node-coordinate',payload)
+}
+watch(() => props.rangeScope, () => { positioning.lockedNodeIds.value=[] })
 
 let pointer
 
@@ -478,8 +639,9 @@ pointer = usePointerTools({
   pickNodeAt,
   toWorld,
   getSelectedIdSet: () => selectedIdSet.value,
+  isNodeLocked: positioning.isLocked,
   getViewBounds: () => bounds.value,
-  getSnapOptions: () => ({ ...snapping.value, scale: effectiveScale.value, gridStep: pickWorldGridStep(effectiveScale.value) }),
+  getSnapOptions: () => ({ ...snapping.value, scale: groundScale.value, gridStep: gps.active.value ? niceScaleBar(1 / groundScale.value).meters : pickWorldGridStep(effectiveScale.value) }),
   setHoveredNodeId: (id) => { hoveredNodeId.value = id },
   setHoverCursor: (x, y) => { hoverCursor.value = { x, y } },
   updateHoveredNode,
@@ -530,9 +692,62 @@ const card = useNodeCard({
   isActive: () => props.active,
 })
 const onCanvasPointerDown = (event) => {
+  sceneClickStart = { x: event.clientX, y: event.clientY }
+  const rect = canvasEl.value?.getBoundingClientRect()
+  if (rect && props.active && props.sceneAssetsVisible && props.editableSceneAssets
+    && toolMode.value !== TOOL_MODES.MEASURE && !spaceHeld.value && event.button === 0
+    && !event.shiftKey && !event.ctrlKey && !event.metaKey && !pickNodeAt(event.clientX - rect.left, event.clientY - rect.top)) {
+    const start = toWorld(event.clientX - rect.left, event.clientY - rect.top)
+    const asset = pickSceneAsset(props.sceneAssets, start.x, start.y, 5 / effectiveScale.value)
+    if (asset && asset.id === props.selectedSceneAssetId) {
+      assetDrag = { id: asset.id, x: asset.x, y: asset.y, start, pointerId: event.pointerId }
+      canvasEl.value.setPointerCapture?.(event.pointerId)
+      emit('pause-request'); event.preventDefault(); return
+    }
+  }
   card.beginClick(event)
   onPointerDown(event)
 }
+let sceneClickStart = null
+let assetDrag = null
+const onCanvasAssetClick = (event) => {
+  if (!props.active || !props.sceneAssetsVisible || !sceneClickStart || toolMode.value === TOOL_MODES.MEASURE
+    || spaceHeld.value || event.shiftKey || event.ctrlKey || event.metaKey
+    || Math.hypot(event.clientX - sceneClickStart.x, event.clientY - sceneClickStart.y) > 6) return
+  const rect = canvasEl.value.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top
+  if (pickNodeAt(x, y)) return
+  const point = toWorld(x, y)
+  const asset = pickSceneAsset(props.sceneAssets, point.x, point.y, 5 / effectiveScale.value)
+  if (asset) emit('scene-asset-select', asset.id)
+}
+const moveSceneAsset = (event) => {
+  if (!assetDrag || !props.active || event.pointerId !== assetDrag.pointerId) return
+  const rect = canvasEl.value.getBoundingClientRect()
+  const point = toWorld(event.clientX - rect.left, event.clientY - rect.top)
+  emit('scene-asset-move', { id: assetDrag.id,
+    x: Math.round((assetDrag.x + point.x - assetDrag.start.x) * 100) / 100,
+    y: Math.round((assetDrag.y + point.y - assetDrag.start.y) * 100) / 100 })
+}
+const endSceneAssetDrag = () => {
+  if (assetDrag && canvasEl.value?.hasPointerCapture?.(assetDrag.pointerId)) canvasEl.value.releasePointerCapture(assetDrag.pointerId)
+  assetDrag = null
+}
+const onAssetEscape = (event) => { if (props.active && event.key === 'Escape') { endSceneAssetDrag(); sceneClickStart = null } }
+watch(() => [props.active, props.editableSceneAssets, props.sceneAssets], () => {
+  if (assetDrag && (!props.active || !props.editableSceneAssets || !props.sceneAssets.some(asset => asset.id === assetDrag.id))) endSceneAssetDrag()
+})
+let consumedSceneFocus = null
+watch(() => props.active ? props.sceneFocusRequest : null, (focus) => {
+  if (!focus || focus === consumedSceneFocus) return
+  const asset = props.sceneAssets.find(item => item.id === focus.id)
+  if (!asset) return
+  const length = Math.max(...sceneAssetBounds(asset.type).size.slice(0, 2)) * asset.scale
+  const fit = Math.min(MAX_VIEW_SCALE, Math.min(displayWidth.value * 0.55, displayHeight.value * 0.65) / Math.max(length, 1))
+  zoom.value = Math.max(ZOOM_MIN, fit / scale.value)
+  const point = toScreen(asset.x, asset.y)
+  pan.value = { x: pan.value.x + displayWidth.value / 2 - point.x, y: pan.value.y + displayHeight.value / 2 - point.y }
+  consumedSceneFocus = focus; scheduleDraw()
+}, { flush: 'post' })
 const cardAnchor = computed(() => {
   const node = nodeById.value.get(card.nodeId.value)
   return node ? toScreen(node.x, node.y) : { x: 0, y: 0 }
@@ -582,7 +797,10 @@ const draw = () => {
   const fx = fxIntensity.value
   const phase = props.currentTime / 1_000_000
 
-  paintSceneBackdrop(ctx, w, h, profile, projection.value)
+  if (gps.active.value) gps.draw(ctx, projection.value, w, h, profile.bg[1], profile.label)
+  else paintSceneBackdrop(ctx, w, h, profile, projection.value)
+  if (props.sceneAssetsVisible) drawSceneAssets(ctx, props.sceneAssets, toScreen, effectiveScale.value, profile, props.selectedSceneAssetId)
+  drawNodeRanges(ctx, nodeRanges.ranges.value, toScreen, effectiveScale.value, profile, { width: w, height: h }, gps.active.value)
   drawVisiblePacketSet(
     ctx,
     props.visiblePackets,
@@ -613,14 +831,15 @@ const draw = () => {
       packetId: null,
     }
     const selected = selectedIdSet.value.has(Number(node.node_id)) || props.selectedNodeId === node.node_id
-    drawNodeBody(ctx, node, visual, profile, phase, fx, nodeRadius.value, toScreen(node.x, node.y), props.editMode && selected)
+    const position = toScreen(node.x, node.y)
+    if (Number.isFinite(position.x) && Number.isFinite(position.y)) drawNodeBody(ctx, node, visual, profile, phase, fx, nodeRadius.value, position, props.editMode && selected)
   }
 
   if (marquee.value) {
     drawMarqueeBox(ctx, marquee.value)
   }
 
-  drawHudText(ctx, profile, props.currentTime, props.visiblePackets)
+  if (!gps.active.value) drawHudText(ctx, profile, props.currentTime, props.visiblePackets)
 }
 
 const updateViewport = () => {
@@ -631,11 +850,13 @@ const updateViewport = () => {
   if (rect.width < 2 || rect.height < 2) return
   displayWidth.value = Math.max(160, rect.width - 2)
   displayHeight.value = Math.max(120, Math.round((rect.height || 0) - 2))
+  if (gps.active.value) pan.value = constrainMapPan(pan.value, projection.value, displayWidth.value, displayHeight.value)
   scheduleDraw()
 }
 
 watch(
-  () => props.active ? [props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.selectedNodeId] : null,
+  () => props.active ? [props.nodeVisuals, props.visiblePackets, props.themeKey, props.fxLevel, props.editMode, props.selectedNodeId, props.viewNodes,
+    props.sceneAssets, props.sceneAssetsVisible, props.selectedSceneAssetId] : null,
   scheduleDraw,
   { immediate: true },
 )
@@ -649,7 +870,8 @@ watch(() => props.currentTime, loop.flushDraw, { flush: 'post' })
 // traverse application settings or packet display metadata on every clock tick.
 watch(
   () => props.active ? [
-    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role]),
+    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role, node.modelType,
+      node.motionDirection?.x, node.motionDirection?.y, node.motionDirection?.z]),
     props.originalPositions.map((node) => [node.node_id, node.x, node.y]),
     props.selectedNodeIds.slice(),
   ] : null,
@@ -657,12 +879,15 @@ watch(
 )
 
 watch(() => props.active, (active) => {
+  view.cancelPinch()
   loop.cancelDraw()
   if (!active) {
     closeContextMenu()
+    selectedMeasurementId.value = null
     zoomPanelOpen.value = false
     snapPanelOpen.value = false
     cancelActiveTool()
+    endSceneAssetDrag(); sceneClickStart = null
     return
   }
   // v-show has restored the host size; retain pan/zoom and paint current data.
@@ -721,6 +946,7 @@ const onKeyDown = (event) => {
       || marquee.value || draggingNodeId.value != null || dragGroup.value || isPanning.value
     const returnToCanvas = hasActiveTool && containerEl.value?.contains(document.activeElement)
     closeContextMenu()
+    selectedMeasurementId.value = null
     zoomPanelOpen.value = false
     snapPanelOpen.value = false
     cancelActiveTool()
@@ -754,6 +980,7 @@ onMounted(() => {
   } catch {
     // ignore persistence errors
   }
+  window.addEventListener('blur', view.cancelPinch)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   document.addEventListener('pointerdown', onZoomOutside, true)
@@ -774,8 +1001,60 @@ onMounted(() => {
   window.addEventListener('resize', updateViewport)
 })
 
+useCanvasPersistence({
+  enabled: () => props.persistState,
+  active: () => props.active,
+  initial: () => props.initialState ?? undefined,
+  capture: () => ({
+    version: 1,
+    viewport: { width: displayWidth.value, height: displayHeight.value },
+    view: gps.active.value && ordinaryView ? {
+      bounds: ordinaryView.bounds, center: toWorldPoint(displayWidth.value / 2, displayHeight.value / 2, { bounds: ordinaryView.bounds, origin: computeContentOrigin(displayWidth.value, displayHeight.value, viewInsets.value, ordinaryView.bounds, ordinaryView.scale), scale: Math.min(ordinaryView.scale * ordinaryView.zoom, MAX_VIEW_SCALE), pan: ordinaryView.pan }),
+      scale: Math.min(ordinaryView.scale * ordinaryView.zoom, MAX_VIEW_SCALE), zoom: ordinaryView.zoom,
+    } : {
+      bounds: { minX: bounds.value.minX, maxX: bounds.value.maxX, minY: bounds.value.minY, maxY: bounds.value.maxY },
+      center: toWorld(displayWidth.value / 2, displayHeight.value / 2),
+      scale: effectiveScale.value,
+      zoom: zoom.value,
+    },
+    nodeSize: nodeSizeScale.value,
+    lockedNodeIds: [...positioning.lockedNodeIds.value],
+    measurements: measurementLines.value.map(({ id, start, end }) => ({ id, start: { ...start, ...measure.resolveMeasurePoint(start) }, end: { ...end, ...measure.resolveMeasurePoint(end) } })),
+    nodeRanges: Object.fromEntries(Object.entries(nodeRanges.settings.value).map(([id, settings]) => [id, { ...settings }])),
+    snapping: { ...snapping.value },
+  }),
+  restore: (saved) => {
+    cancelActiveTool()
+    const b = saved.view.bounds
+    sessionFrozenBounds.value = { ...b, spanX: Math.max(1, b.maxX - b.minX), spanY: Math.max(1, b.maxY - b.minY) }
+    dragFrozenBounds.value = null
+    zoom.value = Math.max(ZOOM_MIN, Math.min(MAX_VIEW_SCALE / scale.value, saved.view.scale / scale.value))
+    pan.value = { x: 0, y: 0 }
+    const center = toScreen(saved.view.center.x, saved.view.center.y)
+    pan.value = { x: displayWidth.value / 2 - center.x, y: displayHeight.value / 2 - center.y }
+    nodeSizeScale.value = saved.nodeSize
+    snapping.value = { ...saved.snapping }
+    positioning.lockedNodeIds.value = (saved.lockedNodeIds || []).filter(id=>nodeById.value.has(id))
+    nodeRanges.settings.value = Object.fromEntries(Object.entries(saved.nodeRanges).filter(([id]) => nodeById.value.has(Number(id))))
+    const lines = saved.measurements.map((line) => ({ ...line, start: { ...line.start }, end: { ...line.end }, distance: measure.distanceByMeasurePoints(line.start, line.end) }))
+    measurementLines.value = lines
+    measure.measurementHistory.value = [lines]
+    measure.measurementHistoryIndex.value = 0
+    selectedMeasurementId.value = null
+    scheduleDraw()
+  },
+  emit: (saved) => emit('canvas-state', saved),
+})
+
 onBeforeUnmount(() => {
+  endSceneAssetDrag()
+  window.removeEventListener('pointermove', moveSceneAsset)
+  window.removeEventListener('pointerup', endSceneAssetDrag)
+  window.removeEventListener('pointercancel', endSceneAssetDrag)
+  window.removeEventListener('keydown', onAssetEscape)
   loop.dispose()
+  view.cancelPinch()
+  window.removeEventListener('blur', view.cancelPinch)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('pointerdown', onZoomOutside, true)
@@ -786,9 +1065,24 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewport)
   if (resizeObserver) resizeObserver.disconnect()
 })
+
+onMounted(() => {
+  window.addEventListener('pointermove', moveSceneAsset)
+  window.addEventListener('pointerup', endSceneAssetDrag)
+  window.addEventListener('pointercancel', endSceneAssetDrag)
+  window.addEventListener('keydown', onAssetEscape)
+})
 </script>
 
 <style scoped>
+.node-pin {width:24px;height:24px;padding:3px;border:1px solid var(--line-strong);border-radius:7px;background:var(--panel);color:var(--muted);cursor:pointer;display:grid;place-items:center;transition:color var(--dur-fast) var(--ease-out),background var(--dur-fast) var(--ease-out);}
+.node-pin svg {width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round;}
+.node-pin.locked {color:var(--accent);border-color:var(--accent);background:var(--sunken);}.node-pin.locked svg{fill:var(--accent);fill-opacity:.22;}
+.node-pin:hover {color:var(--accent);}.node-pin:focus-visible {outline:2px solid var(--accent);outline-offset:2px;}.node-pin:disabled{cursor:default;opacity:.5;}
+.canvas-pin {position:absolute;z-index:10;}.card-pin{flex:none;margin-left:auto;}
+
+.gps-node-coordinate { color: var(--muted); font: 11px var(--font-mono); line-height: 1.6; }
+
 .canvas-host {
   position: relative;
   width: 100%;
@@ -877,6 +1171,8 @@ onBeforeUnmount(() => {
 .zoom-range { writing-mode: vertical-lr; direction: rtl; width: 20px; height: 120px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .zoom-column output { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
 .canvas-scale { display: flex; flex-direction: column; align-items: center; gap: 3px; margin: 0 8px; color: var(--muted); font: 10px var(--font-mono); white-space: nowrap; flex-shrink: 0; pointer-events: none; }
+.canvas-scale.gps-scale { position: relative; isolation: isolate; color: var(--text); }
+.canvas-scale.gps-scale::before { content: ""; position: absolute; inset: -6px -8px; z-index: -1; border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--line); }
 .canvas-scale-line { width: 100%; height: 6px; border: 1px solid currentColor; border-top: 0; }
 
 .toolbar-btn {
@@ -980,6 +1276,7 @@ onBeforeUnmount(() => {
 }
 .node-context-coords .field:last-child { grid-column: 1 / -1; }
 .node-context-add { width: 100%; }
+.node-context-error { margin: 0; color: var(--bad); font-size: 11px; line-height: 1.5; }
 
 .node-tooltip {
   position: absolute;
@@ -1019,6 +1316,11 @@ onBeforeUnmount(() => {
 }
 
 .node-tooltip-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
   margin: 0;
   font-size: 0.88rem;
   color: var(--text, #e2e8f0);

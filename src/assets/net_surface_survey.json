@@ -1,0 +1,2941 @@
+{
+  "meta": {
+    "schema": "uan-vis-packet-log/v2",
+    "time_unit": "us",
+    "time_precision_us": 0.001,
+    "sim_end_us": 66000000,
+    "distance_unit": "m",
+    "protocols": {
+      "phy": [
+        "ns3::AquaSimPhySimple"
+      ],
+      "mac": [
+        "ns3::AquaSimBroadcastMac"
+      ],
+      "routing": [
+        "ns3::AquaSimStaticRouting"
+      ],
+      "channel": [
+        "ns3::AquaSimChannel"
+      ]
+    },
+    "mobility_sample_interval_us": 100000,
+    "trace_scope": "phy-events",
+    "propagation_speed_mps": 1499.99999925,
+    "title": "海面科考船与水下移动观测",
+    "example": {
+      "source": "ns-3 simulation",
+      "generator": "scripts/generate-default-replay.mjs",
+      "sea_level_m": 500
+    }
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "name": "科考船",
+      "x": -300,
+      "y": -200,
+      "z": 498.9,
+      "role": "sink",
+      "modelType": "vessel",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "1.6m/s:0.2m/s:0"
+        }
+      }
+    },
+    {
+      "node_id": 2,
+      "name": "海面浮标",
+      "x": -270,
+      "y": 120,
+      "z": 497.3,
+      "role": "node",
+      "modelType": "buoy",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.1m/s:0.05m/s:0"
+        }
+      }
+    },
+    {
+      "node_id": 3,
+      "name": "作业ROV",
+      "x": 60,
+      "y": -100,
+      "z": 440,
+      "role": "node",
+      "modelType": "rov",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.35m/s:-0.15m/s:0"
+        }
+      }
+    },
+    {
+      "node_id": 4,
+      "name": "巡航AUV-A",
+      "x": 380,
+      "y": -260,
+      "z": 360,
+      "role": "node",
+      "modelType": "auv",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "-1.2m/s:0.55m/s:0"
+        }
+      }
+    },
+    {
+      "node_id": 5,
+      "name": "巡航AUV-B",
+      "x": -360,
+      "y": 420,
+      "z": 325,
+      "role": "node",
+      "modelType": "auv",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.9m/s:-0.65m/s:0"
+        }
+      }
+    },
+    {
+      "node_id": 6,
+      "name": "水下观测站-6",
+      "x": -40,
+      "y": 400,
+      "z": 300,
+      "role": "node",
+      "modelType": "sensor"
+    },
+    {
+      "node_id": 7,
+      "name": "水下观测站-7",
+      "x": 380,
+      "y": 380,
+      "z": 280,
+      "role": "node",
+      "modelType": "sensor"
+    },
+    {
+      "node_id": 8,
+      "name": "水下中继-8",
+      "x": 230,
+      "y": 130,
+      "z": 400,
+      "role": "node",
+      "modelType": "sensor"
+    }
+  ],
+  "movements": [
+    {
+      "node_id": 1,
+      "start_us": 0,
+      "end_us": 66000000,
+      "from_x": -300,
+      "from_y": -200,
+      "from_z": 498.9,
+      "to_x": -194.39999999999446,
+      "to_y": -186.79999999999347,
+      "to_z": 498.9
+    },
+    {
+      "node_id": 2,
+      "start_us": 0,
+      "end_us": 66000000,
+      "from_x": -270,
+      "from_y": 120,
+      "from_z": 497.3,
+      "to_x": -263.4000000000059,
+      "to_y": 123.29999999999708,
+      "to_z": 497.3
+    },
+    {
+      "node_id": 3,
+      "start_us": 0,
+      "end_us": 66000000,
+      "from_x": 60,
+      "from_y": -100,
+      "from_z": 440,
+      "to_x": 83.09999999999786,
+      "to_y": -109.90000000000036,
+      "to_z": 440
+    },
+    {
+      "node_id": 4,
+      "start_us": 0,
+      "end_us": 66000000,
+      "from_x": 380,
+      "from_y": -260,
+      "from_z": 360,
+      "to_x": 300.79999999999706,
+      "to_y": -223.6999999999957,
+      "to_z": 360
+    },
+    {
+      "node_id": 5,
+      "start_us": 0,
+      "end_us": 66000000,
+      "from_x": -360,
+      "from_y": 420,
+      "from_z": 325,
+      "to_x": -300.600000000016,
+      "to_y": 377.10000000000156,
+      "to_z": 325
+    }
+  ],
+  "packets": [
+    {
+      "packet_id": "phy-0",
+      "src": 4,
+      "tx_start_us": 12000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 12231156.051,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14691156.051
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 12272423.624,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14732423.624
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 12425729.659,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14885729.659
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 12442337.131,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14902337.131
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 12499417.728,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14959417.728
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 12514260.168,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14974260.168
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 12651557.928,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 15111557.928
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-1",
+      "src": 3,
+      "tx_start_us": 14691156.051,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 14882869.654,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 14882869.654,
+          "rx_drop_us": 17042869.654
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 14919346.851,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15003187.414,
+          "rx_drop_us": 17079346.851,
+          "with": [
+            "phy-2"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 14930769.13,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15139698.936,
+          "rx_drop_us": 17090769.13,
+          "with": [
+            "phy-2"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 14961400.611,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 14961400.611,
+          "rx_drop_us": 17121400.611
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 15045722.045,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15045722.045,
+          "rx_drop_us": 17205722.045
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 15089628.692,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15089628.692,
+          "rx_drop_us": 17249628.692
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 15136236.583,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15136236.583,
+          "rx_drop_us": 17296236.583
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-2",
+      "src": 8,
+      "tx_start_us": 14732423.624,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 14924135.039,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 14924135.039,
+          "rx_drop_us": 17084135.039
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 14942608.728,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 14942608.728,
+          "rx_drop_us": 17102608.728
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 14995567.015,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 14995567.015,
+          "rx_drop_us": 17155567.015
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 15003187.414,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15003187.414,
+          "rx_drop_us": 17163187.414,
+          "with": [
+            "phy-1"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 15071102.12,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15071102.12,
+          "rx_drop_us": 17231102.12
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 15139698.936,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15139698.936,
+          "rx_drop_us": 17299698.936,
+          "with": [
+            "phy-1"
+          ]
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 15162871.737,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15162871.737,
+          "rx_drop_us": 17322871.737
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-3",
+      "src": 7,
+      "tx_start_us": 14885729.659,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 15095914.763,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15095914.763,
+          "rx_drop_us": 17255914.763
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 15166363.861,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15166363.861,
+          "rx_drop_us": 17326363.861
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 15284194.085,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15284194.085,
+          "rx_drop_us": 17444194.085
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 15310468.302,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15310468.302,
+          "rx_drop_us": 17470468.302
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 15371480.511,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15371480.511,
+          "rx_drop_us": 17531480.511
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 15373354.235,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15373354.235,
+          "rx_drop_us": 17533354.235
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 15486265.899,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15486265.899,
+          "rx_drop_us": 17646265.899
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-4",
+      "src": 2,
+      "tx_start_us": 14959417.728,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 15171317.765,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15171317.765,
+          "rx_drop_us": 17331317.765
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 15189975.558,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15189975.558,
+          "rx_drop_us": 17349975.558
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 15229718.762,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15229718.762,
+          "rx_drop_us": 17389718.762
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 15233581.58,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15233581.58,
+          "rx_drop_us": 17393581.58
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 15298081.236,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15298081.236,
+          "rx_drop_us": 17458081.236
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 15447037.078,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15447037.078,
+          "rx_drop_us": 17607037.078
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 15456171.383,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15456171.383,
+          "rx_drop_us": 17616171.383
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-5",
+      "src": 6,
+      "tx_start_us": 14974260.168,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 15179401.699,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15179401.699,
+          "rx_drop_us": 17339401.699
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 15237403.559,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15237403.559,
+          "rx_drop_us": 17397403.559
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 15248423.135,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15248423.135,
+          "rx_drop_us": 17408423.135
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 15254894.37,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15254894.37,
+          "rx_drop_us": 17414894.37
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 15328865.959,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15328865.959,
+          "rx_drop_us": 17488865.959
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 15422313.636,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15422313.636,
+          "rx_drop_us": 17582313.636
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 15486347.552,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15486347.552,
+          "rx_drop_us": 17646347.552
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-6",
+      "src": 5,
+      "tx_start_us": 15111557.928,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 15316615.421,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15316615.421,
+          "rx_drop_us": 17476615.421
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 15342038.023,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15342038.023,
+          "rx_drop_us": 17502038.023
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 15535224.403,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15535224.403,
+          "rx_drop_us": 17695224.403
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 15541731.495,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15541731.495,
+          "rx_drop_us": 17701731.495
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 15556435.748,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15556435.748,
+          "rx_drop_us": 17716435.748
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 15597169.596,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 15597169.596,
+          "rx_drop_us": 17757169.596
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 15758235.631,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 15758235.631,
+          "rx_drop_us": 17918235.631
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-7",
+      "src": 6,
+      "tx_start_us": 24000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 24199651.83,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24632748.713,
+          "rx_drop_us": 26359651.83,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 24263143.391,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24265219.138,
+          "rx_drop_us": 26423143.391,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 24273624.633,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24488621.067,
+          "rx_drop_us": 26433624.633,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 24280634.202,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24421693.77,
+          "rx_drop_us": 26440634.202,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 24355879.83,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24355879.83,
+          "rx_drop_us": 26515879.83,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 24443686.982,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24443686.982,
+          "rx_drop_us": 26603686.982,
+          "with": [
+            "phy-8"
+          ]
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 24505519.614,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 24505519.614,
+          "rx_drop_us": 26665519.614
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-8",
+      "src": 4,
+      "tx_start_us": 24000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 24217952.166,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24355879.83,
+          "rx_drop_us": 26377952.166,
+          "with": [
+            "phy-7"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 24265219.138,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24265219.138,
+          "rx_drop_us": 26425219.138,
+          "with": [
+            "phy-7"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 24420306.56,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24443686.982,
+          "rx_drop_us": 26580306.56,
+          "with": [
+            "phy-7"
+          ]
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 24421693.77,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24421693.77,
+          "rx_drop_us": 26581693.77,
+          "with": [
+            "phy-7"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 24488621.067,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24488621.067,
+          "rx_drop_us": 26648621.067,
+          "with": [
+            "phy-7"
+          ]
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 24505519.614,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 24505519.614,
+          "rx_drop_us": 26665519.614
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 24632748.713,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 24632748.713,
+          "rx_drop_us": 26792748.713,
+          "with": [
+            "phy-7"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-9",
+      "src": 7,
+      "tx_start_us": 29000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 29210185.104,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31670185.104
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 29280634.202,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31740634.202
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 29397884.375,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31857884.375
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 29420079.063,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31880079.063
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 29477086.311,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31937086.311
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 29486623.652,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 31946623.652
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 29588433.631,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 32048433.631
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-10",
+      "src": 8,
+      "tx_start_us": 31670185.104,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 31861045.059,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 31861045.059,
+          "rx_drop_us": 34021045.059
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 31880370.208,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32021268.404,
+          "rx_drop_us": 34040370.208,
+          "with": [
+            "phy-11"
+          ]
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 31930919.07,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 31930919.07,
+          "rx_drop_us": 34090919.07
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 31933328.495,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 31933328.495,
+          "rx_drop_us": 34093328.495
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 32007745.725,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32007745.725,
+          "rx_drop_us": 34167745.725
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 32061363.332,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32082855.692,
+          "rx_drop_us": 34221363.332,
+          "with": [
+            "phy-12"
+          ]
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 32088375.811,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32088375.811,
+          "rx_drop_us": 34248375.811,
+          "with": [
+            "phy-11"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-11",
+      "src": 6,
+      "tx_start_us": 31740634.202,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 31935637.156,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32088375.811,
+          "rx_drop_us": 34095637.156,
+          "with": [
+            "phy-10"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 32003777.593,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32003777.593,
+          "rx_drop_us": 34163777.593
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 32013797.626,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32013797.626,
+          "rx_drop_us": 34173797.626
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 32021268.404,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32021268.404,
+          "rx_drop_us": 34181268.404,
+          "with": [
+            "phy-10"
+          ]
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 32097614.763,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32097614.763,
+          "rx_drop_us": 34257614.763
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 32180712.309,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32180712.309,
+          "rx_drop_us": 34340712.309
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 32240552.975,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32240552.975,
+          "rx_drop_us": 34400552.975
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-12",
+      "src": 3,
+      "tx_start_us": 31857884.375,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 32048735.416,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32048735.416,
+          "rx_drop_us": 34208735.416
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 32067218.221,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32067218.221,
+          "rx_drop_us": 34227218.221
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 32082855.692,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32082855.692,
+          "rx_drop_us": 34242855.692,
+          "with": [
+            "phy-10"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 32131743.515,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32131743.515,
+          "rx_drop_us": 34291743.515
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 32214881.666,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32214881.666,
+          "rx_drop_us": 34374881.666
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 32255655.126,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32255655.126,
+          "rx_drop_us": 34415655.126
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 32294691.631,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32294691.631,
+          "rx_drop_us": 34454691.631
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-13",
+      "src": 4,
+      "tx_start_us": 31880079.063,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 32089388.601,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32089388.601,
+          "rx_drop_us": 34249388.601
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 32140691.665,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32140691.665,
+          "rx_drop_us": 34300691.665
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 32285951.242,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32285951.242,
+          "rx_drop_us": 34445951.242
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 32299246.171,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32299246.171,
+          "rx_drop_us": 34459246.171
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 32361618.827,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32361618.827,
+          "rx_drop_us": 34521618.827
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 32379897.214,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32379897.214,
+          "rx_drop_us": 34539897.214
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 32500494.34,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32500494.34,
+          "rx_drop_us": 34660494.34
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-14",
+      "src": 2,
+      "tx_start_us": 31946623.652,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 32157104.341,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32157104.341,
+          "rx_drop_us": 34317104.341
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 32168657.34,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32168657.34,
+          "rx_drop_us": 34328657.34
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 32219774.809,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32219774.809,
+          "rx_drop_us": 34379774.809
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 32220501.48,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32220501.48,
+          "rx_drop_us": 34380501.48
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 32284166.037,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32284166.037,
+          "rx_drop_us": 34444166.037
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 32428103.647,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 32428103.647,
+          "rx_drop_us": 34588103.647
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 32433038.369,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 32433038.369,
+          "rx_drop_us": 34593038.369
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-15",
+      "src": 4,
+      "tx_start_us": 36000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 36204800.911,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38664800.911
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 36258245.602,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38718245.602
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 36398336.881,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38858336.881
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 36417885.832,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38877885.832
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 36477840.294,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38937840.294
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 36496849.756,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38956849.756
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 36613973.072,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 39073973.072
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-16",
+      "src": 3,
+      "tx_start_us": 38664800.911,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 38855336.449,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 38855336.449,
+          "rx_drop_us": 41015336.449
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 38866689.542,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 38974945.592,
+          "rx_drop_us": 41026689.542,
+          "with": [
+            "phy-17"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 38883974.482,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39102781.064,
+          "rx_drop_us": 41043974.482,
+          "with": [
+            "phy-17"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 38940093.659,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 38940093.659,
+          "rx_drop_us": 41100093.659
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 39022772.373,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39022772.373,
+          "rx_drop_us": 41182772.373
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 39062306.235,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39062306.235,
+          "rx_drop_us": 41222306.235
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 39098330.167,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39098330.167,
+          "rx_drop_us": 41258330.167
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-17",
+      "src": 8,
+      "tx_start_us": 38718245.602,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 38908778.723,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 38908778.723,
+          "rx_drop_us": 41068778.723
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 38928430.706,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 38928430.706,
+          "rx_drop_us": 41088430.706
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 38974945.592,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 38974945.592,
+          "rx_drop_us": 41134945.592,
+          "with": [
+            "phy-16"
+          ]
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 38981388.993,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 38981388.993,
+          "rx_drop_us": 41141388.993
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 39055341.359,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39055341.359,
+          "rx_drop_us": 41215341.359
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 39102781.064,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39102781.064,
+          "rx_drop_us": 41262781.064,
+          "with": [
+            "phy-16"
+          ]
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 39131340.742,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39131340.742,
+          "rx_drop_us": 41291340.742
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-18",
+      "src": 7,
+      "tx_start_us": 38877885.832,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 39088070.936,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39088070.936,
+          "rx_drop_us": 41248070.936
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 39158520.034,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39158520.034,
+          "rx_drop_us": 41318520.034
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 39275382.966,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39275382.966,
+          "rx_drop_us": 41435382.966
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 39294893.021,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39294893.021,
+          "rx_drop_us": 41454893.021
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 39348951.252,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39348951.252,
+          "rx_drop_us": 41508951.252
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 39363809.115,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39363809.115,
+          "rx_drop_us": 41523809.115
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 39457935.307,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39457935.307,
+          "rx_drop_us": 41617935.307
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-19",
+      "src": 2,
+      "tx_start_us": 38937840.294,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 39148137,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39148137,
+          "rx_drop_us": 41308137
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 39156461.838,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39156461.838,
+          "rx_drop_us": 41316461.838
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 39210575.283,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39210575.283,
+          "rx_drop_us": 41370575.283
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 39213190.551,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39213190.551,
+          "rx_drop_us": 41373190.551
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 39274921.57,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39274921.57,
+          "rx_drop_us": 41434921.57
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 39413043.784,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39413043.784,
+          "rx_drop_us": 41573043.784
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 39423759.327,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39423759.327,
+          "rx_drop_us": 41583759.327
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-20",
+      "src": 6,
+      "tx_start_us": 38956849.756,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 39147571.733,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39147571.733,
+          "rx_drop_us": 41307571.733
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 39219993.147,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39219993.147,
+          "rx_drop_us": 41379993.147
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 39229583.614,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39229583.614,
+          "rx_drop_us": 41389583.614
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 39237483.958,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39237483.958,
+          "rx_drop_us": 41397483.958
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 39314863.141,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39314863.141,
+          "rx_drop_us": 41474863.141
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 39393679.405,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39393679.405,
+          "rx_drop_us": 41553679.405
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 39451574.507,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39451574.507,
+          "rx_drop_us": 41611574.507
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-21",
+      "src": 5,
+      "tx_start_us": 39073973.072,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 39264626.007,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39264626.007,
+          "rx_drop_us": 41424626.007
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 39292528.761,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39292528.761,
+          "rx_drop_us": 41452528.761
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 39486116.883,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39486116.883,
+          "rx_drop_us": 41646116.883
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 39486811.11,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39486811.11,
+          "rx_drop_us": 41646811.11
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 39507305.329,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39507305.329,
+          "rx_drop_us": 41667305.329
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 39544919.34,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 39544919.34,
+          "rx_drop_us": 41704919.34
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 39683142.271,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 39683142.271,
+          "rx_drop_us": 41843142.271
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-22",
+      "src": 6,
+      "tx_start_us": 48000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 48185434.84,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48595234.184,
+          "rx_drop_us": 50345434.84,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 48263143.391,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48263143.391,
+          "rx_drop_us": 50423143.391,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 48272196.081,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48467076.511,
+          "rx_drop_us": 50432196.081,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 48280634.202,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48414312.131,
+          "rx_drop_us": 50440634.202,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 48359316.685,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48359316.685,
+          "rx_drop_us": 50519316.685,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 48432920.629,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48432920.629,
+          "rx_drop_us": 50592920.629,
+          "with": [
+            "phy-23"
+          ]
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 48488254.36,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 48488254.36,
+          "rx_drop_us": 50648254.36
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-23",
+      "src": 4,
+      "tx_start_us": 48000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 48191713.119,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48359316.685,
+          "rx_drop_us": 50351713.119,
+          "with": [
+            "phy-22"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 48251522.228,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48263143.391,
+          "rx_drop_us": 50411522.228,
+          "with": [
+            "phy-22"
+          ]
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 48376438.757,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48432920.629,
+          "rx_drop_us": 50536438.757,
+          "with": [
+            "phy-22"
+          ]
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 48414312.131,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48414312.131,
+          "rx_drop_us": 50574312.131,
+          "with": [
+            "phy-22"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 48467076.511,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48467076.511,
+          "rx_drop_us": 50627076.511,
+          "with": [
+            "phy-22"
+          ]
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 48488254.36,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 48488254.36,
+          "rx_drop_us": 50648254.36
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 48595234.184,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 48595234.184,
+          "rx_drop_us": 50755234.184,
+          "with": [
+            "phy-22"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-24",
+      "src": 5,
+      "tx_start_us": 51000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 51183701.125,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53643701.125
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 51212877.033,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53672877.033
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 51404223.114,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53864223.114
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 51406570.985,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53866570.985
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 51427592.772,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53887592.772
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 51463727.282,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53923727.282
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 51590555.614,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 54050555.614
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-25",
+      "src": 6,
+      "tx_start_us": 53643701.125,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 53825883.197,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 53884506.758,
+          "rx_drop_us": 55985883.197,
+          "with": [
+            "phy-26"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 53906844.516,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 53906844.516,
+          "rx_drop_us": 56066844.516
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 53915561.895,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 53915561.895,
+          "rx_drop_us": 56075561.895
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 53924335.327,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 53924335.327,
+          "rx_drop_us": 56084335.327
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 54003836.206,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54003836.206,
+          "rx_drop_us": 56163836.206
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 54074275.441,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54074275.441,
+          "rx_drop_us": 56234275.441,
+          "with": [
+            "phy-26"
+          ]
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 54127939.873,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54127939.873,
+          "rx_drop_us": 56287939.873
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-26",
+      "src": 2,
+      "tx_start_us": 53672877.033,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 1,
+          "rx_start_us": 53883554.219,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54074275.441,
+          "rx_drop_us": 56043554.219,
+          "with": [
+            "phy-25"
+          ]
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 53884506.758,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 53884506.758,
+          "rx_drop_us": 56044506.758,
+          "with": [
+            "phy-25"
+          ]
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 53944736.071,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 53944736.071,
+          "rx_drop_us": 56104736.071
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 53951331.344,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 53951331.344,
+          "rx_drop_us": 56111331.344
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 54008987.028,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54008987.028,
+          "rx_drop_us": 56168987.028
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 54134871.33,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54134871.33,
+          "rx_drop_us": 56294871.33
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 54157751.51,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54157751.51,
+          "rx_drop_us": 56317751.51
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-27",
+      "src": 8,
+      "tx_start_us": 53864223.114,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 54054109.027,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54054109.027,
+          "rx_drop_us": 56214109.027
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 54074408.218,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54074408.218,
+          "rx_drop_us": 56234408.218
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 54112556.884,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54112556.884,
+          "rx_drop_us": 56272556.884
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 54127366.505,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54127366.505,
+          "rx_drop_us": 56287366.505
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 54200320.501,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54200320.501,
+          "rx_drop_us": 56360320.501
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 54234604.858,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54234604.858,
+          "rx_drop_us": 56394604.858
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 54266378.586,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54266378.586,
+          "rx_drop_us": 56426378.586
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-28",
+      "src": 3,
+      "tx_start_us": 53887592.772,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 54072911.883,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54072911.883,
+          "rx_drop_us": 56232911.883
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 54077477.745,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54077477.745,
+          "rx_drop_us": 56237477.745
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 54093819.476,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54093819.476,
+          "rx_drop_us": 56253819.476
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 54166092.322,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54166092.322,
+          "rx_drop_us": 56326092.322
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 54247763.307,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54247763.307,
+          "rx_drop_us": 56407763.307
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 54284531.085,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54284531.085,
+          "rx_drop_us": 56444531.085
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 54313796.57,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54313796.57,
+          "rx_drop_us": 56473796.57
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-29",
+      "src": 7,
+      "tx_start_us": 53923727.282,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 54133912.386,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54133912.386,
+          "rx_drop_us": 56293912.386
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 54204361.484,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54204361.484,
+          "rx_drop_us": 56364361.484
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 54320664.293,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54320664.293,
+          "rx_drop_us": 56480664.293
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 54336363.513,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54336363.513,
+          "rx_drop_us": 56496363.513
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 54385693.315,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54385693.315,
+          "rx_drop_us": 56545693.315
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 54408583.978,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54408583.978,
+          "rx_drop_us": 56568583.978
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 54491149.943,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54491149.943,
+          "rx_drop_us": 56651149.943
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-30",
+      "src": 4,
+      "tx_start_us": 54050555.614,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 54235698.027,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54235698.027,
+          "rx_drop_us": 56395698.027
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 54298789.16,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54298789.16,
+          "rx_drop_us": 56458789.16
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 54415984.261,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54415984.261,
+          "rx_drop_us": 56575984.261
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 54463156.609,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54463156.609,
+          "rx_drop_us": 56623156.609
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 54512211.704,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54512211.704,
+          "rx_drop_us": 56672211.704
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 54534505.559,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 54534505.559,
+          "rx_drop_us": 56694505.559
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 54636356.461,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 54636356.461,
+          "rx_drop_us": 56796356.461
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-31",
+      "src": 7,
+      "tx_start_us": 58000000,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 8,
+          "rx_start_us": 58210185.104,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60670185.104
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 58280634.202,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60740634.202
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 58396791.454,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60856791.454
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 58411517.393,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60871517.393
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 58459516.234,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60919516.234
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 58484567.775,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 60944567.775
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 58564032.942,
+          "rx_duration_us": 2160000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 61024032.942
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-32",
+      "src": 8,
+      "tx_start_us": 60670185.104,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 60859804.86,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 60859804.86,
+          "rx_drop_us": 63019804.86
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 60880370.208,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61021268.404,
+          "rx_drop_us": 63040370.208,
+          "with": [
+            "phy-33"
+          ]
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 60914902.757,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 60914902.757,
+          "rx_drop_us": 63074902.757
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 60933328.495,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 60933328.495,
+          "rx_drop_us": 63093328.495
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 61005834.135,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61005834.135,
+          "rx_drop_us": 63165834.135
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 61034264.691,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61057100.773,
+          "rx_drop_us": 63194264.691,
+          "with": [
+            "phy-34"
+          ]
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 61067429.656,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61067429.656,
+          "rx_drop_us": 63227429.656,
+          "with": [
+            "phy-33"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-33",
+      "src": 6,
+      "tx_start_us": 60740634.202,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 60918780.651,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61067429.656,
+          "rx_drop_us": 63078780.651,
+          "with": [
+            "phy-32"
+          ]
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 61003777.593,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61003777.593,
+          "rx_drop_us": 63163777.593
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 61012073.658,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61012073.658,
+          "rx_drop_us": 63172073.658
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 61021268.404,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61021268.404,
+          "rx_drop_us": 63181268.404,
+          "with": [
+            "phy-32"
+          ]
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 61101803.849,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61101803.849,
+          "rx_drop_us": 63261803.849
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 61168361.921,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61168361.921,
+          "rx_drop_us": 63328361.921
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 61219848.635,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61219848.635,
+          "rx_drop_us": 63379848.635
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-34",
+      "src": 3,
+      "tx_start_us": 60856791.454,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 61034568.664,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61034568.664,
+          "rx_drop_us": 63194568.664
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 61046404.129,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61046404.129,
+          "rx_drop_us": 63206404.129
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 61057100.773,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61057100.773,
+          "rx_drop_us": 63217100.773,
+          "with": [
+            "phy-32"
+          ]
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 61136759.446,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61136759.446,
+          "rx_drop_us": 63296759.446
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 61217978.084,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61217978.084,
+          "rx_drop_us": 63377978.084
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 61253482.474,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61253482.474,
+          "rx_drop_us": 63413482.474
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 61279644.116,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61279644.116,
+          "rx_drop_us": 63439644.116
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-35",
+      "src": 4,
+      "tx_start_us": 60871517.393,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 61049278.701,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61049278.701,
+          "rx_drop_us": 63209278.701
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 61116129.495,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61116129.495,
+          "rx_drop_us": 63276129.495
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 61224562.339,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61224562.339,
+          "rx_drop_us": 63384562.339
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 61282263.603,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61282263.603,
+          "rx_drop_us": 63442263.603
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 61327068.64,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61327068.64,
+          "rx_drop_us": 63487068.64
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 61350639.436,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61350639.436,
+          "rx_drop_us": 63510639.436
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 61446696.691,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61446696.691,
+          "rx_drop_us": 63606696.691
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-36",
+      "src": 2,
+      "tx_start_us": 60944567.775,
+      "tx_duration_us": 2160000,
+      "receivers": [
+        {
+          "dst": 5,
+          "rx_start_us": 61152853.525,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61152853.525,
+          "rx_drop_us": 63312853.525
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 61155815.372,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61155815.372,
+          "rx_drop_us": 63315815.372
+        },
+        {
+          "dst": 6,
+          "rx_start_us": 61215995.13,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61215995.13,
+          "rx_drop_us": 63375995.13
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 61224554.263,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61224554.263,
+          "rx_drop_us": 63384554.263
+        },
+        {
+          "dst": 8,
+          "rx_start_us": 61280198.734,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61280198.734,
+          "rx_drop_us": 63440198.734
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 61400053.675,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_tx",
+          "collision_start_us": 61400053.675,
+          "rx_drop_us": 63560053.675
+        },
+        {
+          "dst": 7,
+          "rx_start_us": 61428926.855,
+          "rx_duration_us": 2160000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 61428926.855,
+          "rx_drop_us": 63588926.855
+        }
+      ]
+    }
+  ]
+}

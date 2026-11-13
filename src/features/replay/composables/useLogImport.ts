@@ -1,6 +1,7 @@
 import { onScopeDispose } from 'vue'
 import {
   MAX_LOG_FILES,
+  MAX_LOG_TOTAL_BYTES,
   sanitizeFileName,
   validateImportedFile,
   validateImportedText,
@@ -96,8 +97,13 @@ export const useLogImport = ({
 
   const onNodeLogFilesChange = async (event: Event) => {
     const target = event.target as HTMLInputElement
-    const files = [...(target?.files || [])].slice(0, MAX_LOG_FILES)
+    const files = [...(target?.files || [])]
     if (target) target.value = ''
+    if (files.length > MAX_LOG_FILES || files.reduce((total, file) => total + file.size, 0) > MAX_LOG_TOTAL_BYTES) {
+      ++importVersion
+      state.rejectImportedLog(`节点日志最多一次导入 ${MAX_LOG_FILES} 个文件，总大小不超过 ${MAX_LOG_TOTAL_BYTES / 1024 / 1024} MB；本次未导入任何文件。`)
+      return
+    }
     if (files.length) await importFiles(files, true)
   }
 

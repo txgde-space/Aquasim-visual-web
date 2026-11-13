@@ -21,7 +21,9 @@ function test(name, run) {
   results.push(name)
 }
 
-const samples = fs.readdirSync(path.join(root, 'src/assets')).filter((name) => /\.(json|log)$/.test(name)).sort()
+// The original eight fixtures retain their frozen hashes and merged baseline.
+// New default scenarios are validated separately, without rewriting legacy evidence.
+const samples = Object.keys(baseline).filter((name) => /\.(json|log)$/.test(name)).sort()
 test('all existing samples preserve their recorded parser, packet and merge semantics', () => {
   const currentLogs = []
   for (const sample of samples) {
@@ -133,6 +135,37 @@ test('failed normalization leaves current replay intact', () => {
 })
 
 const file = (name, text) => ({ name, size: 100, text: typeof text === 'function' ? text : async () => text })
+const nodeLogV2 = (owner, events = [], runId = 'experiment-1') => JSON.stringify({
+  meta: { schema: 'uan-vis-node-log/v2', run_id: runId, node_id: owner, log_scope: 'node',
+    time_precision_us: 0.001, trace_scope: 'phy-events', sim_end_us: 500 },
+  nodes: [{ node_id: 1, x: 0, y: 0, z: 0, modelType: 'auv' }, { node_id: 2, x: 100, y: 0, z: 0, modelType: 'buoy' }],
+  events,
+})
+test('modern node logs match exact TX events and can reconstruct measured sender context for a partial import', () => {
+  const tx = { type: 'tx_start', event_id: 'tx-2', packet_id: 'p', src: 1, tx_start_us: 1.001, tx_duration_us: 0.003 }
+  const rx = { ...tx, type: 'rx_drop', dst: 2, rx_start_us: 3.002, rx_duration_us: 0.003,
+    status: 'fail', reason: 'collision_rx_rx', collision_start_us: 3.003, rx_drop_us: 3.005, with: ['tx-3'] }
+  const sender = parser.parseLog(nodeLogV2(1, [tx]))
+  const receiver = parser.parseLog(nodeLogV2(2, [rx]))
+  const full = merge.mergeParsedNodeLogs([sender, receiver])
+  assert.equal(full.packets.length, 1)
+  assert.equal(full.packets[0].receivers[0].collision_start_us, 3.003)
+  assert.equal(full.meta.sim_end_us, 500)
+  const partial = merge.mergeParsedNodeLogs([receiver])
+  assert.equal(partial.packets.length, 1)
+  assert.equal(partial.packets[0].tx_observed_via_rx, true)
+  assert.equal(partial.packets[0].tx_start_us, 1.001)
+  assert.equal(partial.packets[0].tx_duration_us, 0.003)
+  assert.equal(partial.nodes[1].modelType, 'buoy')
+  assert.deepEqual(partial.parseErrors, [])
+  const incomplete = parser.parseLog(nodeLogV2(2, [{ ...rx, tx_duration_us: undefined }]))
+  assert.equal(merge.mergeParsedNodeLogs([incomplete]).packets.length, 0, 'No guessed sender timing')
+  assert.throws(() => merge.mergeParsedNodeLogs([sender, parser.parseLog(nodeLogV2(2, [rx], 'another-run'))]), /不同实验/)
+  assert.throws(() => merge.mergeParsedNodeLogs([receiver, receiver]), /重复/)
+  assert.throws(() => merge.mergeParsedNodeLogs([sender, parser.createEmptyParsedLog()]), /混入/)
+  assert.throws(() => merge.mergeParsedNodeLogs([parser.parseLog(nodeLogV2(2, [tx]))]), /所属节点/)
+  assert.throws(() => merge.mergeParsedNodeLogs([sender, parser.parseLog(nodeLogV2(2, [{ ...rx, tx_start_us: 99 }]))]), /不一致/)
+})
 const event = (...files) => ({ target: { value: 'selected', files } })
 const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
@@ -140,6 +173,28 @@ async function asyncTest(name, run) {
   await run()
   results.push(name)
 }
+await asyncTest('all 64 node logs import together; excess or oversized batches reject atomically and cancel older reads', async () => {
+  const { scope, state, imports } = setup()
+  await imports.onNodeLogFilesChange(event(...Array.from({ length: 64 }, (_, i) => file(`node.${i}.json`, nodeLogV2(i)))))
+  assert.equal(state.uploadedNodeLogNames.value.length, 64)
+  assert.deepEqual([...state.parseErrors.value], [])
+  const pending = deferred()
+  const oldImport = imports.onNodeLogFilesChange(event(file('pending.json', () => pending.promise)))
+  let reads = 0
+  await imports.onNodeLogFilesChange(event(...Array.from({ length: 65 }, (_, i) => file(`extra.${i}.json`, async () => { ++reads; return nodeLogV2(i) }))))
+  assert.equal(reads, 0)
+  assert.match(state.parseErrors.value[0], /本次未导入任何文件/)
+  assert.equal(state.uploadedNodeLogNames.value.length, 64)
+  pending.resolve(nodeLogV2(0))
+  await oldImport
+  assert.equal(state.uploadedNodeLogNames.value.length, 64)
+  await imports.onNodeLogFilesChange(event(...Array.from({ length: 7 }, (_, i) => ({
+    ...file(`large.${i}.json`, async () => { ++reads; return nodeLogV2(i) }), size: 10 * 1024 * 1024,
+  }))))
+  assert.equal(reads, 0)
+  assert.match(state.parseErrors.value[0], /总大小/)
+  scope.stop()
+})
 await asyncTest('latest import wins; older completion and failure cannot overwrite it', async () => {
   const { scope, state, imports } = setup()
   const first = deferred()

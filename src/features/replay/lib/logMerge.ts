@@ -17,6 +17,30 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
   const nodeById = new Map<number, ParsedNodeRecord>()
   const txEvents: Array<Record<string, unknown>> = []
   const rxEvents: Array<Record<string, unknown>> = []
+  const nodeLogsV2 = parsedLogs.filter((log) => log.meta.schema === 'uan-vis-node-log/v2')
+  if (nodeLogsV2.length) {
+    if (nodeLogsV2.length !== parsedLogs.length) throw new Error('请单独导入同一次实验的节点日志，不要混入全局日志或旧格式日志。')
+    const runIds = new Set(nodeLogsV2.map((log) => log.meta.run_id))
+    if (runIds.size !== 1 || !nodeLogsV2[0]?.meta.run_id) throw new Error('节点日志来自不同实验，或缺少 run_id，不能合并。')
+    if (new Set(nodeLogsV2.map((log) => log.meta.sim_end_us)).size !== 1)
+      throw new Error('节点日志的实验结束时间不一致，不能合并。')
+    const owners = nodeLogsV2.map((log) => Number(log.meta.node_id))
+    if (owners.some((id) => !Number.isInteger(id) || id < 0) || new Set(owners).size !== owners.length)
+      throw new Error('节点日志包含重复文件或无效的采集节点编号。')
+    const txKeys = new Set<string>()
+    for (const parsed of nodeLogsV2) {
+      const owner = Number(parsed.meta.node_id)
+      for (const event of parsed.nodeEvents) {
+        if (event.type === 'tx_start') {
+          const key = String(event.event_id || '')
+          if (Number(event.src) !== owner || !key || txKeys.has(key)) throw new Error('节点日志的 TX 所属节点或发送事件标识无效。')
+          txKeys.add(key)
+        } else if (event.type === 'rx_success' || event.type === 'rx_drop') {
+          if (Number(event.dst) !== owner || !event.event_id) throw new Error('节点日志的 RX 所属节点或发送事件标识无效。')
+        }
+      }
+    }
+  }
 
   parsedLogs.forEach((parsed, fileIndex) => {
     Object.assign(merged.meta, parsed.meta || {})
@@ -77,6 +101,20 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
       const candidatePackets = receiver.packet_id ? (packetsByPacketId.get(receiver.packet_id) || []) : []
       let matchedPacket = directPacket
       if (!matchedPacket) {
+        // Modern node logs carry measured transmitter context with each RX.
+        // A partial import can display that reception without inventing an origin
+        // time, duration, or a successful result at any other node.
+        if (nodeLogsV2.length && receiver.tx_key && Number.isFinite(receiver.src)
+          && Number.isFinite(receiver.tx_start_us) && Number.isFinite(receiver.tx_duration_us)
+          && Number(receiver.tx_start_us) >= 0 && Number(receiver.tx_duration_us) >= 0) {
+          matchedPacket = normalizeNodeTxEvent({ type: 'tx_start', event_id: receiver.tx_key,
+            packet_id: receiver.packet_id, src: receiver.src, tx_start_us: receiver.tx_start_us,
+            tx_duration_us: receiver.tx_duration_us, tx_observed_via_rx: true }, packets.length, usesFractionalTiming(merged.meta))
+          packets.push(matchedPacket)
+          packetsByTxKey.set(receiver.tx_key, matchedPacket)
+        }
+      }
+      if (!matchedPacket && !nodeLogsV2.length) {
         // Nearest preceding TX, preserving the first candidate when times tie.
         // A scan avoids allocating and sorting the same candidate list per RX.
         for (const packet of candidatePackets) {
@@ -87,6 +125,11 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
         matchedPacket ||= candidatePackets[0]
       }
 
+      if (matchedPacket && nodeLogsV2.length && (matchedPacket.src !== receiver.src
+        || matchedPacket.tx_start_us !== Number(receiver.tx_start_us)
+        || matchedPacket.tx_duration_us !== Number(receiver.tx_duration_us)))
+        throw new Error('节点日志中同一次发送的源节点或时间信息不一致。')
+
       if (!matchedPacket) {
         const sourceLabel = receiver.source_file ? String(receiver.source_file) : 'node-log'
         merged.parseErrors.push(`${sourceLabel}: 未找到 ${receiver.packet_id} 的 TX 事件`)
@@ -96,6 +139,7 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
       matchedPacket.receivers.push(receiver)
     })
 
+  if (nodeLogsV2.length) packets.sort((a, b) => a.tx_start_us - b.tx_start_us || a.event_id.localeCompare(b.event_id))
   for (const packet of packets) {
     merged.packets.push({
       ...packet,
@@ -106,14 +150,14 @@ export const mergeParsedNodeLogs = (parsedLogs: ParsedLog[], fileNames: string[]
   // Supported multi-file inputs can exceed JavaScript's function-argument limit
   // before the final record cap. Accumulate bounds without spreading arrays.
   let simEndUs = normalizeTime(merged.meta.sim_end_us)
-  for (const packet of merged.packets) {
+  for (const packet of nodeLogsV2.length ? [] : merged.packets) {
     simEndUs = Math.max(simEndUs, normalizeTime(packet.tx_end_us ?? packet.end_us))
     for (const receiver of (packet.receivers || []) as Array<Record<string, unknown>>) {
       simEndUs = Math.max(simEndUs,
         normalizeTime(receiver.rx_start_us ?? receiver.start_us) + normalizeTime(receiver.rx_duration_us ?? receiver.duration_us))
     }
   }
-  for (const movement of merged.movements) {
+  for (const movement of nodeLogsV2.length ? [] : merged.movements) {
     simEndUs = Math.max(simEndUs, normalizeTime(movement.end_us))
   }
 

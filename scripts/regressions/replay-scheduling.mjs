@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createRenderer, h, markRaw, nextTick, ref, ssrContextKey } from 'vue'
 
 export async function checkReplayScheduling(server) {
   const { usePlaybackEngine } = await server.ssrLoadModule('/src/features/replay/composables/usePlaybackEngine.ts')
   const { useReplayState } = await server.ssrLoadModule('/src/features/replay/composables/useReplayState.ts')
+  const { parseLog } = await server.ssrLoadModule('/src/features/replay/lib/logParser.ts')
   const { default: NodeCanvas } = await server.ssrLoadModule('/src/components/NodeCanvas.vue')
   const globalKeys = ['window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'ResizeObserver']
   const savedGlobals = new Map(globalKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
@@ -146,13 +148,14 @@ export async function checkReplayScheduling(server) {
     await advanceFrame()
     assert.equal(draws.length, endedDraws)
 
-    // Exercise the shipped default log, including the first successful RX's
+    // Exercise the preserved original example, including the first successful RX's
     // hold state just after 1.54 s. An empty one-second synthetic scene cannot
     // detect exceptions in those visual branches or moving-node updates.
     let state
     app = renderer.createApp({ setup() {
       playback = usePlaybackEngine({ getCycleEndUs: () => state.cycleEndUs.value })
       state = useReplayState({ playback })
+      state.applyParsedLog(parseLog(readFileSync(new URL('../../src/assets/net.json', import.meta.url), 'utf8')))
       return () => h(Canvas, {
         nodes: state.nodesState.value,
         nodeVisuals: state.nodeVisuals.value,
@@ -166,7 +169,6 @@ export async function checkReplayScheduling(server) {
     defaultCanvas.canvasEl = markRaw({ width: 0, height: 0, getContext: () => ctx })
     defaultCanvas.containerEl = markRaw({ getBoundingClientRect: () => ({ width: 800, height: 600 }) })
     defaultCanvas.loop.flushDraw()
-    assert.equal(state.activeLogName.value, 'net.json', 'this scenario uses the real default log')
     assert.equal(state.cycleEndUs.value, 12000000)
     assert.ok(state.nodeMovementRows.value.length > 0, 'the default fixture contains movement')
     const baseCoordinates = state.baseNodesState.value.map(({ node_id, x, y, z }) => ({ node_id, x, y, z }))

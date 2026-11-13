@@ -48,7 +48,7 @@ export default defineConfig({
   // Prebundle lazy 3D/worker dependencies at startup so their first import does not
   // trigger an optimizer update while an existing page uses the previous graph.
   cacheDir: 'node_modules/.vite/aquasim-web',
-  optimizeDeps: { include: ['@babylonjs/core', 'highlight.js/lib/core', 'highlight.js/lib/languages/cpp', 'highlight.js/lib/languages/json'] },
+  optimizeDeps: { include: ['wa-sqlite', '@babylonjs/core', 'highlight.js/lib/core', 'highlight.js/lib/languages/cpp', 'highlight.js/lib/languages/json'] },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

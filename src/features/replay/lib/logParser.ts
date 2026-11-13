@@ -40,7 +40,12 @@ const appendParsedObject = (raw: unknown, parsed: ParsedLog): void => {
       time_unit: sanitizeDisplayText(meta.time_unit || parsed.meta.time_unit, 16),
       distance_unit: sanitizeDisplayText(meta.distance_unit || parsed.meta.distance_unit, 16),
       sim_end_us: Number(meta.sim_end_us ?? parsed.meta.sim_end_us) || 0,
-      ...(meta.trace_scope === 'phy-success' ? { trace_scope: meta.trace_scope } : {}),
+      ...(meta.schema === 'uan-vis-node-log/v2' ? {
+        log_scope: 'node',
+        node_id: Number(meta.node_id),
+        run_id: sanitizeDisplayText(meta.run_id, 80),
+      } : {}),
+      ...(meta.trace_scope === 'phy-success' || meta.trace_scope === 'phy-events' ? { trace_scope: meta.trace_scope } : {}),
       ...(typeof meta.time_precision_us === 'number'
         && Number.isFinite(meta.time_precision_us) && meta.time_precision_us > 0
         ? { time_precision_us: meta.time_precision_us } : {}),

@@ -1,8 +1,10 @@
-import { onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, type Ref } from 'vue'
+import { createSceneNavigation, type SceneNavigation } from './sceneNavigation'
 import {
   ArcRotateCamera,
   Color3,
   Color4,
+  DirectionalLight,
   Engine,
   HemisphericLight,
   PointerEventTypes,
@@ -16,17 +18,16 @@ import {
 const CAMERA_ALPHA = -Math.PI / 3
 const CAMERA_BETA = Math.PI / 2.9
 const CAMERA_RADIUS = 9200
-const CAMERA_LOWER_RADIUS_LIMIT = 2200
-const CAMERA_UPPER_RADIUS_LIMIT = 45000
+const CAMERA_LOWER_RADIUS_LIMIT = 0.2
+const CAMERA_UPPER_RADIUS_LIMIT = 100000
 const CAMERA_WHEEL_DELTA_PERCENTAGE = 0.015
 const CAMERA_MIN_Z = 1
-const CAMERA_MAX_Z = 200000
-const LIGHT_INTENSITY = 1.1
+const CAMERA_MAX_Z = 400000
+const LIGHT_INTENSITY = 0.55
+const KEY_LIGHT_INTENSITY = 1.25
+const RIM_LIGHT_INTENSITY = 0.35
 const LIGHT_GROUND_COLOR = new Color3(0.1, 0.14, 0.2)
-const CAMERA_MOVE_SPEED_RATIO = 0.45
-const CAMERA_FAST_MULTIPLIER = 2.5
 const CAMERA_MAX_FRAME_SECONDS = 0.05
-const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'])
 
 interface CameraPose {
   alpha: number
@@ -40,8 +41,8 @@ interface BabylonSceneDeps {
   hostRef: Ref<HTMLElement | null>
   getClearColor: () => Color4
   getActive?: () => boolean
-  /** Called for POINTERPICK with the picked mesh's nodeId, or null on empty pick. */
-  onPick: (nodeId: number | null) => void
+  /** Called for POINTERTAP with the picked mesh's nodeId, or null on empty pick. */
+  onPick: (nodeId: number | null, sceneAssetId?: string) => void
   /** Called before scene.render() to flush pending mesh data and sync overlays. */
   onFrame: () => void
   /** Report initialization/render failures to the scene's loading boundary. */
@@ -71,7 +72,11 @@ export const useBabylonScene = ({
   let resizeObserver: ResizeObserver | null = null
   let pointerObserver: Observer<PointerInfo> | null = null
   let defaultCameraState: CameraPose | null = null
-  const pressedKeys = new Set<string>()
+  let navigation: SceneNavigation | null = null
+  const navigationMode = ref<'orbit' | 'roam'>('orbit')
+  const pointerLocked = ref(false)
+  const fullscreen = ref(false)
+  const navigationError = ref('')
   let lastFrameTime = 0
   let failed = false
 
@@ -86,29 +91,13 @@ export const useBabylonScene = ({
     camera.setTarget(camera.getTarget().add(delta), false, false, true)
   }
 
-  const moveFromKeyboard = (dt: number) => {
-    if (!camera || !pressedKeys.size || dt <= 0) return
-    const forward = camera.getTarget().subtract(camera.position)
-    forward.y = 0
-    if (forward.lengthSquared() < 1e-6) forward.set(-Math.cos(camera.alpha), 0, -Math.sin(camera.alpha))
-    forward.normalize()
-    const right = Vector3.Cross(Vector3.Up(), forward).normalize()
-    const direction = forward.scale(Number(pressedKeys.has('KeyW')) - Number(pressedKeys.has('KeyS')))
-      .add(right.scale(Number(pressedKeys.has('KeyD')) - Number(pressedKeys.has('KeyA'))))
-      .add(Vector3.Up().scale(Number(pressedKeys.has('KeyE')) - Number(pressedKeys.has('KeyQ'))))
-    if (direction.lengthSquared() === 0) return
-    const fast = pressedKeys.has('ShiftLeft') || pressedKeys.has('ShiftRight')
-    const distance = camera.radius * CAMERA_MOVE_SPEED_RATIO * (fast ? CAMERA_FAST_MULTIPLIER : 1) * dt
-    translateCamera(direction.normalize().scale(distance))
-  }
-
   const renderLoop = () => {
     if (!scene || !camera || getActive?.() === false) return
     try {
       const now = performance.now()
       const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, CAMERA_MAX_FRAME_SECONDS) : 0
       lastFrameTime = now
-      moveFromKeyboard(dt)
+      navigation?.moveFromKeyboard(dt)
       onFrame()
       scene.render()
     } catch (error) {
@@ -121,7 +110,7 @@ export const useBabylonScene = ({
   const setActive = (active: boolean) => {
     if (!engine) return
     engine.stopRenderLoop()
-    pressedKeys.clear()
+    navigation?.suspend()
     lastFrameTime = 0
     if (!active) return
     engine.runRenderLoop(renderLoop)
@@ -133,20 +122,26 @@ export const useBabylonScene = ({
   }
 
   /** Recenter the camera target and remember it as the default pose. */
-  const focusCamera = (target: Vector3) => {
+  const focusCamera = (target: Vector3, radius?: number) => {
     if (!camera) return
+    const alpha = camera.alpha, beta = camera.beta
     camera.setTarget(target)
+    camera.alpha = alpha; camera.beta = beta
+    if (radius !== undefined) camera.radius = Math.max(CAMERA_LOWER_RADIUS_LIMIT, Math.min(CAMERA_UPPER_RADIUS_LIMIT, radius))
     if (defaultCameraState) {
       defaultCameraState.target = target.clone()
+      defaultCameraState.radius = camera.radius
     }
   }
 
   const resetCameraView = () => {
     if (!camera || !defaultCameraState) return
+    camera.lowerRadiusLimit = CAMERA_LOWER_RADIUS_LIMIT
+    camera.minZ = CAMERA_MIN_Z
+    camera.setTarget(defaultCameraState.target.clone())
     camera.alpha = defaultCameraState.alpha
     camera.beta = defaultCameraState.beta
     camera.radius = defaultCameraState.radius
-    camera.setTarget(defaultCameraState.target.clone())
   }
 
   const resize = () => {
@@ -158,16 +153,6 @@ export const useBabylonScene = ({
       reportFailure(error)
     }
   }
-
-  const onCanvasPointerDown = () => canvasRef.value?.focus()
-  const onCanvasKeyDown = (event: KeyboardEvent) => {
-    if (event.ctrlKey || event.metaKey || event.altKey) return
-    if (!MOVE_KEYS.has(event.code) && event.code !== 'ShiftLeft' && event.code !== 'ShiftRight') return
-    if (MOVE_KEYS.has(event.code)) event.preventDefault()
-    pressedKeys.add(event.code)
-  }
-  const onWindowKeyUp = (event: KeyboardEvent) => pressedKeys.delete(event.code)
-  const clearKeys = () => pressedKeys.clear()
 
   const mount = () => {
     const canvas = canvasRef.value
@@ -183,6 +168,8 @@ export const useBabylonScene = ({
       stencil: true,
       antialias: true,
     })
+    // Retain metre-sized equipment and the 10 km seabed in the same view.
+    engine.useReverseDepthBuffer = true
     scene = new Scene(engine)
     scene.clearColor = getClearColor().clone()
 
@@ -193,12 +180,7 @@ export const useBabylonScene = ({
     camera.panningSensibility = 0
     camera.minZ = CAMERA_MIN_Z
     camera.maxZ = CAMERA_MAX_Z
-    camera.attachControl(canvas, true)
-    canvas.addEventListener('pointerdown', onCanvasPointerDown)
-    canvas.addEventListener('keydown', onCanvasKeyDown)
-    canvas.addEventListener('blur', clearKeys)
-    window.addEventListener('keyup', onWindowKeyUp)
-    window.addEventListener('blur', clearKeys)
+    camera.attachControl(canvas, false)
     const pointerInput = camera.inputs?.attached?.pointers as { buttons?: number[] } | undefined
     if (pointerInput) {
       pointerInput.buttons = [0]
@@ -214,11 +196,27 @@ export const useBabylonScene = ({
     light.intensity = LIGHT_INTENSITY
     light.groundColor = LIGHT_GROUND_COLOR.clone()
 
+    // Direct highlights reveal the PBR hull curvature and material roughness.
+    // Keep ambient fill for dark faces; these three lights need no shadow maps,
+    // environment downloads or post-processing and are owned by the scene.
+    const keyLight = new DirectionalLight('model-key-light', new Vector3(-0.45, -1, 0.35).normalize(), scene)
+    keyLight.intensity = KEY_LIGHT_INTENSITY
+    const rimLight = new DirectionalLight('model-rim-light', new Vector3(0.7, -0.35, -0.6).normalize(), scene)
+    rimLight.intensity = RIM_LIGHT_INTENSITY
+
+    navigation = createSceneNavigation({
+      canvas, host: hostRef.value, getCamera, getActive, onResize: resize,
+      onStateChange: (state) => {
+        navigationMode.value = state.mode; pointerLocked.value = state.pointerLocked
+        fullscreen.value = state.fullscreen; navigationError.value = state.error
+      },
+    })
+
     pointerObserver = scene.onPointerObservable.add((pointerInfo) => {
-      if (pointerInfo.type !== PointerEventTypes.POINTERPICK) return
+      if (getActive?.() === false || pointerInfo.type !== PointerEventTypes.POINTERTAP || pointerInfo.event.button !== 0) return
       const picked = pointerInfo.pickInfo?.pickedMesh
       const nodeId = picked?.metadata?.nodeId
-      onPick(nodeId ?? null)
+      onPick(nodeId ?? null, picked?.metadata?.sceneAssetId)
     })
 
     if (getActive?.() !== false) engine.runRenderLoop(renderLoop)
@@ -235,12 +233,8 @@ export const useBabylonScene = ({
 
   const dispose = () => {
     engine?.stopRenderLoop()
-    canvasRef.value?.removeEventListener('pointerdown', onCanvasPointerDown)
-    canvasRef.value?.removeEventListener('keydown', onCanvasKeyDown)
-    canvasRef.value?.removeEventListener('blur', clearKeys)
-    window.removeEventListener('keyup', onWindowKeyUp)
-    window.removeEventListener('blur', clearKeys)
-    pressedKeys.clear()
+    navigation?.dispose()
+    navigation = null
     if (scene && pointerObserver) scene.onPointerObservable.remove(pointerObserver)
     pointerObserver = null
     if (resizeObserver) resizeObserver.disconnect()
@@ -287,6 +281,10 @@ export const useBabylonScene = ({
   onBeforeUnmount(dispose)
 
   return {
+    navigationMode, pointerLocked, fullscreen, navigationError,
+    requestRoaming: () => navigation?.requestRoaming(),
+    exitRoaming: () => navigation?.exitRoaming(),
+    toggleFullscreen: () => navigation?.toggleFullscreen(),
     getEngine,
     getScene,
     getCamera,

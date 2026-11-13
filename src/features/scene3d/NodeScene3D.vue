@@ -1,6 +1,6 @@
 <template>
   <div ref="hostEl" class="scene-host" :style="{ background: hostBackground }">
-    <canvas ref="canvasEl" class="scene-canvas" tabindex="0" aria-label="3D 场景，点击后可使用 WASD 移动、Q E 升降、Shift 加速" />
+    <canvas ref="canvasEl" class="scene-canvas" tabindex="0" aria-label="3D 场景，点击后可使用 WASD 移动、空格上升、Shift 下沉" />
     <canvas
       ref="axesEl"
       class="scene-axes"
@@ -9,19 +9,40 @@
       @click="resetCameraView"
       title="重置 3D 视角"
     />
-    <div class="scene-help" @pointerdown.stop>
+    <div class="scene-help" @pointerdown.stop @click.stop>
       <span>3D 视图</span>
-      <span>拖动旋转</span>
-      <span>滚轮缩放</span>
-      <span>点击画布后 WASD 移动 · Q/E 升降 · Shift 加速</span>
-      <span>点击节点查看</span>
+      <select aria-label="查看节点模型" :value="viewedNodeId ?? ''" @change="selectNodeView">
+        <option value="" disabled>查看节点</option>
+        <option v-for="node in nodes" :key="node.node_id" :value="node.node_id">{{node.name || '节点'}} ({{node.node_id}})</option>
+      </select>
+      <button type="button" @click="resetCameraView">全局拓扑</button>
+      <button type="button" :class="{ active: oceanEnabled }" :aria-pressed="oceanEnabled" @click="oceanEnabled = !oceanEnabled">海洋环境</button>
+      <button type="button" :class="{ active: worldAxesVisible }" :aria-pressed="worldAxesVisible" @click="worldAxesVisible = !worldAxesVisible">坐标轴</button>
+      <button type="button" :class="{ active: isRoaming }" :aria-pressed="isRoaming" @click="toggleRoaming">{{ isRoaming ? '退出漫游' : '漫游' }}</button>
+      <button type="button" :aria-pressed="isFullscreen" @click="babylon.toggleFullscreen()">{{ isFullscreen ? '退出全屏' : '全屏' }}</button>
+      <span class="scene-key-help">{{ isRoaming ? '鼠标转向 · WASD · 空格上升 · Shift 下沉 · Esc' : '拖动环绕 · 滚轮缩放 · WASD · 空格上升 · Shift 下沉' }}</span>
+    </div>
+    <div v-if="isPointerLocked" class="scene-reticle" aria-hidden="true" />
+    <p v-if="navigationError" class="scene-navigation-error" role="status">{{ navigationError }}</p>
+    <SceneOverview v-if="active" :nodes="nodes" :bounds="baseViewNodes" :visuals="nodeVisuals"
+      :packets="visiblePackets" :current-time="currentTime" :viewed-node-id="viewedNodeId" @inspect="inspectOverviewNode" />
+    <div v-if="viewedNode && viewedNodeVisual" class="scene-live-status" :class="[viewedNodeVisual.mode, { 'has-conflict': viewedNodeVisual.overlay }]" aria-label="聚焦节点通信状态">
+      <span>{{ viewedNode.name }} · {{ viewedNode.node_id }}</span><strong>{{ viewedNodeVisual.statusText }}</strong>
+      <span v-if="['tx','rx'].includes(viewedNodeVisual.mode)" class="scene-live-progress"><i :style="{ transform: `scaleX(${viewedNodeVisual.fillProgress})` }" /></span>
     </div>
 
     <div
       v-if="selectedNodePos && selectedNode"
+      ref="nodeCardEl"
       class="scene-tooltip"
+      role="group"
+      :aria-label="`节点 ${selectedNode.node_id} 详情`"
+      @pointerdown.stop
+      @click.stop
+      @wheel.stop
       :style="{ left: `${selectedNodePos.x}px`, top: `${selectedNodePos.y}px` }"
     >
+      <button type="button" class="scene-card-close" aria-label="关闭节点详情" @click="closeNodeCard">×</button>
       <p class="scene-tooltip-title">
         {{ selectedNode.name }}（{{ selectedNode.node_id }}）
         <span class="scene-tooltip-role">{{ selectedNode.role }}</span>
@@ -29,6 +50,8 @@
       <p class="scene-tooltip-row">x: {{ selectedNode.x.toFixed(2) }}m, y: {{ selectedNode.y.toFixed(2) }}m, z: {{ Number(selectedNode.z ?? 0).toFixed(2) }}m</p>
       <p v-if="selectedNodeVisual" class="scene-tooltip-row">状态：{{ selectedNodeVisual.statusText }}</p>
       <p v-if="selectedNodeVisual?.packetId" class="scene-tooltip-row">关联包：{{ selectedNodeVisual.packetId }}</p>
+      <div class="scene-model-size"><span>{{ nodeModelSizeLabel(resolveNodeModel(selectedNode)) }}</span><button type="button" @click="inspectSelectedNode">近看模型</button></div>
+      <slot name="node-actions" :node="selectedNode" />
     </div>
   </div>
 </template>
@@ -38,7 +61,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Matrix, Vector3, Viewport } from '@babylonjs/core'
 import {
   DEPTH_SCALE,
-  PROGRESS_CORE_SCALE,
   clamp,
   packetColor,
   theme3DFor,
@@ -46,22 +68,32 @@ import {
 } from '@/features/scene3d/lib/themes3d'
 import {
   createNodeEntry,
+  syncNodeAnnotation,
   createPacketEntry,
   disposeNodeEntry,
   disposePacketEntry,
-  setMaterialColor,
   syncMaterialColor,
   syncPacketGeometry,
   visualProgressStyle,
-  visualStateColor,
 } from '@/features/scene3d/lib/factories'
 import {
   disposeWorldAxisEntry,
   drawAxesWidget,
   syncWorldAxes,
+  setWorldAxesVisible,
 } from '@/features/scene3d/lib/worldAxes'
+import { nodeCardPosition } from '@/features/scene3d/lib/nodeCardPosition'
+import { NODE_MODEL_DIMENSIONS, nodeModelSizeLabel, resolveNodeModel } from '@/shared/nodeModel'
+import { motionAngles } from '@/shared/nodeMotion'
 import { useBabylonScene } from '@/features/scene3d/lib/useBabylonScene'
+import { createOceanEnvironment } from '@/features/scene3d/lib/oceanEnvironment'
 import { packetPathKey, worldAxisBounds, worldAxesNeedRefresh } from '@/features/scene3d/lib/sceneState'
+import { syncSceneAssets, disposeSceneAssetEntry } from '@/features/scene3d/lib/sceneAssets'
+import { followModelMovement, inspectModel, syncInspectionDepth } from '@/features/scene3d/lib/modelInspection'
+import { sceneAssetBounds } from '@/shared/sceneAssetGeometry'
+import { signalWindow } from './lib/signalTimeline'
+import { syncPacketAnnotationSize, syncPacketPresentation } from './lib/packetEffects'
+import SceneOverview from './SceneOverview.vue'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -69,18 +101,33 @@ const props = defineProps({
   visiblePackets: { type: Array, default: () => [] },
   currentTime: { type: Number, required: true },
   topologyNodes: { type: Array, default: null },
+  viewNodes: { type: Array, default: null },
   themeKey: { type: String, default: 'industrial-scada' },
   fxLevel: { type: String, default: 'standard' },
   /* 视图常驻（v-show）时的可见性：false 停 renderLoop，true 恢复并补刷新 */
   active: { type: Boolean, default: true },
+  sceneAssets: { type: Array, default: () => [] },
+  sceneAssetsVisible: { type: Boolean, default: true },
+  sceneFocusRequest: { type: Object, default: null },
 })
-const emit = defineEmits(['scene-error'])
+const emit = defineEmits(['scene-error', 'scene-asset-select'])
+const sceneAssetEntries = new Map()
+let consumedAssetFocus = null
+let appliedSceneAssets = null
+let appliedSceneVisibility = null
 
 const hostEl = ref(null)
 const canvasEl = ref(null)
 const axesEl = ref(null)
+const nodeCardEl = ref(null)
+let cardObserver = null
+let cardSize = { width: 260, height: 150 }
 const selectedNodeId = ref(null)
 const selectedNodePos = ref(null)
+const oceanEnabled = ref(true)
+const worldAxesVisible = ref(true)
+let oceanEnvironment = null
+const baseViewNodes = computed(() => props.viewNodes || props.topologyNodes || props.nodes)
 
 const nodeById = computed(() => new Map(props.nodes.map((node) => [node.node_id, node])))
 const nodeVisualById = computed(() => new Map(props.nodeVisuals.map((visual) => [visual.node_id, visual])))
@@ -93,6 +140,16 @@ const selectedNodeVisual = computed(() => {
 const clearSelection = () => {
   selectedNodeId.value = null
   selectedNodePos.value = null
+}
+
+const closeNodeCard = () => {
+  clearSelection()
+  canvasEl.value?.focus({ preventScroll: true })
+}
+const onOutsidePointerDown = (event) => {
+  if (!props.active || selectedNodeId.value == null || event.target === canvasEl.value
+    || nodeCardEl.value?.contains(event.target)) return
+  clearSelection()
 }
 
 // A replacement topology is a different replay, even if it reuses node IDs.
@@ -130,13 +187,25 @@ const syncSelectedNodePos = () => {
     pos,
     Matrix.IdentityReadOnly,
     scene.getTransformMatrix(),
-    new Viewport(0, 0, engine.getRenderWidth(), engine.getRenderHeight()),
+    new Viewport(0, 0, hostEl.value.clientWidth, hostEl.value.clientHeight),
   )
-  selectedNodePos.value = {
-    x: projected.x,
-    y: projected.y,
+  const position = nodeCardPosition(projected,
+    { width: hostEl.value.clientWidth, height: hostEl.value.clientHeight }, cardSize)
+  if (position?.x !== selectedNodePos.value?.x || position?.y !== selectedNodePos.value?.y) {
+    selectedNodePos.value = position
   }
 }
+
+watch(nodeCardEl, (element) => {
+  cardObserver?.disconnect()
+  cardObserver = null
+  if (!element) return
+  cardObserver = new ResizeObserver(() => {
+    cardSize = { width: element.offsetWidth, height: element.offsetHeight }
+    if (props.active) syncSelectedNodePos()
+  })
+  cardObserver.observe(element)
+})
 
 const drawAxesOverlay = () => {
   const camera = babylon.getCamera()
@@ -146,6 +215,14 @@ const drawAxesOverlay = () => {
 
 const onSceneFrame = () => {
   flushRefresh()
+  const camera = babylon.getCamera()
+  if (props.active && camera) {
+    syncInspectionDepth(camera)
+    oceanEnvironment?.frame(camera, props.currentTime / 1e6)
+    const height = hostEl.value?.clientHeight || 800
+    for (const entry of nodeMeshMap.values()) syncNodeAnnotation(entry, camera, height)
+    for (const entry of packetMeshMap.values()) syncPacketAnnotationSize(entry, camera, height)
+  }
   syncSelectedNodePos()
   drawAxesOverlay()
 }
@@ -155,7 +232,9 @@ const babylon = useBabylonScene({
   hostRef: hostEl,
   getClearColor: () => theme3D.value.clear,
   getActive: () => props.active,
-  onPick: (nodeId) => {
+  onPick: (nodeId, assetId) => {
+    if (babylon.pointerLocked.value) return
+    if (assetId) { clearSelection(); emit('scene-asset-select', assetId); return }
     if (nodeId == null || !nodeById.value.has(nodeId)) {
       clearSelection()
       return
@@ -166,6 +245,10 @@ const babylon = useBabylonScene({
   onFrame: onSceneFrame,
   onError: (error) => emit('scene-error', error),
   cleanup: () => {
+    for (const entry of sceneAssetEntries.values()) disposeSceneAssetEntry(entry)
+    sceneAssetEntries.clear()
+    oceanEnvironment?.dispose()
+    oceanEnvironment = null
     for (const entry of nodeMeshMap.values()) disposeNodeEntry(entry)
     nodeMeshMap.clear()
     for (const entry of packetMeshMap.values()) disposePacketEntry(entry)
@@ -175,20 +258,59 @@ const babylon = useBabylonScene({
     worldAxesMap.clear()
   },
 })
+const isRoaming = computed(() => babylon.navigationMode.value === 'roam')
+const isPointerLocked = computed(() => babylon.pointerLocked.value)
+const isFullscreen = computed(() => babylon.fullscreen.value)
+const navigationError = computed(() => babylon.navigationError.value)
+const toggleRoaming = () => {
+  endMiddlePan()
+  clearSelection()
+  viewedNodeId.value = null
+  inspectedPosition = null
+  if (isRoaming.value) babylon.exitRoaming()
+  else void babylon.requestRoaming()
+}
+
+const viewedNodeId = ref(null)
+const viewedNode = computed(() => nodeById.value.get(viewedNodeId.value) || null)
+const viewedNodeVisual = computed(() => nodeVisualById.value.get(viewedNodeId.value) || null)
+let inspectedPosition = null
+const inspectNode = (node) => {
+  const camera = babylon.getCamera()
+  if (!camera || !node) return
+  const size = NODE_MODEL_DIMENSIONS[resolveNodeModel(node)]
+  const entry = nodeMeshMap.get(node.node_id)
+  const center = new Vector3(0, size.height / 2, 0)
+  const target = entry ? Vector3.TransformCoordinates(center, entry.root.computeWorldMatrix(true)) : worldPos(node).add(center)
+  inspectModel(camera, target, Math.max(size.length, size.width, size.height))
+  viewedNodeId.value = node.node_id
+  inspectedPosition = entry ? entry.root.position.clone() : worldPos(node)
+}
+const inspectSelectedNode = () => inspectNode(selectedNode.value)
+const inspectOverviewNode = (node) => {
+  clearSelection()
+  inspectNode(node)
+  canvasEl.value?.focus({ preventScroll: true })
+}
+const selectNodeView = (event) => {
+  const node = nodeById.value.get(Number(event.target.value))
+  if (!node) return
+  clearSelection()
+  inspectNode(node)
+  syncSelectedNodePos()
+}
 
 const buildNodes = () => {
   const scene = babylon.getScene()
   if (!scene) return
   const palette = theme3D.value
-  const fx = fx3D.value
   const inactiveProgressStyle = { diffuse: palette.rx, emissive: palette.rx.scale(0.28), alpha: 0 }
   for (const node of props.nodes) {
     const visual = nodeVisualById.value.get(node.node_id)
     const pos = worldPos(node)
-    const isSink = node.role === 'sink' || /sink/i.test(String(node.name || ''))
-    const kind = isSink ? 'vessel' : 'auv'
+    const kind = resolveNodeModel(node)
     let entry = nodeMeshMap.get(node.node_id)
-    // 节点角色变化（sink ↔ 普通）时模型种类不同，整体重建
+    // Replace only the changed node's geometry; preserve camera and replay state.
     if (entry && entry.kind !== kind) {
       disposeNodeEntry(entry)
       nodeMeshMap.delete(node.node_id)
@@ -200,25 +322,21 @@ const buildNodes = () => {
     }
 
     entry.root.position.copyFrom(pos)
-    const pulse = fx > 1
-      ? 1 + (Math.sin((props.currentTime * 0.000004) + (node.node_id * 0.35)) * 0.02)
-      : 1
-    entry.root.scaling.setAll(pulse)
+    entry.root.scaling.setAll(1)
+    const direction = motionAngles(node.motionDirection)
+    if (direction && ['auv', 'rov', 'vessel'].includes(kind)) {
+      entry.root.rotation.set(0, -direction.heading, kind === 'vessel' ? 0 : clamp(direction.pitch, -Math.PI / 6, Math.PI / 6))
+    } else entry.root.rotation.set(0, 0, 0)
 
     entry.progress.setEnabled(true)
-    const state = visualStateColor(visual, palette)
-    syncMaterialColor(entry.base.material, state)
+    // Equipment keeps its own material; traffic state is a separate overlay.
 
     const progressStyle = visualProgressStyle(visual, palette)
     if (progressStyle && progressStyle.alpha > 0.001) {
-      entry.progress.scaling.set(
-        progressStyle.scaleX ?? PROGRESS_CORE_SCALE,
-        progressStyle.scaleY ?? PROGRESS_CORE_SCALE,
-        progressStyle.scaleZ ?? PROGRESS_CORE_SCALE,
-      )
+      entry.progressScale = 1
       syncMaterialColor(entry.progress.material, progressStyle)
     } else {
-      entry.progress.scaling.setAll(0.01)
+      entry.progressScale = 0.01
       syncMaterialColor(entry.progress.material, inactiveProgressStyle)
     }
   }
@@ -245,21 +363,13 @@ const buildPackets = () => {
     const srcPos = worldPos(srcNode)
 
     for (const receiver of packet.receivers) {
-      if (now < packet.tx_start_us || now > receiver.rx_end_us) continue
+      if (!signalWindow(packet, receiver, now).active) continue
       const dstNode = nodeById.value.get(receiver.dst)
       if (!dstNode) continue
       const key = packetPathKey(packet, receiver.dst)
 
       const dstPos = worldPos(dstNode)
-      const propagationDelay = receiver.rx_start_us - packet.tx_start_us
-      const pathDuration = propagationDelay > 0 ? propagationDelay : 1
-      const frontRatio = clamp((now - packet.tx_start_us) / pathDuration, 0, 1)
-      const tailRatio = clamp((now - (packet.tx_start_us + packet.tx_duration_us)) / pathDuration, 0, 1)
-      const startRatio = Math.min(frontRatio, tailRatio)
-      const endRatio = Math.max(frontRatio, tailRatio)
-      if (endRatio <= 0) continue
-
-      if (Vector3.DistanceSquared(srcPos, dstPos) < 1) continue
+      if (Vector3.DistanceSquared(srcPos, dstPos) < 1e-8) continue
       activeKeys.add(key)
       const color = packetColor(receiver, now, palette)
 
@@ -272,33 +382,7 @@ const buildPackets = () => {
       }
       packetStaleCounts.delete(key)
 
-      const segLength = Math.max(80, entry.pathLength * Math.max(0.001, endRatio - startRatio))
-      const midRatio = (startRatio + endRatio) / 2
-      entry.line.setEnabled(true)
-      entry.line.alpha = fx > 1 ? 0.62 : 0.52
-      entry.line.color = palette.line
-      entry.block.setEnabled(true)
-      entry.marker.setEnabled(now >= receiver.rx_start_us)
-
-      entry.block.position.set(
-        srcPos.x + entry.direction.x * midRatio,
-        srcPos.y + entry.direction.y * midRatio,
-        srcPos.z + entry.direction.z * midRatio,
-      )
-      entry.block.scaling.x = fx > 1 ? 1.15 : 1
-      entry.block.scaling.y = segLength / 100
-      entry.block.scaling.z = fx > 1 ? 1.15 : 1
-      const pulseAlpha = fx > 1
-        ? (0.78 + ((Math.sin((now * 0.000009) + segLength) + 1) * 0.08))
-        : 0.96
-      setMaterialColor(entry.block.material, color, color.scale(0.12 * fx), pulseAlpha)
-
-      setMaterialColor(
-        entry.marker.material,
-        color,
-        color.scale(0.12 * fx),
-        Math.min(0.82, palette.markerAlpha * fx),
-      )
+      syncPacketPresentation(entry, packet, receiver, now, palette, fx)
     }
   }
 
@@ -306,6 +390,8 @@ const buildPackets = () => {
     if (activeKeys.has(key)) continue
     entry.line.setEnabled(false)
     entry.block.setEnabled(false)
+    entry.head.setEnabled(false)
+    entry.result.setEnabled(false)
     entry.marker.setEnabled(false)
     // Bound the cache: dispose entries that stay inactive for a few refreshes
     // (previously they were only disabled and leaked without limit).
@@ -322,9 +408,10 @@ const buildPackets = () => {
 /* Use the base topology rather than moving playback positions so orbit/pan
    stays stable. Refocus only when the base topology coordinates change. */
 let cameraFocusSignature = ''
+let needsInitialNodeView = false
 
 const updateCameraTargetIfNeeded = () => {
-  const topology = props.topologyNodes || props.nodes
+  const topology = baseViewNodes.value
   if (!babylon.getCamera() || !topology.length) return
   // Base topology is stable during movement playback and changes on log import.
   const signature = topology.map((node) => `${node.node_id}:${node.x}:${node.y}:${node.z ?? 0}`).join('|')
@@ -332,13 +419,20 @@ const updateCameraTargetIfNeeded = () => {
   cameraFocusSignature = signature
   const xs = topology.map((node) => node.x)
   const ys = topology.map((node) => node.y)
-  const zs = topology.map((node) => -(node.z ?? 0) * DEPTH_SCALE)
+  const zs = topology.map((node) => (node.z ?? 0) * DEPTH_SCALE)
   const center = new Vector3(
     (Math.min(...xs) + Math.max(...xs)) / 2,
     (Math.min(...zs) + Math.max(...zs)) / 2,
     (Math.min(...ys) + Math.max(...ys)) / 2,
   )
-  babylon.focusCamera(center)
+  const modelSpan = Math.max(4, ...props.nodes.map(node => {
+    const size = NODE_MODEL_DIMENSIONS[resolveNodeModel(node)]
+    return Math.max(size.length, size.width, size.height)
+  }))
+  const span = Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys), Math.max(...zs)-Math.min(...zs))
+  const radius = Math.max(modelSpan * 1.8, span * .65 / Math.tan(babylon.getCamera().fov / 2))
+  babylon.focusCamera(center, radius)
+  needsInitialNodeView = true
 }
 
 // World axes only depend on node bounds; skip the rebuild (which redraws a
@@ -348,9 +442,11 @@ const updateCameraTargetIfNeeded = () => {
 let drawnWorldAxisBounds = null
 
 const syncWorldAxesIfNeeded = () => {
+  setWorldAxesVisible(worldAxesMap, worldAxesVisible.value)
+  if (!worldAxesVisible.value) return
   const scene = babylon.getScene()
   if (!scene) return
-  const nextBounds = worldAxisBounds(props.nodes, DEPTH_SCALE)
+  const nextBounds = worldAxisBounds(baseViewNodes.value, DEPTH_SCALE)
   if (!worldAxesNeedRefresh(drawnWorldAxisBounds, nextBounds)) return
   drawnWorldAxisBounds = nextBounds
   if (!nextBounds) {
@@ -358,7 +454,7 @@ const syncWorldAxesIfNeeded = () => {
     worldAxesMap.clear()
     return
   }
-  syncWorldAxes(scene, props.nodes, worldAxesMap)
+  syncWorldAxes(scene, baseViewNodes.value, worldAxesMap)
 }
 
 const refreshScene = () => {
@@ -366,8 +462,36 @@ const refreshScene = () => {
   babylon.setClearColor(theme3D.value.clear)
   updateCameraTargetIfNeeded()
   syncWorldAxesIfNeeded()
+  if (!oceanEnvironment) oceanEnvironment = createOceanEnvironment(babylon.getScene(), theme3D.value.ocean)
+  oceanEnvironment.sync(baseViewNodes.value)
+  oceanEnvironment.setEnabled(oceanEnabled.value)
   buildNodes()
+  if (needsInitialNodeView) {
+    // Inspect a real-size model on entry, instead of enlarging every device to fill the map.
+    inspectNode(nodeById.value.get(viewedNodeId.value) || props.nodes[0])
+    needsInitialNodeView = false
+  } else if (viewedNodeId.value != null) {
+    const position = nodeMeshMap.get(viewedNodeId.value)?.root.position
+    if (position && inspectedPosition) followModelMovement(babylon.getCamera(), inspectedPosition, position)
+    inspectedPosition = position?.clone() || null
+  }
   buildPackets()
+  if (appliedSceneAssets !== props.sceneAssets || appliedSceneVisibility !== props.sceneAssetsVisible) {
+    syncSceneAssets(babylon.getScene(), props.sceneAssets, props.sceneAssetsVisible, sceneAssetEntries)
+    appliedSceneAssets = props.sceneAssets; appliedSceneVisibility = props.sceneAssetsVisible
+  }
+  const focus = props.sceneFocusRequest
+  if (focus && focus !== consumedAssetFocus) {
+    const asset = props.sceneAssets.find(item => item.id === focus.id)
+    const camera = babylon.getCamera()
+    if (asset && camera) {
+      viewedNodeId.value = null
+      inspectedPosition = null
+      const size = sceneAssetBounds(asset.type).size
+      inspectModel(camera, worldPos(asset).add(new Vector3(0, size[2] * asset.scale / 2, 0)), Math.max(...size) * asset.scale)
+      consumedAssetFocus = focus
+    }
+  }
   syncSelectedNodePos()
 }
 
@@ -376,6 +500,9 @@ const resize = () => {
 }
 
 const resetCameraView = () => {
+  viewedNodeId.value = null
+  inspectedPosition = null
+  clearSelection()
   babylon.resetCameraView()
   drawAxesOverlay()
 }
@@ -391,7 +518,7 @@ const onSceneKeyDown = (event) => {
 }
 
 const onCanvasPointerDown = (event) => {
-  if (!babylon.getCamera() || !canvasEl.value || event.button !== 1) return
+  if (isRoaming.value || !babylon.getCamera() || !canvasEl.value || event.button !== 1) return
   event.preventDefault()
   middlePanPointerId = event.pointerId
   middlePanLast = { x: event.clientX, y: event.clientY }
@@ -457,6 +584,7 @@ onMounted(() => {
   window.addEventListener('pointercancel', endMiddlePan)
   window.addEventListener('resize', resize)
   window.addEventListener('keydown', onSceneKeyDown)
+  document.addEventListener('pointerdown', onOutsidePointerDown, { capture: true })
   queueRefresh()
 })
 
@@ -464,12 +592,16 @@ watch(
   () => props.active ? [props.nodeVisuals, props.visiblePackets, props.currentTime, props.themeKey, props.fxLevel] : null,
   queueRefresh,
 )
+watch(oceanEnabled, queueRefresh)
+watch(worldAxesVisible, queueRefresh)
+watch(() => props.active ? [props.sceneAssets, props.sceneAssetsVisible, props.sceneFocusRequest] : null, queueRefresh)
 
 // Geometry may also be edited in place; only read mesh/camera input fields.
 watch(
   () => props.active ? [
-    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role]),
+    props.nodes.map((node) => [node.node_id, node.x, node.y, node.z, node.name, node.role, node.modelType, node.motionDirection]),
     props.topologyNodes?.map((node) => [node.node_id, node.x, node.y, node.z]),
+    props.viewNodes?.map((node) => [node.x, node.y, node.z]),
   ] : null,
   queueRefresh,
 )
@@ -505,6 +637,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', endMiddlePan)
   window.removeEventListener('pointercancel', endMiddlePan)
   window.removeEventListener('keydown', onSceneKeyDown)
+  document.removeEventListener('pointerdown', onOutsidePointerDown, { capture: true })
+  cardObserver?.disconnect()
   if (canvasEl.value) {
     canvasEl.value.removeEventListener('pointerdown', onCanvasPointerDown)
     canvasEl.value.removeEventListener('pointermove', onCanvasPointerMove)
@@ -520,6 +654,19 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
 }
+
+.scene-host:fullscreen {
+  width: 100vw;
+  height: 100vh;
+}
+
+.scene-live-status { position:absolute; left:14px; bottom:92px; z-index:2; display:flex; align-items:center; gap:12px; padding:9px 13px; border:1px solid var(--line); border-radius:var(--r-md); background:var(--panel); color:var(--text); backdrop-filter:blur(10px); font-size:12px; }
+.scene-live-status strong { font-weight:500; color:var(--muted); }
+.scene-live-status.tx strong { color:var(--tx); }.scene-live-status.rx strong,.scene-live-status.rx-done strong { color:var(--rx); }
+.scene-live-status.collision strong,.scene-live-status.collision-linger strong,.scene-live-status.has-conflict strong { color:var(--bad); }
+.scene-live-progress { width:70px; height:3px; background:var(--line-strong); overflow:hidden; border-radius:3px; }
+.scene-live-progress i { display:block; width:100%; height:100%; transform-origin:left; background:var(--rx); }
+.tx .scene-live-progress i { background:var(--tx); }
 
 .scene-canvas {
   width: 100%;
@@ -559,6 +706,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   gap: 0.55rem;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: min(540px, max(220px, calc(50% - 200px)));
   padding: 0.4rem 0.65rem;
   border-radius: var(--r-md, 10px);
   border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
@@ -569,6 +718,60 @@ onBeforeUnmount(() => {
   font-size: 0.74rem;
 }
 
+.scene-help select { max-width: 180px; min-width: 80px; padding: .24rem .4rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel); color: var(--text); font: inherit; cursor: pointer; }
+.scene-help select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scene-help button {
+  padding: 0.24rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.scene-help button:hover,
+.scene-help button.active {
+  color: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.scene-help button:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.scene-key-help {
+  font-size: 0.68rem;
+}
+
+.scene-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--text);
+  border-radius: 50%;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.scene-navigation-error {
+  position: absolute;
+  left: 12px;
+  top: 64px;
+  z-index: 2;
+  max-width: calc(100% - 24px);
+  padding: 0.4rem 0.65rem;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
 .scene-help span:first-child {
   color: var(--accent-soft, #8fd9ff);
   font-weight: 600;
@@ -576,20 +779,31 @@ onBeforeUnmount(() => {
 
 .scene-tooltip {
   position: absolute;
-  transform: translate(14px, -50%);
   z-index: 2;
   background: var(--panel, rgba(17, 23, 34, 0.88));
   backdrop-filter: blur(10px);
   border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
   border-radius: var(--r-md, 10px);
   padding: 0.5rem 0.65rem;
-  min-width: 200px;
+  width: 260px;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  box-sizing: border-box;
   box-shadow: var(--shadow-pop, 0 18px 48px rgba(0, 0, 0, 0.55));
-  pointer-events: none;
+  pointer-events: auto;
 }
+
+.scene-model-size { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 9px; color: var(--muted); font: 10px var(--font-mono); }
+.scene-model-size button { background: var(--sunken); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--text); cursor: pointer; padding: 5px 8px; font: 11px var(--font-ui); }
+.scene-card-close { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; font-size: 18px; }
+.scene-card-close:hover { background: var(--raised); color: var(--text); }
+.scene-card-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .scene-tooltip-title {
   margin: 0;
+  padding-right: 24px;
+  overflow-wrap: anywhere;
   font-size: 0.88rem;
   color: var(--text, #e8ecf3);
   font-weight: 700;
@@ -627,7 +841,7 @@ onBeforeUnmount(() => {
   }
 
   .scene-tooltip {
-    min-width: 160px;
+    width: 240px;
     padding: 0.35rem 0.5rem;
   }
 }

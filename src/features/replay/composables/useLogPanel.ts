@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import type { LifecycleStage, PacketEntry } from '@/shared/types/replay'
 import { clampRatio } from '../lib/format'
 import type { ReplayStateApi } from './useReplayState'
@@ -55,7 +55,13 @@ export const useLogPanel = ({
   }
 
   const onKeydown = (event: KeyboardEvent) => {
-    if (event.code !== 'Space' || (event.target && /^(INPUT|TEXTAREA|SELECT|BUTTON|OPTION)$/i.test((event.target as HTMLElement).tagName))) {
+    const target = event.target as HTMLElement | null
+    if (event.defaultPrevented || event.isComposing || event.repeat
+      || event.ctrlKey || event.metaKey || event.altKey || event.code !== 'KeyP'
+      || (target && /^(INPUT|TEXTAREA|SELECT|BUTTON|OPTION)$/i.test(target.tagName))
+      || target?.isContentEditable
+      || target?.closest?.('[contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"], [role="alertdialog"], [role="textbox"]')
+      || (typeof document !== 'undefined' && document.querySelector?.('dialog[open], [aria-modal="true"]'))) {
       return
     }
     event.preventDefault()
@@ -130,6 +136,11 @@ export const useLogPanel = ({
     activeDragEvent.value = null
     playback.scrubEnd()
   }
+
+  watch(state.focusedNodeId, () => {
+    if (activeDragEvent.value) onGlobalPointerUp()
+    suppressLogClick.value = null
+  }, { flush: 'sync' })
 
   return {
     logPanelOpen,

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NodeCanvas from '../components/NodeCanvas.vue'
+import NodeModelSelect from '../components/NodeModelSelect.vue'
 import ExperimentPanel from '../components/ExperimentPanel.vue'
 import ProtocolDrawer from '../components/ProtocolDrawer.vue'
 import SplitPane from '../components/SplitPane.vue'
@@ -9,7 +10,8 @@ import { CANVAS_THEME_KEY, LOCAL_STORAGE_KEYS } from '../shared/constants'
 import { session } from '../state/replaySession'
 import { buildExperimentSpec, validateExperiment } from '@/features/experiment/lib/experimentSpec'
 import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
-import { cloneNode, useTopologyEditor } from '@/features/experiment/composables/useTopologyEditor'
+import { protocolRange } from '@/features/experiment/lib/protocolRange'
+import { cloneNode, nodesFromReplay, useTopologyEditor } from '@/features/experiment/composables/useTopologyEditor'
 import { useRunExperiment } from '@/features/experiment/composables/useRunExperiment'
 import { useSimulatorSettings } from '@/features/experiment/composables/useSimulatorSettings'
 import { useExperimentFiles } from '@/features/experiment/composables/useExperimentFiles'
@@ -20,12 +22,15 @@ import SimulatorSettings from '@/features/experiment/components/SimulatorSetting
 import ProtocolSourceViewer from '@/features/experiment/components/ProtocolSourceViewer.vue'
 import type { CatalogItem } from '@/features/experiment/lib/typeIdCatalog'
 
+const canvasViewPadding = { left: 232, top: 24, right: 300, bottom: 0 }
 const router = useRouter()
 const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory } = useSimulatorSettings()
 const simulatorBusy = computed(() => buildStatus.value === 'building' || cleanStatus.value === 'cleaning')
+const drawerCatalog = computed(() => catalog.value.filter((layer) => layer.scope !== 'node'))
 const editor = useTopologyEditor(catalog)
 const {
   editNodes,
+  canvas,
   selectedIds,
   experimentForm,
   activeCatalogId,
@@ -41,7 +46,7 @@ const {
   onNodeSelect,
   onNodesMove,
   onNodeMove,
-  onCoordChange,
+  onNodeCoordinate,
   addNode,
   removeSelected,
   assignItem,
@@ -50,9 +55,15 @@ const {
   setField,
   setProtocolAttribute,
   setNodeDestination,
+  setNodeProtocolAttribute,
+  onNodeRename,
+  onNodeModelChange,
+  setNodeMobility,
 } = editor
 
-const copyHint = ref('')
+const rangeScope = ref(0)
+const defaultRangeM = computed(() => protocolRange(experimentForm.value, catalog.value))
+const nodeRangeRadii = computed(() => Object.fromEntries(editNodes.value.map((node) => [node.node_id, protocolRange(experimentForm.value, catalog.value, node)])))
 const protoOpen = ref(true)
 const inspectOpen = ref(true)
 const sourceItem = ref<CatalogItem | null>(null)
@@ -127,17 +138,8 @@ const onRun = async () => {
 const syncFromReplay = () => {
   const source = session.replayNodes
   if (!Array.isArray(source) || !source.length) return
-  replaceTopology(source.map((node) => cloneNode({
-    node_id: Number(node.node_id),
-    name: node.name,
-    x: node.x,
-    y: node.y,
-    z: node.z ?? 0,
-    role: node.role,
-    phyId: experimentForm.value.phyId,
-    macId: experimentForm.value.macId,
-    routingId: experimentForm.value.routingId,
-  })))
+  rangeScope.value++
+  replaceTopology(nodesFromReplay(source, experimentForm.value))
 }
 
 const applyToReplay = () => {
@@ -148,23 +150,14 @@ const applyToReplay = () => {
 }
 
 const files = useExperimentFiles(editor, catalog, aquaSimHome, selectDirectory, () => {
+  rangeScope.value++
   runStatus.value = 'idle'
   runLog.value = ''
   consoleOpen.value = false
 })
 const { documentJson, message: fileMessage, failed: fileFailed, importing, newExperiment, importFile, exportFile } = files
 
-const copyJson = async () => {
-  try {
-    await navigator.clipboard.writeText(documentJson.value)
-    copyHint.value = '已复制'
-  } catch {
-    copyHint.value = '失败'
-  }
-  window.setTimeout(() => {
-    copyHint.value = ''
-  }, 1600)
-}
+
 </script>
 
 <template>
@@ -172,35 +165,53 @@ const copyJson = async () => {
     <div ref="stageEl" class="deck">
       <div class="deck-canvas">
         <NodeCanvas
+          :key="rangeScope"
+          :initial-state="canvas"
+          :persist-state="true"
+          @canvas-state="canvas = $event"
           :nodes="canvasNodes"
           :node-visuals="nodeVisuals"
           :visible-packets="[]"
           :current-time="0"
+          :default-range-m="defaultRangeM ?? undefined"
+          :range-by-node="nodeRangeRadii"
+          :range-scope="rangeScope"
           :theme-key="CANVAS_THEME_KEY"
           fx-level="standard"
           :edit-mode="true"
+          :allow-gps="true"
           :allow-delete-nodes="true"
+          :allow-rename="runStatus !== 'running' && !simulatorBusy"
+          :allow-coordinate-edit="runStatus !== 'running' && !simulatorBusy"
+          :allow-position-lock="true"
           :allow-place-node="canAddNode"
           :box-select="true"
           :original-positions="[]"
           :selected-node-id="selectedEditNode?.node_id ?? undefined"
           :selected-node-ids="selectedIds"
           :sound-speed-mps="1500"
-          :view-padding="{ left: 232, top: 24, right: 300, bottom: 0 }"
+          :view-padding="canvasViewPadding"
           @node-move="onNodeMove"
           @nodes-move="onNodesMove"
           @node-select="onNodeSelect"
           @node-place="addNode"
           @selection-change="onSelectionChange"
           @nodes-delete="removeSelected"
+          @node-rename="onNodeRename"
+          @node-coordinate="onNodeCoordinate"
           @protocol-drop="onProtocolDrop"
         >
+          <template #node-actions="{ node }">
+            <NodeModelSelect :node="node" :disabled="runStatus === 'running' || simulatorBusy" @change="onNodeModelChange" />
+          </template>
           <template #node-details="{ node }">
             <NodeProtocolDetails
               :node-id="node.node_id" :nodes="editNodes" :form="experimentForm" :layers="catalog" :ready="catalogReady"
               :disabled="runStatus === 'running' || simulatorBusy"
               @application="(nodeId, id) => assignItem({ layer: 'app', id }, [nodeId])"
               @attribute="setProtocolAttribute" @destination="setNodeDestination"
+              @protocol-attribute="(typeId, name, value, nodeId) => setNodeProtocolAttribute(typeId, name, value, [nodeId])"
+              @mobility="setNodeMobility"
             />
           </template>
         </NodeCanvas>
@@ -208,7 +219,7 @@ const copyJson = async () => {
 
       <div class="dock-unit dock-unit-l" :class="{ closed: !protoOpen }">
         <div class="dock dock-left">
-          <ProtocolDrawer :layers="catalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem" @view-source="sourceItem = $event">
+          <ProtocolDrawer :layers="drawerCatalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem" @view-source="sourceItem = $event">
             <template #protocol-settings="{ layerId }">
               <ProtocolAttributes embedded scope="scene" :layer-id="layerId" :layers="catalog" :form="experimentForm" :node="null" :ready="catalogReady" @change="setProtocolAttribute" />
             </template>
@@ -232,16 +243,13 @@ const copyJson = async () => {
         <button class="btn btn-compact" data-testid="exp-add-node" :disabled="!canAddNode" @click="addNode()">添加节点</button>
         <button class="btn btn-compact" :disabled="selectedIds.length === 0" aria-keyshortcuts="Delete Backspace" title="删除选中节点（Delete / Backspace）" @click="removeSelected">删除选中</button>
         <span class="cmd-sep" aria-hidden="true"></span>
-        <span class="stack-brief">{{ stackBrief }}</span>
-        <span class="cmd-sep" aria-hidden="true"></span>
-        <span v-if="copyHint" class="field-chip">{{ copyHint }}</span>
         <button class="btn btn-compact" :disabled="runStatus === 'running' || simulatorBusy || importing" @click="newExperiment">新建实验</button>
         <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || simulatorBusy || validationIssues.length > 0" @click="onRun">
           {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
         </button>
       </div>
 
-      <div class="dock-unit dock-unit-r" :class="{ closed: !inspectOpen }">
+      <div class="dock-unit dock-unit-r experiment-inspector" :class="{ closed: !inspectOpen }">
         <button
           class="panel-ear"
           :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
@@ -281,21 +289,6 @@ const copyJson = async () => {
             @reset="resetDirectory"
             @select="selectDirectory"
           />
-          <div class="dock-title">{{ selectedSummary }}</div>
-          <div v-if="selectedEditNode" class="coord-grid">
-            <label class="field field-compact">
-              <div class="field-head"><span>X (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.x" @input="onCoordChange('x', $event)" />
-            </label>
-            <label class="field field-compact">
-              <div class="field-head"><span>Y (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.y" @input="onCoordChange('y', $event)" />
-            </label>
-            <label class="field field-compact">
-              <div class="field-head"><span>Z (m)</span></div>
-              <input class="select" type="number" step="0.01" :value="selectedEditNode.z ?? 0" @input="onCoordChange('z', $event)" />
-            </label>
-          </div>
           <ExperimentPanel
             :form="experimentForm"
             :spec-json="documentJson"
@@ -311,14 +304,15 @@ const copyJson = async () => {
             @apply-to-replay="applyToReplay"
             @add-node="() => addNode()"
             @remove-node="removeSelected"
-            @download="exportFile"
-            @copy="copyJson"
-          />
-          <ExperimentFiles
-            :disabled="runStatus === 'running' || simulatorBusy"
-            :message="fileMessage" :failed="fileFailed" :importing="importing"
-            @import="importFile" @export="exportFile"
-          />
+          >
+            <template #experiment-files>
+              <ExperimentFiles
+                :disabled="runStatus === 'running' || simulatorBusy"
+                :message="fileMessage" :failed="fileFailed" :importing="importing"
+                @import="importFile" @export="exportFile"
+              />
+            </template>
+          </ExperimentPanel>
         </aside>
         </SplitPane>
       </div>
@@ -370,3 +364,8 @@ const copyJson = async () => {
     </footer>
   </section>
 </template>
+
+<style scoped>
+/* Match the left dock: its height is capped at deck height minus 88px. */
+.experiment-inspector { bottom: calc(88px - var(--dock-gap)); }
+</style>

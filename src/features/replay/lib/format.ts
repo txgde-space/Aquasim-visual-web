@@ -23,6 +23,11 @@ export const timeDisplay = (us: number, fractionalTiming = false): string => {
 export const reasonLabel = (reason: string | null | undefined): string => {
   if (reason === 'collision_rx_rx') return 'rx-rx 冲突'
   if (reason === 'collision_rx_tx') return 'rx-tx 冲突'
+  if (reason === 'collision') return '碰撞（未细分类型）'
+  if (reason === 'reception_incomplete') return '仿真结束时接收未完成'
+  if (reason === 'outcome_unreported') return '未记录接收结果'
+  if (reason === 'phy_rejected') return '物理层丢弃'
+  if (reason === 'receiver_unavailable') return '接收节点不可用'
   if (reason === 'below_rx_thresh') return '门限不足（信号低于接收阈值）'
   return '接收失败'
 }

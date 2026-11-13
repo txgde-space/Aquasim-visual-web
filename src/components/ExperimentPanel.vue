@@ -19,8 +19,6 @@ const emit = defineEmits([
   'apply-to-replay',
   'add-node',
   'remove-node',
-  'download',
-  'copy',
   'run',
 ])
 
@@ -78,9 +76,9 @@ const onField = (key, event) => {
   <div class="experiment-panel">
     <div class="dock-title">全局仿真参数</div>
     <div class="control-fields-grid">
-      <label class="field field-compact" title="仿真停止时间，如 30s">
-        <div class="field-head"><span>仿真时长</span><span class="field-param">simStop</span></div>
-        <input class="select" :value="form.simStop" @input="onField('simStop', $event)" />
+      <label class="field field-compact" title="仿真停止时间；省略单位按秒，支持 30s、500ms">
+        <div class="field-head"><span>仿真时长（s）</span><span class="field-param">simStop</span></div>
+        <input class="select" :value="form.simStop" placeholder="如 30、30s 或 500ms" @input="onField('simStop', $event)" />
       </label>
     </div>
 
@@ -88,13 +86,15 @@ const onField = (key, event) => {
       <li v-for="item in warnings" :key="item">{{ item }}</li>
     </ul>
 
-    <div class="dock-title">规格与代码</div>
+    <section aria-label="实验文件">
+    <div class="dock-title">实验文件</div>
     <div class="control-btn-row">
       <button class="btn btn-compact" title="查看实验规格 JSON" @click="openViewer('json')">预览 JSON</button>
       <button class="btn btn-compact" title="查看生成的 ns-3 仿真代码" @click="openViewer('cc')">预览代码</button>
-      <button class="btn btn-compact" title="下载 experiment.json" @click="emit('download')">下载 JSON</button>
-      <button class="btn btn-compact" title="复制实验规格 JSON 到剪贴板" @click="emit('copy')">复制 JSON</button>
     </div>
+
+    <slot name="experiment-files" />
+    </section>
 
     <div class="dock-title">回放联动</div>
     <div class="control-btn-row">

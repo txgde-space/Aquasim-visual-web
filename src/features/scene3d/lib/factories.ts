@@ -4,12 +4,14 @@ import {
   MeshBuilder,
   TransformNode,
   type LinesMesh,
+  type Quaternion,
   type Scene,
   StandardMaterial,
   Vector3,
 } from '@babylonjs/core'
+import { NODE_MODEL_DIMENSIONS, type NodeModelType } from '@/shared/nodeModel'
+import { buildNodeModel } from './nodeModels'
 import {
-  PATH_BLOCK_DIAMETER,
   PROGRESS_CORE_SCALE,
   type Theme3DPalette,
 } from './themes3d'
@@ -150,140 +152,22 @@ export const visualProgressStyle = (
   return null
 }
 
-export type NodeModelKind = 'vessel' | 'auv'
+export type NodeModelKind = NodeModelType
 
 export interface NodeMeshEntry {
   kind: NodeModelKind
   root: TransformNode
-  /** 船体 / 艇身主体：承载节点状态色（tx/rx/collision 变色） */
+  /** 模型主体：使用设备自身的 PBR 涂装，收发状态由 progress 单独显示。 */
   base: Mesh
   progress: Mesh
+  /** Screen-space locator only; equipment geometry remains in metres. */
+  marker: Mesh
+  progressScale: number
   /** 上层建筑、尾舵、桅杆等固定配色部件 */
   details: Mesh[]
 }
 
-/* ---- 水面舰艇（sink / 网关节点）：尖艏船体 + 甲板 + 舰桥 + 桅杆航行灯 ---- */
-
-/** 船体俯视轮廓（X = 船长，艏朝 +X；Y = 船宽），ExtrudeShape 沿 Z 拉出型深后翻转到 Y 向上 */
-const VESSEL_HULL_OUTLINE = [
-  new Vector3(250, 0, 0),
-  new Vector3(120, 76, 0),
-  new Vector3(-190, 76, 0),
-  new Vector3(-240, 44, 0),
-  new Vector3(-240, -44, 0),
-  new Vector3(-190, -76, 0),
-  new Vector3(120, -76, 0),
-]
-
-const buildVessel = (scene: Scene, nodeId: number, palette: Theme3DPalette, root: TransformNode) => {
-  const hull = bindNodeMeta(MeshBuilder.ExtrudeShape(`node-${nodeId}-hull`, {
-    shape: VESSEL_HULL_OUTLINE,
-    path: [new Vector3(0, 0, -32), new Vector3(0, 0, 52)],
-    cap: Mesh.CAP_ALL,
-  }, scene), nodeId)
-  hull.rotation.x = -Math.PI / 2
-  hull.parent = root
-  hull.material = makeMaterial(scene, `node-${nodeId}-hull-mat`, palette.idleDiffuse, palette.idleEmissive, 1)
-
-  const deck = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-deck`, {
-    width: 400,
-    height: 14,
-    depth: 132,
-  }, scene), nodeId)
-  deck.parent = root
-  deck.position.set(0, 59, 0)
-  deck.material = makeMaterial(scene, `node-${nodeId}-deck-mat`, palette.hull, null, 1)
-
-  const bridge = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-bridge`, {
-    width: 120,
-    height: 80,
-    depth: 92,
-  }, scene), nodeId)
-  bridge.parent = root
-  bridge.position.set(-110, 106, 0)
-  bridge.material = makeMaterial(scene, `node-${nodeId}-bridge-mat`, palette.superstructure, palette.superstructure.scale(0.08), 1)
-
-  const mast = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${nodeId}-mast`, {
-    diameterTop: 8,
-    diameterBottom: 16,
-    height: 130,
-    tessellation: 10,
-  }, scene), nodeId)
-  mast.parent = root
-  mast.position.set(-110, 211, 0)
-  mast.material = makeMaterial(scene, `node-${nodeId}-mast-mat`, palette.hull, null, 1)
-
-  const beacon = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-beacon`, {
-    diameter: 20,
-    segments: 10,
-  }, scene), nodeId)
-  beacon.parent = root
-  beacon.position.set(-110, 288, 0)
-  beacon.material = makeMaterial(scene, `node-${nodeId}-beacon-mat`, palette.beacon, palette.beacon.scale(0.85), 1)
-
-  return { base: hull, details: [deck, bridge, mast, beacon] }
-}
-
-/* ---- AUV（水下节点）：胶囊鱼雷艇身 + 指挥台围壳 + 十字尾舵 + 螺旋桨 ---- */
-
-const buildAuv = (scene: Scene, nodeId: number, palette: Theme3DPalette, root: TransformNode) => {
-  const body = bindNodeMeta(MeshBuilder.CreateCapsule(`node-${nodeId}-body`, {
-    radius: 54,
-    height: 400,
-    tessellation: 24,
-  }, scene), nodeId)
-  body.rotation.z = Math.PI / 2 // 胶囊默认沿 Y，放平到 X（艏朝 +X）
-  body.parent = root
-  body.material = makeMaterial(scene, `node-${nodeId}-body-mat`, palette.idleDiffuse, palette.idleEmissive, 1)
-
-  const sail = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-sail`, {
-    width: 84,
-    height: 54,
-    depth: 34,
-  }, scene), nodeId)
-  sail.parent = root
-  sail.position.set(34, 62, 0)
-  sail.material = makeMaterial(scene, `node-${nodeId}-sail-mat`, palette.hull, null, 1)
-
-  const fins = [
-    { name: 'fin-top', width: 70, height: 76, depth: 10, pos: new Vector3(-168, 58, 0) },
-    { name: 'fin-bottom', width: 70, height: 76, depth: 10, pos: new Vector3(-168, -58, 0) },
-    { name: 'fin-port', width: 70, height: 10, depth: 76, pos: new Vector3(-168, 0, 58) },
-    { name: 'fin-starboard', width: 70, height: 10, depth: 76, pos: new Vector3(-168, 0, -58) },
-  ].map((spec) => {
-    const fin = bindNodeMeta(MeshBuilder.CreateBox(`node-${nodeId}-${spec.name}`, {
-      width: spec.width,
-      height: spec.height,
-      depth: spec.depth,
-    }, scene), nodeId)
-    fin.parent = root
-    fin.position.copyFrom(spec.pos)
-    fin.material = makeMaterial(scene, `node-${nodeId}-${spec.name}-mat`, palette.hull, null, 1)
-    return fin
-  })
-
-  const prop = bindNodeMeta(MeshBuilder.CreateCylinder(`node-${nodeId}-prop`, {
-    diameter: 66,
-    height: 14,
-    tessellation: 20,
-  }, scene), nodeId)
-  prop.rotation.z = Math.PI / 2
-  prop.parent = root
-  prop.position.set(-206, 0, 0)
-  prop.material = makeMaterial(scene, `node-${nodeId}-prop-mat`, palette.hull, null, 1)
-
-  const bowLight = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-bow-light`, {
-    diameter: 18,
-    segments: 10,
-  }, scene), nodeId)
-  bowLight.parent = root
-  bowLight.position.set(196, 0, 0)
-  bowLight.material = makeMaterial(scene, `node-${nodeId}-bow-light-mat`, palette.beacon, palette.beacon.scale(0.85), 1)
-
-  return { base: body, details: [sail, ...fins, prop, bowLight] }
-}
-
-/** 创建节点模型：root 挂在节点世界坐标上，base 承载状态色，details 固定配色。 */
+/** 创建节点模型：root 挂在节点世界坐标上，设备材质与收发状态独立。 */
 export const createNodeEntry = (
   scene: Scene,
   nodeId: number,
@@ -291,31 +175,44 @@ export const createNodeEntry = (
   palette: Theme3DPalette,
 ): NodeMeshEntry => {
   const root = new TransformNode(`node-${nodeId}-root`, scene)
-  const { base, details } = kind === 'vessel'
-    ? buildVessel(scene, nodeId, palette, root)
-    : buildAuv(scene, nodeId, palette, root)
+  const { base, details } = buildNodeModel(scene, nodeId, kind, root, palette.model)
 
-  const progress = bindNodeMeta(MeshBuilder.CreateSphere(`node-${nodeId}-progress`, {
-    diameter: 300,
-    segments: 18,
+  const progress = bindNodeMeta(MeshBuilder.CreateTorus(`node-${nodeId}-progress`, {
+    diameter: 1,
+    thickness: .025,
+    tessellation: 48,
   }, scene), nodeId)
+  progress.rotation.x = Math.PI / 2
+  progress.bakeCurrentTransformIntoVertices()
+  progress.billboardMode = Mesh.BILLBOARDMODE_ALL
   progress.parent = root
-  progress.material = makeMaterial(
+  const progressMaterial = makeMaterial(
     scene,
     `node-${nodeId}-progress-mat`,
     palette.rx,
     palette.rx.scale(0.28),
     0,
   )
-  progress.material.backFaceCulling = false
-  progress.material.needDepthPrePass = true
+  progressMaterial.disableLighting = true
+  progressMaterial.disableDepthWrite = true
+  progress.material = progressMaterial
   progress.renderingGroupId = 1
 
-  return { kind, root, base, progress, details }
+  const marker = bindNodeMeta(MeshBuilder.CreateTorus(`node-${nodeId}-locator`, { diameter: 1, thickness: .035, tessellation: 32 }, scene), nodeId)
+  marker.rotation.x = Math.PI / 2
+  marker.bakeCurrentTransformIntoVertices()
+  marker.billboardMode = Mesh.BILLBOARDMODE_ALL
+  marker.parent = root
+  const markerMaterial = makeMaterial(scene, `node-${nodeId}-locator-mat`, palette.idleDiffuse, palette.idleDiffuse, .7)
+  markerMaterial.disableLighting = true
+  markerMaterial.disableDepthWrite = true
+  marker.material = markerMaterial
+  marker.renderingGroupId = 2
+  return { kind, root, base, progress, marker, progressScale: .01, details }
 }
 
 const disposeMeshAndMaterial = (mesh: Mesh): void => {
-  const material = mesh.material as StandardMaterial | null
+  const material = mesh.material
   if (material) material.dispose()
   mesh.dispose()
 }
@@ -324,14 +221,31 @@ const disposeMeshAndMaterial = (mesh: Mesh): void => {
 export const disposeNodeEntry = (entry: NodeMeshEntry): void => {
   disposeMeshAndMaterial(entry.base)
   disposeMeshAndMaterial(entry.progress)
+  disposeMeshAndMaterial(entry.marker)
   for (const detail of entry.details) disposeMeshAndMaterial(detail)
   entry.root.dispose()
+}
+
+/** Only screen annotations adapt to distance; equipment geometry always stays at 1:1 scale. */
+export const syncNodeAnnotation = (entry: NodeMeshEntry, camera: { globalPosition: Vector3; fov: number }, viewportHeight: number): void => {
+  const size = NODE_MODEL_DIMENSIONS[entry.kind]
+  const physicalDiameter = Math.max(size.length, size.width, size.height)
+  const distance = Vector3.Distance(camera.globalPosition, entry.root.position)
+  const metresPerPixel = 2 * distance * Math.tan(camera.fov / 2) / Math.max(1, viewportHeight)
+  const locator = 26 * metresPerPixel
+  entry.progress.position.y = size.height / 2
+  entry.marker.position.y = size.height / 2
+  entry.marker.scaling.setAll(locator)
+  entry.marker.setEnabled(physicalDiameter < 16 * metresPerPixel)
+  entry.progress.scaling.setAll(Math.max(physicalDiameter * 1.12, locator) * entry.progressScale)
 }
 
 export interface PacketMeshEntry {
   line: LinesMesh
   block: Mesh
   marker: Mesh
+  head: Mesh
+  result: LinesMesh
   sourcePosition: Vector3
   destinationPosition: Vector3
   direction: Vector3
@@ -343,7 +257,9 @@ const orientPacketPath = (entry: PacketMeshEntry): void => {
   entry.block.rotationQuaternion = null
   entry.block.lookAt(entry.destinationPosition)
   entry.block.rotate(Vector3.Right(), Math.PI / 2)
+  entry.head.rotationQuaternion = (entry.block.rotationQuaternion as Quaternion | null)?.clone() || null
   entry.marker.position.copyFrom(entry.destinationPosition)
+  entry.result.position.copyFrom(entry.destinationPosition)
 }
 
 /** Time/progress/color changes do not require rewriting the path vertex buffer. */
@@ -358,7 +274,7 @@ export const syncPacketGeometry = (entry: PacketMeshEntry, source: Vector3, dest
   return true
 }
 
-/** Create the three meshes (with materials) that visualize one packet path. */
+/** Thin signal band, direction arrow and an endpoint ring; never scale equipment. */
 export const createPacketEntry = (
   scene: Scene,
   packetId: number | string,
@@ -376,21 +292,41 @@ export const createPacketEntry = (
   line.alpha = 0.52
 
   const block = MeshBuilder.CreateCylinder(`packet-${packetId}-${dst}-block`, {
-    diameter: PATH_BLOCK_DIAMETER,
-    height: 100,
-    tessellation: 20,
+    diameter: 1,
+    height: 1,
+    tessellation: 8,
   }, scene)
   block.material = makeMaterial(scene, `packet-${packetId}-${dst}-mat`, color, color.scale(0.12), 0.96)
 
-  const marker = MeshBuilder.CreateSphere(`packet-${packetId}-${dst}-marker`, {
-    diameter: 70,
-    segments: 14,
+  const marker = MeshBuilder.CreateTorus(`packet-${packetId}-${dst}-marker`, {
+    diameter: 1, thickness: .045, tessellation: 32,
   }, scene)
+  marker.rotation.x = Math.PI / 2
+  marker.bakeCurrentTransformIntoVertices()
+  marker.billboardMode = Mesh.BILLBOARDMODE_ALL
   marker.material = makeMaterial(scene, `packet-${packetId}-${dst}-marker-mat`, color, color.scale(0.12), palette.markerAlpha)
+  const head = MeshBuilder.CreateCylinder(`packet-${packetId}-${dst}-head`, {
+    diameterTop: 0, diameterBottom: 1, height: 1, tessellation: 8,
+  }, scene)
+  head.material = makeMaterial(scene, `${head.name}-mat`, palette.tx, palette.tx, .95)
+  const result = MeshBuilder.CreateLineSystem(`packet-${packetId}-${dst}-result`, { lines: [
+    [new Vector3(-.25,-.25,0), new Vector3(.25,.25,0)],
+    [new Vector3(-.25,.25,0), new Vector3(.25,-.25,0)],
+  ] }, scene)
+  result.billboardMode = Mesh.BILLBOARDMODE_ALL
+  result.color = palette.bad
+  for (const mesh of [line, block, head, marker, result]) {
+    mesh.isPickable = false
+    mesh.renderingGroupId = 1
+    const material = mesh.material as StandardMaterial
+    material.disableDepthWrite = true
+    material.fogEnabled = false
+    if (material instanceof StandardMaterial) material.disableLighting = true
+  }
 
   const direction = dstPos.subtract(srcPos)
   const entry = {
-    line, block, marker,
+    line, block, marker, head, result,
     sourcePosition: srcPos.clone(), destinationPosition: dstPos.clone(),
     direction, pathLength: direction.length(),
   }
@@ -402,5 +338,7 @@ export const createPacketEntry = (
 export const disposePacketEntry = (entry: PacketMeshEntry): void => {
   disposeMeshAndMaterial(entry.block)
   disposeMeshAndMaterial(entry.marker)
+  disposeMeshAndMaterial(entry.head)
   entry.line.dispose()
+  entry.result.dispose()
 }

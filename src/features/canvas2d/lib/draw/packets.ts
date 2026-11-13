@@ -29,7 +29,7 @@ export const packetSegmentColor = (
     return txColor
   }
 
-  if (receiver.status === 'ok') {
+  if (receiver.status === 'ok' || receiver.reason === 'reception_incomplete' || receiver.reason === 'outcome_unreported') {
     return rxColor
   }
 
@@ -153,7 +153,7 @@ export const drawPacketRect = (
       0.92,
     )
 
-    if (receiver.status !== 'ok') {
+    if (receiver.status !== 'ok' && receiver.reason !== 'reception_incomplete' && receiver.reason !== 'outcome_unreported') {
       const collisionAt = receiver.collision_start_us ?? receiver.rx_start_us
       if (now >= collisionAt) {
         const impactDuration = receiver.rx_duration_us > 0 ? receiver.rx_duration_us : 1

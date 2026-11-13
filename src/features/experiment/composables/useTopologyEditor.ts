@@ -1,8 +1,11 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
+import type { ReplayNode } from '../../../shared/types/replay'
 import { experimentDraft } from './experimentDraft'
 import { catalogItemById, type CatalogLayer } from '../lib/typeIdCatalog'
 import { MAX_NODE_COUNT, nextAvailableNodeId, topologyIssues } from '../lib/experimentValidation'
+import { normalizeNodeName } from '../../../shared/nodeName'
+import { isNodeModelType, type NodeModelType } from '../../../shared/nodeModel'
 
 /** Normalise any node-like object (replay node, canvas node) into a TopologyNode. */
 export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): TopologyNode => ({
@@ -12,13 +15,26 @@ export const cloneNode = (node: Partial<TopologyNode> & { node_id: number }): To
   y: Number(node.y) || 0,
   z: Number(node.z) || 0,
   role: node.role || 'node',
+  ...(node.modelType === undefined ? {} : { modelType: node.modelType }),
+  ...(node.mobility === undefined ? {} : { mobility: { ...node.mobility } }),
   phyId: node.phyId || '',
   macId: node.macId || '',
   routingId: node.routingId || '',
   appId: node.appId || 'none',
   appAttrs: { ...node.appAttrs },
   appDestination: node.appDestination,
+  ...(node.protocolAttributes === undefined ? {} : {
+    protocolAttributes: Object.fromEntries(Object.entries(node.protocolAttributes).map(([typeId, attrs]) => [typeId, { ...attrs }])),
+  }),
 })
+
+/** Import the recorded initial topology, retaining node-owned configuration. */
+export const nodesFromReplay = (nodes: ReplayNode[], form: ExperimentForm): TopologyNode[] => nodes.map((node) => cloneNode({
+  ...node,
+  phyId: form.phyId,
+  macId: form.macId,
+  routingId: form.routingId,
+}))
 
 export interface AssignPayload {
   layer?: string
@@ -33,8 +49,9 @@ export interface AssignPayload {
 const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
 
 export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
-  const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId } = experimentDraft
+  const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId, canvas } = experimentDraft
   const topologyError = ref('')
+  const isPositionLocked = (id: number) => canvas.value?.lockedNodeIds?.includes(Number(id)) ?? false
   const canAddNode = computed(() => editNodes.value.length < MAX_NODE_COUNT)
 
   const selectedNodes: ComputedRef<TopologyNode[]> = computed(() => (
@@ -67,8 +84,8 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
   const stackLayer = (layerId: string, itemId: string) => {
     const item = catalogItemById(layerId, itemId, layers.value)
     return {
-      name: item?.label || itemId || '—',
-      typeId: item?.typeId ? item.typeId.replace(/^ns3::/, '') : '—',
+      name: item?.label || (itemId ? `${itemId}（待校验）` : '未选择'),
+      typeId: (item?.typeId || itemId || '—').replace(/^ns3::/, ''),
       source: item?.source || '',
     }
   }
@@ -114,7 +131,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     const byId = new Map(moves.map((item) => [Number(item.node_id), item]))
     editNodes.value = editNodes.value.map((node) => {
       const next = byId.get(Number(node.node_id))
-      if (!next) return node
+      if (!next || isPositionLocked(node.node_id)) return node
       return {
         ...node,
         x: round2(next.x),
@@ -125,7 +142,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
 
   const onNodeMove = (payload: { node_id: number; x: number; y: number } | null) => {
     if (!payload || !Number.isFinite(Number(payload.node_id))) return
-    if (selectedIds.value.length > 1) return
+    if (selectedIds.value.length > 1 || isPositionLocked(payload.node_id)) return
     editNodes.value = editNodes.value.map((node) => (
       node.node_id === payload.node_id
         ? { ...node, x: round2(payload.x), y: round2(payload.y) }
@@ -133,13 +150,10 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     ))
   }
 
-  const onCoordChange = (axis: 'x' | 'y' | 'z', event: Event) => {
-    const node = selectedEditNode.value
-    if (!node) return
-    const next = Number((event.target as HTMLInputElement).value)
-    if (!Number.isFinite(next)) return
-    editNodes.value = editNodes.value.map((item) => (
-      item.node_id === node.node_id ? { ...item, [axis]: round2(next) } : item
+  const onNodeCoordinate = ({ node_id, axis, value }: { node_id: number; axis: 'x' | 'y' | 'z'; value: number }) => {
+    if (!['x', 'y', 'z'].includes(axis) || !Number.isFinite(value) || isPositionLocked(node_id)) return
+    editNodes.value = editNodes.value.map((node) => (
+      node.node_id === node_id ? { ...node, [axis]: round2(value) } : node
     ))
   }
 
@@ -175,6 +189,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
         y: round2(y),
         z: round2(z),
         role: 'node',
+        modelType: 'auv',
         phyId: experimentForm.value.phyId,
         macId: experimentForm.value.macId,
         routingId: experimentForm.value.routingId,
@@ -213,6 +228,9 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
       return
     }
 
+    // Node-owned selections are edited by their own card, never the unified stack.
+    if (layerDefinition?.scope === 'node') return
+
     experimentForm.value = { ...experimentForm.value, [field]: itemId }
     if (layerDefinition?.scope !== 'scene') editNodes.value = editNodes.value.map((node) => ({ ...node, [field]: itemId }))
   }
@@ -234,6 +252,37 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
 
   const setNodeDestination = (nodeId: number, destination?: number) => {
     editNodes.value = editNodes.value.map((node) => node.node_id === nodeId ? { ...node, appDestination: destination } : node)
+  }
+
+  const onNodeRename = ({ node_id, name }: { node_id: number; name: string }) => {
+    editNodes.value = editNodes.value.map((node) => node.node_id === node_id
+      ? { ...node, name: normalizeNodeName(name, node_id) } : node)
+  }
+
+  const onNodeModelChange = ({ node_id, modelType }: { node_id: number; modelType: NodeModelType }) => {
+    if (!isNodeModelType(modelType)) return
+    editNodes.value = editNodes.value.map((node) => node.node_id === node_id
+      ? { ...node, modelType } : node)
+  }
+
+  const setNodeMobility = (nodeId: number, typeId: string) => {
+    editNodes.value = editNodes.value.map((node) => {
+      if (node.node_id !== nodeId) return node
+      if (typeId) return { ...node, mobility: { type: typeId } }
+      const { mobility: _mobility, ...fixed } = node
+      return fixed
+    })
+  }
+
+  const setNodeProtocolAttribute = (typeId: string, name: string, value: string, nodeIds = selectedIds.value) => {
+    const ids = new Set(nodeIds)
+    editNodes.value = editNodes.value.map((node) => {
+      if (!ids.has(node.node_id)) return node
+      const attrs = { ...node.protocolAttributes?.[typeId] }
+      if (value === '') delete attrs[name]
+      else attrs[name] = value
+      return { ...node, protocolAttributes: { ...node.protocolAttributes, [typeId]: attrs } }
+    })
   }
 
   const onProtocolDrop = (payload: AssignPayload) => {
@@ -268,6 +317,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
 
   return {
     editNodes,
+    canvas,
     canAddNode,
     topologyError,
     selectedIds,
@@ -285,7 +335,7 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     onNodeSelect,
     onNodesMove,
     onNodeMove,
-    onCoordChange,
+    onNodeCoordinate,
     addNode,
     removeSelected,
     assignItem,
@@ -294,6 +344,10 @@ export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
     setField,
     setProtocolAttribute,
     setNodeDestination,
+    onNodeRename,
+    onNodeModelChange,
+    setNodeMobility,
+    setNodeProtocolAttribute,
   }
 }
 
