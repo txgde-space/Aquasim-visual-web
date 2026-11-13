@@ -1,0 +1,517 @@
+{
+  "meta": {
+    "schema": "uan-vis-packet-log/v2",
+    "time_unit": "us",
+    "time_precision_us": 0.001,
+    "sim_end_us": 98005000,
+    "distance_unit": "m",
+    "protocols": {
+      "phy": [
+        "ns3::AquaSimPhySimple"
+      ],
+      "mac": [
+        "ns3::AquaSimTDMA"
+      ],
+      "routing": [
+        "ns3::AquaSimStaticRouting"
+      ],
+      "channel": [
+        "ns3::AquaSimChannel"
+      ]
+    },
+    "trace_scope": "phy-events",
+    "propagation_speed_mps": 1499.99999925
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "name": "A",
+      "x": -3600,
+      "y": 2700,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 2,
+      "name": "B",
+      "x": 1200,
+      "y": 900,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 3,
+      "name": "Sink",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "role": "sink"
+    },
+    {
+      "node_id": 4,
+      "name": "C",
+      "x": -1800,
+      "y": -1350,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 5,
+      "name": "D",
+      "x": 3000,
+      "y": -2250,
+      "z": 0,
+      "role": "node"
+    }
+  ],
+  "packets": [
+    {
+      "packet_id": "phy-0",
+      "src": 1,
+      "tx_start_us": 19610000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 22564657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 24464657.341
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 22610000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 24510000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-1",
+      "src": 2,
+      "tx_start_us": 24510000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 25510000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 27410000
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 26928677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 28828677.324
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 27010000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 28910000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-2",
+      "src": 4,
+      "tx_start_us": 29410000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 30910000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 32810000
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 31910000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 33810000
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 32364657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 34264657.341
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-3",
+      "src": 5,
+      "tx_start_us": 34310000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 36728677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38628677.324
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 36810000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 38710000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-4",
+      "src": 1,
+      "tx_start_us": 39210000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 42164657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 44064657.341
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 42210000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 44110000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-5",
+      "src": 2,
+      "tx_start_us": 44110000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 45110000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 47010000
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 46528677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 48428677.324
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 46610000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 48510000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-6",
+      "src": 4,
+      "tx_start_us": 49010000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 50510000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 52410000
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 51510000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53410000
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 51964657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 53864657.341
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-7",
+      "src": 5,
+      "tx_start_us": 53910000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 56328677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 58228677.324
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 56410000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 58310000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-8",
+      "src": 1,
+      "tx_start_us": 58810000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 61764657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 63664657.341
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 61810000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 63710000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-9",
+      "src": 2,
+      "tx_start_us": 63710000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 64710000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 66610000
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 66128677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 68028677.324
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 66210000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 68110000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-10",
+      "src": 4,
+      "tx_start_us": 68610000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 70110000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 72010000
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 71110000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 73010000
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 71564657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 73464657.341
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-11",
+      "src": 5,
+      "tx_start_us": 73510000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 75928677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 77828677.324
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 76010000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 77910000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-12",
+      "src": 1,
+      "tx_start_us": 78410000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 4,
+          "rx_start_us": 81364657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 83264657.341
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 81410000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 83310000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-13",
+      "src": 2,
+      "tx_start_us": 83310000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 84310000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 86210000
+        },
+        {
+          "dst": 5,
+          "rx_start_us": 85728677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 87628677.324
+        },
+        {
+          "dst": 4,
+          "rx_start_us": 85810000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 87710000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-14",
+      "src": 4,
+      "tx_start_us": 88210000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 89710000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 91610000
+        },
+        {
+          "dst": 2,
+          "rx_start_us": 90710000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 92610000
+        },
+        {
+          "dst": 1,
+          "rx_start_us": 91164657.341,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 93064657.341
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-15",
+      "src": 5,
+      "tx_start_us": 93110000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 2,
+          "rx_start_us": 95528677.324,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 97428677.324
+        },
+        {
+          "dst": 3,
+          "rx_start_us": 95610000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 97510000
+        }
+      ]
+    }
+  ]
+}

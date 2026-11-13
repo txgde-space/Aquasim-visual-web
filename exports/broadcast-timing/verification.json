@@ -1,0 +1,48 @@
+[
+  {
+    "name": "simultaneous-no-collision",
+    "timing": [
+      {
+        "node": "A",
+        "tx_s": 10,
+        "rx_start_s": 13,
+        "rx_end_s": 14.6,
+        "status": "ok",
+        "reason": "",
+        "collision_s": null
+      },
+      {
+        "node": "B",
+        "tx_s": 10,
+        "rx_start_s": 11,
+        "rx_end_s": 12.6,
+        "status": "ok",
+        "reason": "",
+        "collision_s": null
+      }
+    ]
+  },
+  {
+    "name": "staggered-collision",
+    "timing": [
+      {
+        "node": "A",
+        "tx_s": 10,
+        "rx_start_s": 13,
+        "rx_end_s": 14.6,
+        "status": "fail",
+        "reason": "collision_rx_rx",
+        "collision_s": 13
+      },
+      {
+        "node": "B",
+        "tx_s": 12,
+        "rx_start_s": 13,
+        "rx_end_s": 14.6,
+        "status": "fail",
+        "reason": "collision_rx_rx",
+        "collision_s": 13
+      }
+    ]
+  }
+]

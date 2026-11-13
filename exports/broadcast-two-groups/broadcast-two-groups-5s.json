@@ -1,0 +1,326 @@
+{
+  "schema": "aqua-sim-experiment/v0",
+  "simStop": "25s",
+  "channel": {
+    "type": "ns3::AquaSimChannel",
+    "propagation": "ns3::AquaSimRangePropagation"
+  },
+  "stack": {
+    "phy": {
+      "type": "ns3::AquaSimPhySimple",
+      "attrs": {}
+    },
+    "mac": {
+      "type": "ns3::AquaSimBroadcastMac",
+      "attrs": {}
+    },
+    "routing": {
+      "type": "ns3::AquaSimStaticRouting"
+    }
+  },
+  "protocolAttributes": {
+    "ns3::AquaSimPhySimple": {
+      "DataRate": "200bps",
+      "RxProcessingDelay": "300ms",
+      "transRange": "4500"
+    }
+  },
+  "traffic": {
+    "preset": "none"
+  },
+  "nodes": [
+    {
+      "id": 1,
+      "name": "A1",
+      "x": -4500,
+      "y": 0,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "PacketSize": "26",
+        "Delay": "5",
+        "StartTime": "0s"
+      },
+      "appDestination": 3
+    },
+    {
+      "id": 2,
+      "name": "B1",
+      "x": 1500,
+      "y": 0,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "PacketSize": "26",
+        "Delay": "5",
+        "StartTime": "0s"
+      },
+      "appDestination": 3
+    },
+    {
+      "id": 3,
+      "name": "Sink1",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "role": "sink",
+      "app": "",
+      "appAttrs": {}
+    },
+    {
+      "id": 4,
+      "name": "A2",
+      "x": -4500,
+      "y": 6000,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "PacketSize": "26",
+        "Delay": "5",
+        "StartTime": "0s"
+      },
+      "appDestination": 6
+    },
+    {
+      "id": 5,
+      "name": "B2",
+      "x": 1500,
+      "y": 6000,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "PacketSize": "26",
+        "Delay": "5",
+        "StartTime": "2s"
+      },
+      "appDestination": 6
+    },
+    {
+      "id": 6,
+      "name": "Sink2",
+      "x": 0,
+      "y": 6000,
+      "z": 0,
+      "role": "sink",
+      "app": "",
+      "appAttrs": {}
+    }
+  ],
+  "editor": {
+    "version": 3,
+    "form": {
+      "phyId": "ns3::AquaSimPhySimple",
+      "macId": "ns3::AquaSimBroadcastMac",
+      "routingId": "ns3::AquaSimStaticRouting",
+      "channelId": "ns3::AquaSimChannel",
+      "propagationId": "ns3::AquaSimRangePropagation",
+      "simStop": "25s",
+      "txPower": 1.1,
+      "protocolAttributes": {
+        "ns3::AquaSimPhySimple": {
+          "DataRate": "200bps",
+          "RxProcessingDelay": "300ms",
+          "transRange": "4500"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "name": "A1",
+        "x": -4500,
+        "y": 0,
+        "z": 0,
+        "role": "node",
+        "appAttrs": {
+          "PacketSize": "26",
+          "Delay": "5",
+          "StartTime": "0s"
+        },
+        "appDestination": 3,
+        "node_id": 1,
+        "appId": "ns3::AquaSimTrafficGen",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      },
+      {
+        "name": "B1",
+        "x": 1500,
+        "y": 0,
+        "z": 0,
+        "role": "node",
+        "appAttrs": {
+          "PacketSize": "26",
+          "Delay": "5",
+          "StartTime": "0s"
+        },
+        "appDestination": 3,
+        "node_id": 2,
+        "appId": "ns3::AquaSimTrafficGen",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      },
+      {
+        "name": "Sink1",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "role": "sink",
+        "appAttrs": {},
+        "node_id": 3,
+        "appId": "none",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      },
+      {
+        "name": "A2",
+        "x": -4500,
+        "y": 6000,
+        "z": 0,
+        "role": "node",
+        "appAttrs": {
+          "PacketSize": "26",
+          "Delay": "5",
+          "StartTime": "0s"
+        },
+        "appDestination": 6,
+        "node_id": 4,
+        "appId": "ns3::AquaSimTrafficGen",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      },
+      {
+        "name": "B2",
+        "x": 1500,
+        "y": 6000,
+        "z": 0,
+        "role": "node",
+        "appAttrs": {
+          "PacketSize": "26",
+          "Delay": "5",
+          "StartTime": "2s"
+        },
+        "appDestination": 6,
+        "node_id": 5,
+        "appId": "ns3::AquaSimTrafficGen",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      },
+      {
+        "name": "Sink2",
+        "x": 0,
+        "y": 6000,
+        "z": 0,
+        "role": "sink",
+        "appAttrs": {},
+        "node_id": 6,
+        "appId": "none",
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimBroadcastMac",
+        "routingId": "ns3::AquaSimStaticRouting"
+      }
+    ],
+    "selectedIds": [],
+    "activeCatalogId": "ns3::AquaSimBroadcastMac",
+    "aquaSimHome": "/Users/thou/repos/aqua-sim-dev",
+    "canvas": {
+      "version": 1,
+      "viewport": {
+        "width": 1468,
+        "height": 621
+      },
+      "view": {
+        "bounds": {
+          "minX": -4500,
+          "maxX": 1500,
+          "minY": 0,
+          "maxY": 6000
+        },
+        "center": {
+          "x": -1500,
+          "y": 3000
+        },
+        "scale": 0.065,
+        "zoom": 1
+      },
+      "nodeSize": 0.9,
+      "measurements": [
+        {
+          "id": "group-distance-1",
+          "start": {
+            "x": -4500,
+            "y": 0,
+            "z": 0,
+            "nodeId": 1
+          },
+          "end": {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "nodeId": 3
+          }
+        },
+        {
+          "id": "group-distance-2",
+          "start": {
+            "x": 1500,
+            "y": 0,
+            "z": 0,
+            "nodeId": 2
+          },
+          "end": {
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "nodeId": 3
+          }
+        },
+        {
+          "id": "group-distance-4",
+          "start": {
+            "x": -4500,
+            "y": 6000,
+            "z": 0,
+            "nodeId": 4
+          },
+          "end": {
+            "x": 0,
+            "y": 6000,
+            "z": 0,
+            "nodeId": 6
+          }
+        },
+        {
+          "id": "group-distance-5",
+          "start": {
+            "x": 1500,
+            "y": 6000,
+            "z": 0,
+            "nodeId": 5
+          },
+          "end": {
+            "x": 0,
+            "y": 6000,
+            "z": 0,
+            "nodeId": 6
+          }
+        }
+      ],
+      "nodeRanges": {},
+      "snapping": {
+        "enabled": true,
+        "grid": true,
+        "alignment": true,
+        "spacing": true
+      }
+    }
+  }
+}

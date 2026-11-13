@@ -1,0 +1,319 @@
+{
+  "schema": "aqua-sim-experiment/v0",
+  "protocolAttributes": {
+    "ns3::AquaSimTDMA": {
+      "SlotLen": "15s"
+    },
+    "ns3::AquaSimPhyCmn": {
+      "transRange": "1500"
+    },
+    "ns3::AquaSimPhySimple": {
+      "DataRate": "200bps",
+      "RxProcessingDelay": "300ms",
+      "transRange": "1500"
+    }
+  },
+  "simStop": "200s",
+  "channel": {
+    "type": "ns3::AquaSimChannel",
+    "propagation": "ns3::AquaSimRangePropagation"
+  },
+  "stack": {
+    "phy": {
+      "type": "ns3::AquaSimPhySimple",
+      "attrs": {
+        "txPower": 1.1
+      }
+    },
+    "mac": {
+      "type": "ns3::AquaSimTDMA",
+      "attrs": {}
+    },
+    "routing": {
+      "type": "ns3::AquaSimStaticRouting"
+    }
+  },
+  "nodes": [
+    {
+      "id": 1,
+      "name": "边缘节点1",
+      "x": -2478.15,
+      "y": 855.33,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "Delay": "10"
+      },
+      "appDestination": 3,
+      "protocolAttributes": {
+        "ns3::AquaSimTDMA": {
+          "Token": "0"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Node-2",
+      "x": -500,
+      "y": 855.33,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "Delay": "0"
+      },
+      "appDestination": 3,
+      "protocolAttributes": {
+        "ns3::AquaSimTDMA": {
+          "Token": "1"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "Node-3",
+      "x": -1407.29,
+      "y": 24.36,
+      "z": 0,
+      "role": "node",
+      "app": "",
+      "appAttrs": {}
+    },
+    {
+      "id": 4,
+      "name": "Node-4",
+      "x": -500,
+      "y": -888.67,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "Delay": "0"
+      },
+      "appDestination": 3,
+      "protocolAttributes": {
+        "ns3::AquaSimTDMA": {
+          "Token": "3"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Node-5",
+      "x": -2478.15,
+      "y": -888.67,
+      "z": 0,
+      "role": "node",
+      "app": "ns3::AquaSimTrafficGen",
+      "appAttrs": {
+        "Delay": "0"
+      },
+      "appDestination": 3,
+      "protocolAttributes": {
+        "ns3::AquaSimTDMA": {
+          "Token": "2"
+        }
+      }
+    }
+  ],
+  "traffic": {
+    "preset": "none"
+  },
+  "editor": {
+    "version": 3,
+    "form": {
+      "macId": "ns3::AquaSimTDMA",
+      "phyId": "ns3::AquaSimPhySimple",
+      "routingId": "ns3::AquaSimStaticRouting",
+      "channelId": "ns3::AquaSimChannel",
+      "propagationId": "ns3::AquaSimRangePropagation",
+      "simStop": "200s",
+      "txPower": 1.1,
+      "protocolAttributes": {
+        "ns3::AquaSimTDMA": {
+          "SlotLen": "15s"
+        },
+        "ns3::AquaSimPhyCmn": {
+          "transRange": "1500"
+        },
+        "ns3::AquaSimPhySimple": {
+          "DataRate": "200bps",
+          "RxProcessingDelay": "300ms",
+          "transRange": "1500"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "appDestination": 3,
+        "node_id": 1,
+        "name": "边缘节点1",
+        "role": "node",
+        "x": -2478.15,
+        "y": 855.33,
+        "z": 0,
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimTDMA",
+        "routingId": "ns3::AquaSimStaticRouting",
+        "appId": "ns3::AquaSimTrafficGen",
+        "appAttrs": {
+          "Delay": "10"
+        },
+        "protocolAttributes": {
+          "ns3::AquaSimTDMA": {
+            "Token": "0"
+          }
+        }
+      },
+      {
+        "appDestination": 3,
+        "node_id": 2,
+        "name": "Node-2",
+        "role": "node",
+        "x": -500,
+        "y": 855.33,
+        "z": 0,
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimTDMA",
+        "routingId": "ns3::AquaSimStaticRouting",
+        "appId": "ns3::AquaSimTrafficGen",
+        "appAttrs": {
+          "Delay": "0"
+        },
+        "protocolAttributes": {
+          "ns3::AquaSimTDMA": {
+            "Token": "1"
+          }
+        }
+      },
+      {
+        "node_id": 3,
+        "name": "Node-3",
+        "role": "node",
+        "x": -1407.29,
+        "y": 24.36,
+        "z": 0,
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimTDMA",
+        "routingId": "ns3::AquaSimStaticRouting",
+        "appId": "none",
+        "appAttrs": {}
+      },
+      {
+        "appDestination": 3,
+        "node_id": 4,
+        "name": "Node-4",
+        "role": "node",
+        "x": -500,
+        "y": -888.67,
+        "z": 0,
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimTDMA",
+        "routingId": "ns3::AquaSimStaticRouting",
+        "appId": "ns3::AquaSimTrafficGen",
+        "appAttrs": {
+          "Delay": "0"
+        },
+        "protocolAttributes": {
+          "ns3::AquaSimTDMA": {
+            "Token": "3"
+          }
+        }
+      },
+      {
+        "appDestination": 3,
+        "node_id": 5,
+        "name": "Node-5",
+        "role": "node",
+        "x": -2478.15,
+        "y": -888.67,
+        "z": 0,
+        "phyId": "ns3::AquaSimPhySimple",
+        "macId": "ns3::AquaSimTDMA",
+        "routingId": "ns3::AquaSimStaticRouting",
+        "appId": "ns3::AquaSimTrafficGen",
+        "appAttrs": {
+          "Delay": "0"
+        },
+        "protocolAttributes": {
+          "ns3::AquaSimTDMA": {
+            "Token": "2"
+          }
+        }
+      }
+    ],
+    "selectedIds": [],
+    "activeCatalogId": "phy:ns3::AquaSimPhySimple",
+    "aquaSimHome": "/Users/thou/repos/aqua-sim-dev",
+    "canvas": {
+      "version": 1,
+      "viewport": {
+        "width": 1468,
+        "height": 587
+      },
+      "view": {
+        "bounds": {
+          "minX": -2478.15,
+          "maxX": -500,
+          "minY": -888.67,
+          "maxY": 855.33
+        },
+        "center": {
+          "x": -823.1572916639593,
+          "y": 382.7026883817734
+        },
+        "scale": 0.1344893393344017,
+        "zoom": 0.5741723569135779
+      },
+      "nodeSize": 0.9,
+      "measurements": [
+        {
+          "id": "measure-1793076365591-20ad02",
+          "start": {
+            "x": -2478.15,
+            "y": -888.67,
+            "z": 0,
+            "nodeId": 5
+          },
+          "end": {
+            "x": -2478.15,
+            "y": 855.33,
+            "z": 0,
+            "nodeId": 1
+          }
+        },
+        {
+          "id": "measure-1793076368808-3eda27",
+          "start": {
+            "x": -1407.29,
+            "y": 24.36,
+            "z": 0,
+            "nodeId": 3
+          },
+          "end": {
+            "x": -2478.15,
+            "y": -888.67,
+            "z": 0,
+            "nodeId": 5
+          }
+        }
+      ],
+      "nodeRanges": {
+        "1": {
+          "visible": true,
+          "radiusM": "",
+          "filled": true,
+          "showLabel": true,
+          "opacity": 0.14
+        }
+      },
+      "snapping": {
+        "enabled": true,
+        "grid": true,
+        "alignment": true,
+        "spacing": true
+      }
+    }
+  }
+}

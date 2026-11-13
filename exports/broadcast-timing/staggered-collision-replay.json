@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "schema": "uan-vis-packet-log/v2",
+    "time_unit": "us",
+    "time_precision_us": 0.001,
+    "sim_end_us": 18000000,
+    "distance_unit": "m",
+    "protocols": {
+      "phy": [
+        "ns3::AquaSimPhySimple"
+      ],
+      "mac": [
+        "ns3::AquaSimBroadcastMac"
+      ],
+      "routing": [
+        "ns3::AquaSimStaticRouting"
+      ],
+      "channel": [
+        "ns3::AquaSimChannel"
+      ]
+    },
+    "trace_scope": "phy-events",
+    "propagation_speed_mps": 1499.99999925
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "name": "A",
+      "x": -4500,
+      "y": 0,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 2,
+      "name": "B",
+      "x": 1500,
+      "y": 0,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 3,
+      "name": "Sink",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "role": "sink"
+    }
+  ],
+  "packets": [
+    {
+      "packet_id": "phy-0",
+      "src": 1,
+      "tx_start_us": 10000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 13000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 13000000,
+          "rx_drop_us": 14600000,
+          "with": [
+            "phy-1"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-1",
+      "src": 2,
+      "tx_start_us": 12000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 13000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 13000000,
+          "rx_drop_us": 14600000,
+          "with": [
+            "phy-0"
+          ]
+        }
+      ]
+    }
+  ]
+}

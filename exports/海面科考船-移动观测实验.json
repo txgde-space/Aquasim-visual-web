@@ -1,0 +1,173 @@
+{
+  "schema": "aqua-sim-experiment/v0",
+  "simStop": "66s",
+  "traffic": {
+    "preset": "none"
+  },
+  "channel": {
+    "type": "ns3::AquaSimChannel",
+    "propagation": "ns3::AquaSimRangePropagation"
+  },
+  "stack": {
+    "phy": {
+      "type": "ns3::AquaSimPhySimple",
+      "attrs": {}
+    },
+    "mac": {
+      "type": "ns3::AquaSimBroadcastMac",
+      "attrs": {}
+    },
+    "routing": {
+      "type": "ns3::AquaSimStaticRouting"
+    }
+  },
+  "protocolAttributes": {
+    "ns3::AquaSimPhySimple": {
+      "DataRate": "200bps",
+      "transRange": "1000m",
+      "RxProcessingDelay": "300ms"
+    }
+  },
+  "nodes": [
+    {
+      "id": 1,
+      "name": "科考船",
+      "modelType": "vessel",
+      "role": "sink",
+      "x": -300,
+      "y": -200,
+      "z": 498.9,
+      "app": "",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "1.6m/s:0.2m/s:0"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "海面浮标",
+      "modelType": "buoy",
+      "role": "node",
+      "x": -270,
+      "y": 120,
+      "z": 497.3,
+      "app": "",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.1m/s:0.05m/s:0"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "作业ROV",
+      "modelType": "rov",
+      "role": "node",
+      "x": 60,
+      "y": -100,
+      "z": 440,
+      "app": "",
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.35m/s:-0.15m/s:0"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "巡航AUV-A",
+      "modelType": "auv",
+      "role": "node",
+      "x": 380,
+      "y": -260,
+      "z": 360,
+      "app": "ns3::AquaSimTrafficGen",
+      "appDestination": 1,
+      "appAttrs": {
+        "Delay": "12s",
+        "PacketSize": "40"
+      },
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "-1.2m/s:0.55m/s:0"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "巡航AUV-B",
+      "modelType": "auv",
+      "role": "node",
+      "x": -360,
+      "y": 420,
+      "z": 325,
+      "app": "ns3::AquaSimTrafficGen",
+      "appDestination": 1,
+      "appAttrs": {
+        "Delay": "17s",
+        "PacketSize": "40"
+      },
+      "mobility": {
+        "type": "ns3::AquaVisualLinearMobilityModel"
+      },
+      "protocolAttributes": {
+        "ns3::AquaVisualLinearMobilityModel": {
+          "InitialVelocity": "0.9m/s:-0.65m/s:0"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "水下观测站-6",
+      "modelType": "sensor",
+      "role": "node",
+      "x": -40,
+      "y": 400,
+      "z": 300,
+      "app": "ns3::AquaSimTrafficGen",
+      "appDestination": 1,
+      "appAttrs": {
+        "Delay": "24s",
+        "PacketSize": "40"
+      }
+    },
+    {
+      "id": 7,
+      "name": "水下观测站-7",
+      "modelType": "sensor",
+      "role": "node",
+      "x": 380,
+      "y": 380,
+      "z": 280,
+      "app": "ns3::AquaSimTrafficGen",
+      "appDestination": 1,
+      "appAttrs": {
+        "Delay": "29s",
+        "PacketSize": "40"
+      }
+    },
+    {
+      "id": 8,
+      "name": "水下中继-8",
+      "modelType": "sensor",
+      "role": "node",
+      "x": 230,
+      "y": 130,
+      "z": 400,
+      "app": ""
+    }
+  ]
+}

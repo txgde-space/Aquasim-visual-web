@@ -1,0 +1,365 @@
+{
+  "meta": {
+    "schema": "uan-vis-packet-log/v2",
+    "time_unit": "us",
+    "time_precision_us": 0.001,
+    "sim_end_us": 25000000,
+    "distance_unit": "m",
+    "protocols": {
+      "phy": [
+        "ns3::AquaSimPhySimple"
+      ],
+      "mac": [
+        "ns3::AquaSimBroadcastMac"
+      ],
+      "routing": [
+        "ns3::AquaSimStaticRouting"
+      ],
+      "channel": [
+        "ns3::AquaSimChannel"
+      ]
+    },
+    "trace_scope": "phy-events",
+    "propagation_speed_mps": 1499.99999925
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "name": "A1",
+      "x": -4500,
+      "y": 0,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 2,
+      "name": "B1",
+      "x": 1500,
+      "y": 0,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 3,
+      "name": "Sink1",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "role": "sink"
+    },
+    {
+      "node_id": 4,
+      "name": "A2",
+      "x": -4500,
+      "y": 6000,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 5,
+      "name": "B2",
+      "x": 1500,
+      "y": 6000,
+      "z": 0,
+      "role": "node"
+    },
+    {
+      "node_id": 6,
+      "name": "Sink2",
+      "x": 0,
+      "y": 6000,
+      "z": 0,
+      "role": "sink"
+    }
+  ],
+  "packets": [
+    {
+      "packet_id": "phy-0",
+      "src": 1,
+      "tx_start_us": 5000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 8000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 9900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-1",
+      "src": 2,
+      "tx_start_us": 5000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 6000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 7900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-2",
+      "src": 4,
+      "tx_start_us": 5000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 8000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 8000000,
+          "rx_drop_us": 9600000,
+          "with": [
+            "phy-3"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-3",
+      "src": 5,
+      "tx_start_us": 7000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 8000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 8000000,
+          "rx_drop_us": 9600000,
+          "with": [
+            "phy-2"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-4",
+      "src": 1,
+      "tx_start_us": 10000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 13000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 14900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-5",
+      "src": 2,
+      "tx_start_us": 10000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 11000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 12900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-6",
+      "src": 4,
+      "tx_start_us": 10000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 13000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 13000000,
+          "rx_drop_us": 14600000,
+          "with": [
+            "phy-7"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-7",
+      "src": 5,
+      "tx_start_us": 12000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 13000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 13000000,
+          "rx_drop_us": 14600000,
+          "with": [
+            "phy-6"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-8",
+      "src": 1,
+      "tx_start_us": 15000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 18000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 19900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-9",
+      "src": 2,
+      "tx_start_us": 15000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 16000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 17900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-10",
+      "src": 4,
+      "tx_start_us": 15000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 18000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 18000000,
+          "rx_drop_us": 19600000,
+          "with": [
+            "phy-11"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-11",
+      "src": 5,
+      "tx_start_us": 17000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 18000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 18000000,
+          "rx_drop_us": 19600000,
+          "with": [
+            "phy-10"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-12",
+      "src": 1,
+      "tx_start_us": 20000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 23000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 24900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-13",
+      "src": 2,
+      "tx_start_us": 20000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 3,
+          "rx_start_us": 21000000,
+          "rx_duration_us": 1600000,
+          "status": "ok",
+          "rx_processing_duration_us": 300000,
+          "rx_delivery_us": 22900000
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-14",
+      "src": 4,
+      "tx_start_us": 20000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 23000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 23000000,
+          "rx_drop_us": 24600000,
+          "with": [
+            "phy-15"
+          ]
+        }
+      ]
+    },
+    {
+      "packet_id": "phy-15",
+      "src": 5,
+      "tx_start_us": 22000000,
+      "tx_duration_us": 1600000,
+      "receivers": [
+        {
+          "dst": 6,
+          "rx_start_us": 23000000,
+          "rx_duration_us": 1600000,
+          "status": "fail",
+          "reason": "collision_rx_rx",
+          "collision_start_us": 23000000,
+          "rx_drop_us": 24600000,
+          "with": [
+            "phy-14"
+          ]
+        }
+      ]
+    }
+  ]
+}

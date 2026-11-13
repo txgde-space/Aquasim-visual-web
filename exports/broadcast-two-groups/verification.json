@@ -1,0 +1,149 @@
+{
+  "min_cross_group_distance_m": 6000,
+  "timings": [
+    {
+      "src": 1,
+      "group": 1,
+      "tx_s": 5,
+      "rx_start_s": 8,
+      "rx_end_s": 9.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 2,
+      "group": 1,
+      "tx_s": 5,
+      "rx_start_s": 6,
+      "rx_end_s": 7.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 4,
+      "group": 2,
+      "tx_s": 5,
+      "rx_start_s": 8,
+      "rx_end_s": 9.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 5,
+      "group": 2,
+      "tx_s": 7,
+      "rx_start_s": 8,
+      "rx_end_s": 9.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 1,
+      "group": 1,
+      "tx_s": 10,
+      "rx_start_s": 13,
+      "rx_end_s": 14.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 2,
+      "group": 1,
+      "tx_s": 10,
+      "rx_start_s": 11,
+      "rx_end_s": 12.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 4,
+      "group": 2,
+      "tx_s": 10,
+      "rx_start_s": 13,
+      "rx_end_s": 14.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 5,
+      "group": 2,
+      "tx_s": 12,
+      "rx_start_s": 13,
+      "rx_end_s": 14.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 1,
+      "group": 1,
+      "tx_s": 15,
+      "rx_start_s": 18,
+      "rx_end_s": 19.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 2,
+      "group": 1,
+      "tx_s": 15,
+      "rx_start_s": 16,
+      "rx_end_s": 17.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 4,
+      "group": 2,
+      "tx_s": 15,
+      "rx_start_s": 18,
+      "rx_end_s": 19.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 5,
+      "group": 2,
+      "tx_s": 17,
+      "rx_start_s": 18,
+      "rx_end_s": 19.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 1,
+      "group": 1,
+      "tx_s": 20,
+      "rx_start_s": 23,
+      "rx_end_s": 24.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 2,
+      "group": 1,
+      "tx_s": 20,
+      "rx_start_s": 21,
+      "rx_end_s": 22.6,
+      "status": "ok",
+      "reason": ""
+    },
+    {
+      "src": 4,
+      "group": 2,
+      "tx_s": 20,
+      "rx_start_s": 23,
+      "rx_end_s": 24.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    },
+    {
+      "src": 5,
+      "group": 2,
+      "tx_s": 22,
+      "rx_start_s": 23,
+      "rx_end_s": 24.6,
+      "status": "fail",
+      "reason": "collision_rx_rx"
+    }
+  ]
+}
