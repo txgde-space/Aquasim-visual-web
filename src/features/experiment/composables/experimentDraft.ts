@@ -1,3 +1,4 @@
+import type { CanvasState } from '../../../shared/types/canvas'
 import { ref } from 'vue'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
 import { createDefaultExperimentForm } from '../lib/experimentSpec'
@@ -8,5 +9,6 @@ export const experimentDraft = {
   nodes: ref<TopologyNode[]>([]),
   form: ref<ExperimentForm>(createDefaultExperimentForm()),
   selectedIds: ref<number[]>([]),
-  activeCatalogId: ref('mac:swarm'),
+  activeCatalogId: ref(''),
+  canvas: ref<CanvasState>(),
 }

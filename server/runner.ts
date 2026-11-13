@@ -6,6 +6,7 @@ import type { IncomingMessage } from 'node:http'
 import type { ExperimentSpec } from '../src/shared/types/experiment'
 import { generateAquaVisualCc } from '../src/features/experiment/lib/generateScratch'
 import { inspectSimulator } from './simulatorConfig'
+import { simulatorInputSignature, rememberSimulatorBuild, forgetSimulatorBuild, reusableSimulatorCatalog } from './simulatorBuildCache'
 import { cachedCatalog, catalogProbe, invalidateCatalog, saveCatalog } from './protocolCatalog'
 
 /** POST /api/run request body limit (1 MB). */
@@ -48,6 +49,9 @@ export const readPrecompileProgress = (aquaSimHome: unknown = ''): RunOutcome =>
   const home = fs.realpathSync(config.home)
   return { status: 200, payload: { ok: true, progress: buildProgress?.home === home ? buildProgress : null, task: taskMetadata() } }
 }
+
+/** Check reuse only while the build tree is idle. Checking never executes ns-3. */
+export const readReusableSimulatorCatalog = (home: string) => activeTask ? null : reusableSimulatorCatalog(home)
 
 interface ConfiguredCache {
   directory: string
@@ -115,11 +119,12 @@ const collectRunLog = (cwd: string, sinceMs: number, fallbackName: string): { lo
   // Every stack uses the same PHY trace; native logs remain a fallback.
   hits.sort((a, b) => Number(b.name === fallbackName) - Number(a.name === fallbackName) || b.mtimeMs - a.mtimeMs)
   if (hits[0].name === fallbackName && hits.length > 1) {
-    // Some implementations expose no common Tx/Rx events. An empty adapter log
-    // must not conceal their native output; this rule applies to every stack.
+    // A trajectory is useful without packet traffic. Only an adapter with no
+    // packet or movement observations falls back to the protocol's native log.
     try {
       const generated = JSON.parse(fs.readFileSync(hits[0].full, 'utf8'))
-      if (Array.isArray(generated.packets) && generated.packets.length === 0) hits.shift()
+      const hasMovement = Array.isArray(generated.movements) && generated.movements.length > 0
+      if (Array.isArray(generated.packets) && generated.packets.length === 0 && !hasMovement) hits.shift()
     } catch {
       hits.shift()
     }
@@ -206,6 +211,12 @@ const runNs3 = async (cwd: string, program: string, sinceMs: number, logName: st
   }
 }
 
+/** Command output belongs in stdout; the UI-facing error stays concise. */
+class CatalogProbeError extends Error {
+  constructor(message: string, readonly stdout: string) { super(message) }
+}
+const diagnosticOutput = (error: unknown): string => error instanceof CatalogProbeError ? error.stdout : ''
+
 const discoverCatalog = async (home: string) => {
   const name = `aqua-visual-catalog-${randomUUID().slice(0, 8)}`
   const scratch = path.join(home, 'scratch', `${name}.cc`)
@@ -213,8 +224,9 @@ const discoverCatalog = async (home: string) => {
     fs.mkdirSync(path.dirname(scratch), { recursive: true })
     fs.writeFileSync(scratch, catalogProbe)
     const result = await runProcess(home, [path.join(home, 'ns3'), 'run', name], BUILD_TIMEOUT_MS)
-    if (result.code !== 0) throw new Error(`读取注册协议失败：\n${result.stdout}`)
-    return saveCatalog(home, result.stdout)
+    if (result.code !== 0) throw new CatalogProbeError('读取注册协议失败，请查看详情。', result.stdout)
+    try { return saveCatalog(home, result.stdout) }
+    catch (error) { throw new CatalogProbeError(error instanceof Error ? error.message : String(error), result.stdout) }
   } finally {
     fs.rmSync(scratch, { force: true })
   }
@@ -223,6 +235,7 @@ const discoverCatalog = async (home: string) => {
 const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
   const config = inspectSimulator(aquaSimHome)
   if (!config.ok) return { status: 400, payload: config }
+  forgetSimulatorBuild(config.home)
   setBuildProgress(config.home, 'configure')
   const setup = await ensureConfigured(config.home)
   if (!setup.ok) {
@@ -232,6 +245,7 @@ const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
       payload: { ok: false, phase: 'configure', error: '预编译配置失败', stdout: setup.stdout, home: config.home },
     }
   }
+  const inputBeforeBuild = simulatorInputSignature(config.home)
   setBuildProgress(config.home, 'build')
   let progressTail = ''
   const build = await runProcess(config.home, [path.join(config.home, 'ns3'), 'build'], BUILD_TIMEOUT_MS, (chunk) => {
@@ -247,12 +261,13 @@ const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
   let catalog
   if (ok) {
     setBuildProgress(config.home, 'catalog')
-    try { catalog = await discoverCatalog(config.home) }
+    try { catalog = cachedCatalog(config.home) || await discoverCatalog(config.home) }
     catch (error) {
       setBuildProgress(config.home, 'failed')
-      return { status: 500, payload: { ok: false, phase: 'catalog', error: String(error), stdout: [setup.stdout, build.stdout].filter(Boolean).join('\n') } }
+      return { status: 500, payload: { ok: false, phase: 'catalog', error: error instanceof Error ? error.message : String(error), stdout: [setup.stdout, build.stdout, diagnosticOutput(error)].filter(Boolean).join('\n') } }
     }
   }
+  if (ok && catalog) rememberSimulatorBuild(config.home, inputBeforeBuild, catalog)
   setBuildProgress(config.home, ok ? 'done' : 'failed', ok ? 1 : 0, 1)
   return {
     status: ok ? 200 : 500,
@@ -269,6 +284,7 @@ const doPrecompile = async (aquaSimHome: unknown): Promise<RunOutcome> => {
 const doClearBuild = async (aquaSimHome: unknown): Promise<RunOutcome> => {
   const config = inspectSimulator(aquaSimHome)
   if (!config.ok) return { status: 400, payload: config }
+  forgetSimulatorBuild(config.home)
   const clean = await runProcess(config.home, [path.join(config.home, 'ns3'), 'clean'], CLEAN_TIMEOUT_MS)
   if (clean.code === 0) {
     invalidateCatalog(config.home)
@@ -328,7 +344,7 @@ const doRunExperiment = async (spec: unknown, aquaSimHome: unknown): Promise<Run
     return { status: result.ok ? 200 : 500, payload }
   } catch (error) {
     const message = String((error as { message?: unknown })?.message || error)
-    return { status: 500, payload: { ok: false, error: message, stdout: [setupOutput, message].filter(Boolean).join('\n') } }
+    return { status: 500, payload: { ok: false, error: message, stdout: [setupOutput, message, diagnosticOutput(error)].filter(Boolean).join('\n') } }
   } finally {
     try {
       fs.unlinkSync(scratchAbs)

@@ -47,6 +47,17 @@ export async function checkProtocolSource(server) {
         assert.equal((await request({ typeId: radioType, path: file })).status, 403, 'built-in model access is an exact allowlist, not another filesystem reader')
       }
     }
+    const simplePhy = await request({ typeId: 'ns3::AquaSimPhySimple' })
+    assert.equal(simplePhy.status, 200)
+    assert.equal(simplePhy.payload.selectedPath, 'builtin/aqua-sim-phy-simple.cc')
+    assert.match(simplePhy.payload.code, /AquaSimPhySimple/)
+    assert.equal((await request({ typeId: 'ns3::AquaSimPhySimple', path: 'builtin/terrestrial-radio.cc' })).status, 403)
+    const vbf = await request({ typeId: 'ns3::AquaSimVBF' })
+    assert.equal(vbf.status, 200)
+    assert.equal(vbf.payload.selectedPath, 'builtin/aqua-sim-routing-vbf.cc')
+    assert.match(vbf.payload.code, /fa7a655f|AquaSimVBF/)
+    assert.match(vbf.payload.code, /return Projection\(pkt\) <= m_width/)
+    assert.equal((await request({ typeId: 'ns3::AquaSimVBF', path: 'builtin/terrestrial-radio.cc' })).status, 403)
     assert.equal((await request({ path: 'builtin/terrestrial-radio.cc' })).status, 403)
 
     for (const typeId of ['ns3::Missing', 'ns3::CommentOnly', 'ns3::BlockComment', 'ns3::RawStringOnly', 'ns3::NotARegistration']) {

@@ -1,8 +1,11 @@
+import { parseCanvasState } from '../../../shared/canvasState'
+import { isNodeModelType } from '../../../shared/nodeModel'
+import type { CanvasState } from '../../../shared/types/canvas'
 import type { ExperimentForm, TopologyNode } from '../../../shared/types/experiment'
 import { buildExperimentSpec, createDefaultExperimentForm } from './experimentSpec'
 import { catalogItemById, TYPEID_LAYERS, type CatalogLayer } from './typeIdCatalog'
 import { isNodeId, MAX_NODE_COUNT, MAX_NODE_ID, MIN_NODE_ID, topologyIssues } from './experimentValidation'
-import { legacyEnvironmentAttributes, legacyProtocolType, mergeProtocolAttributes, migrateLegacyApplications, migrateLegacyProtocolAttributes, readLegacyTrafficSettings } from './legacyExperiment'
+import { legacyEnvironmentAttributes, legacyProtocolDefaults, legacyProtocolType, mergeProtocolAttributes, migrateLegacyApplications, migrateLegacyProtocolAttributes, readLegacyTrafficSettings } from './legacyExperiment'
 
 export interface ExperimentDraftData {
   form: ExperimentForm
@@ -10,6 +13,7 @@ export interface ExperimentDraftData {
   selectedIds: number[]
   activeCatalogId: string
   aquaSimHome?: string
+  canvas?: CanvasState
 }
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
@@ -33,6 +37,9 @@ const attributes = (value: unknown): Record<string, string> => Object.fromEntrie
 const protocolAttributes = (value: unknown) => Object.fromEntries(
   Object.entries(object(value ?? {}, 'protocolAttributes')).map(([key, value]) => [key, attributes(value)]),
 )
+const nodeProtocolAttributes = (value: unknown) => Object.fromEntries(
+  Object.entries(object(value, '节点协议覆盖')).map(([key, value]) => [key, attributes(object(value, `节点 ${key} 的属性覆盖`))]),
+)
 
 /** Preserve inactive form settings as well as the executable v0 spec. */
 export const serializeExperiment = (draft: ExperimentDraftData, layers: CatalogLayer[] = TYPEID_LAYERS): string => JSON.stringify({
@@ -45,6 +52,7 @@ export const serializeExperiment = (draft: ExperimentDraftData, layers: CatalogL
     selectedIds: draft.selectedIds,
     activeCatalogId: draft.activeCatalogId,
     aquaSimHome: draft.aquaSimHome,
+    canvas: draft.canvas,
   },
 }, null, 2)
 
@@ -89,7 +97,7 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
   if (editor) {
     const saved = object(editor.form, 'editor.form')
     legacyTraffic = readLegacyTrafficSettings(doc.traffic, saved)
-    const defaults = createDefaultExperimentForm()
+    const defaults = { ...createDefaultExperimentForm(), ...(editor.version !== 3 ? legacyProtocolDefaults : {}) }
     const fields = Object.fromEntries(Object.entries(defaults).filter(([key]) => key !== 'protocolAttributes').map(([key, fallback]) => [key,
       saved[key] === undefined ? fallback : typeof fallback === 'number' ? number(saved[key], key) : string(saved[key], key),
     ]))
@@ -132,8 +140,15 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
     if (!isNodeId(id)) throw new Error(`节点编号必须是 ${MIN_NODE_ID}–${MAX_NODE_ID} 的整数`)
     const appDestination = node.appDestination === undefined ? undefined : number(node.appDestination, '应用目的节点')
     if (appDestination !== undefined && !isNodeId(appDestination)) throw new Error('应用目的节点编号无效')
+    if (node.modelType !== undefined && !isNodeModelType(node.modelType)) throw new Error(`节点 ${id} 的模型类型 modelType 无效`)
+    const mobility = node.mobility === undefined ? undefined : object(node.mobility, `节点 ${id} 的移动模型`)
+    if (mobility && Object.keys(mobility).some((key) => key !== 'type')) throw new Error(`节点 ${id} 的移动模型仅保存 type；属性应放在节点 protocolAttributes 中`)
+    const mobilityType = mobility === undefined ? undefined : string(mobility.type, `节点 ${id} 的移动模型 TypeId`)
+    if (mobilityType !== undefined && !mobilityType.trim()) throw new Error(`节点 ${id} 的移动模型 TypeId 不能为空`)
     return {
       ...(appDestination === undefined ? {} : { appDestination }),
+      ...(node.modelType === undefined ? {} : { modelType: node.modelType }),
+      ...(mobilityType === undefined ? {} : { mobility: { type: mobilityType } }),
       node_id: id, name: string(node.name ?? `Node-${id}`, '节点名称'), role: string(node.role ?? 'node', '节点角色'),
       x: number(node.x, 'x'), y: number(node.y, 'y'), z: number(node.z ?? 0, 'z'),
       phyId: editor?.nodes ? string(node.phyId ?? form.phyId, 'phyId') : form.phyId,
@@ -141,6 +156,7 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
       routingId: editor?.nodes ? string(node.routingId ?? form.routingId, 'routingId') : form.routingId,
       appId: editor?.nodes ? legacyProtocolType('app', string(node.appId ?? 'none', 'appId'), layers) || 'none' : idFor('app', node.app ?? ''),
       appAttrs: attributes(node.appAttrs),
+      ...(node.protocolAttributes === undefined ? {} : { protocolAttributes: nodeProtocolAttributes(node.protocolAttributes) }),
     }
   })
   const nodeIssues = topologyIssues(nodes.map((node) => ({ ...node, id: node.node_id })))
@@ -153,5 +169,6 @@ export const parseExperiment = (text: string, layers: CatalogLayer[] = TYPEID_LA
     selectedIds: Array.isArray(selected) ? selected.filter((id) => nodes.some((node) => node.node_id === id)) : nodes.slice(0, 1).map((node) => node.node_id),
     activeCatalogId: editor?.activeCatalogId === undefined ? `mac:${form.macId}` : string(editor.activeCatalogId, 'activeCatalogId'),
     aquaSimHome: editor?.aquaSimHome === undefined ? undefined : string(editor.aquaSimHome, 'AQUA_SIM_HOME'),
+    ...(editor?.canvas === undefined ? {} : { canvas: parseCanvasState(editor.canvas) }),
   }
 }

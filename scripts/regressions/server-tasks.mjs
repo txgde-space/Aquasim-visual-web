@@ -1,3 +1,4 @@
+import { fixtureLayers, selectedForm } from './protocol-fixture.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -6,13 +7,13 @@ import path from 'node:path'
 export async function checkServerTasks(server) {
   const { precompileSimulatorGuarded: build, runExperimentGuarded: run, clearSimulatorBuildGuarded: clean, readPrecompileProgress: progress } = await server.ssrLoadModule('/server/runner.ts')
   const { createDefaultExperimentForm, buildExperimentSpec } = await server.ssrLoadModule('/src/features/experiment/lib/experimentSpec.ts')
-  const { TYPEID_LAYERS } = await server.ssrLoadModule('/src/features/experiment/lib/typeIdCatalog.ts')
   const { RADIO_TYPE_IDS } = await server.ssrLoadModule('/src/features/experiment/lib/radioEnvironment.ts')
-  const rows = TYPEID_LAYERS.flatMap((layer) => layer.items.filter((item) => item.typeId).map((item) => ({
+  const rows = fixtureLayers.flatMap((layer) => layer.items.filter((item) => item.typeId).map((item) => ({
     layer: item.field === 'propagationId' ? 'propagation' : layer.id, typeId: item.typeId, attributes: [],
   })))
-  const spec = buildExperimentSpec(createDefaultExperimentForm(), [{ node_id: 1, x: 0, y: 0, z: 0 }, { node_id: 2, x: 100, y: 0, z: 0 }])
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aquasim-task-lock-'))
+  const spec = buildExperimentSpec(selectedForm(createDefaultExperimentForm), [{ node_id: 1, x: 0, y: 0, z: 0 }, { node_id: 2, x: 100, y: 0, z: 0 }])
+  // macOS aliases /var to /private/var; compare against the runner's real paths.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aquasim-task-lock-')))
   const homes = []
   const tasks = []
   const track = (promise) => { tasks.push(promise); void promise.catch(() => {}); return promise }
@@ -37,7 +38,7 @@ if (phase === 'build') fs.writeSync(1, '[1/2] fixture compilation\\n');
   if (phase === 'catalog') fs.writeSync(1, 'AQUASIM_CATALOG_BEGIN\\n' + ${JSON.stringify(JSON.stringify(rows))} + '\\nAQUASIM_CATALOG_END\\n');
   if (phase === 'run' && fs.existsSync(path.join(home, 'cleanup-error'))) fs.mkdirSync(path.join(home, 'net.' + args[1] + '.json'));
   if (phase === 'run' && fs.existsSync(path.join(home, 'dual-logs'))) {
-    fs.writeFileSync(path.join(home, 'net.' + args[1] + '.json'), JSON.stringify({ meta: { time_precision_us: 0.001 }, packets: fs.existsSync(path.join(home, 'empty-trace')) ? [] : [{ src: 1, tx_start_us: 0, tx_duration_us: 1 }] }));
+    fs.writeFileSync(path.join(home, 'net.' + args[1] + '.json'), JSON.stringify({ meta: { time_precision_us: 0.001 }, packets: fs.existsSync(path.join(home, 'empty-trace')) ? [] : [{ src: 1, tx_start_us: 0, tx_duration_us: 1 }], movements: fs.existsSync(path.join(home, 'movement-trace')) ? [{ node_id: 1, start_us: 0, end_us: 1000000, start: { x: 0, y: 0, z: -20 }, end: { x: 10, y: 0, z: -20 } }] : [] }));
     fs.writeFileSync(path.join(home, 'net.native.json'), JSON.stringify({ native: true }));
   }
 })().catch(error => { console.error(error); process.exitCode = 9; });
@@ -113,6 +114,11 @@ if (phase === 'build') fs.writeSync(1, '[1/2] fixture compilation\\n');
       const result = await original
       assert.equal(result.status, 500)
       assert.equal(result.payload.phase, phase)
+      if (phase === 'catalog') {
+        assert.match(result.payload.stdout,/fixture catalog failed/,'failed probe output is kept in stdout')
+        assert.match(result.payload.error,/读取注册协议失败/)
+        assert.doesNotMatch(result.payload.error,/fixture catalog failed/,'the status does not embed full compiler output')
+      }
       assert.equal(await duplicate, result, 'duplicates receive the same failure result')
       assert.equal(progress(failed).payload.task, null)
       assert.equal(progress(failed).payload.progress.phase, 'failed')
@@ -168,6 +174,10 @@ if (phase === 'build') fs.writeSync(1, '[1/2] fixture compilation\\n');
     flag(logging, 'empty-trace')
     const emptyResult = await track(run(radioSpec, logging))
     assert.equal(emptyResult.payload.logName, 'net.native.json', 'a model without common trace events retains its native output')
+    flag(logging, 'movement-trace')
+    const movingResult = await track(run(radioSpec, logging))
+    assert.match(movingResult.payload.logName, /^net\.aqua-visual-.*\.json$/, 'real movement observations remain replayable without packet traffic')
+    assert.equal(JSON.parse(movingResult.payload.log).movements.length, 1)
     console.log('server task regressions passed: canonical build joining, global busy metadata, all phases, shared failures, immediate release and exception recovery')
   } finally {
     // Always unblock fixture children before removing their working directories.

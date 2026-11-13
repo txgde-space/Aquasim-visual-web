@@ -1,5 +1,8 @@
 import type { ExperimentSpec } from '../../../shared/types/experiment'
 import type { CatalogItem, CatalogLayer, ProtocolAttribute } from './typeIdCatalog'
+import { deviceProtocolConfigurations, NODE_PROTOCOL_LAYERS } from './protocolConfiguration'
+
+import { attributeLiteral, nonBlankAttributes } from './protocolUnits'
 
 /** Public socket-application contract, identified from registered attributes rather than class names. */
 export const hasSocketInterface = (item: CatalogItem | undefined): boolean => (
@@ -19,6 +22,9 @@ export const attributeEditState = (item: CatalogItem, attr: ProtocolAttribute, l
   if (['phy', 'mac', 'routing'].includes(layerId || '') && attr.name === 'SetDevice' && attr.valueType === 'ns3::PointerValue') {
     return { editable: false, managed: true, reason: '由所在节点的公共设备接口连接' }
   }
+  if (layerId === 'mobility' && attr.name === 'Position' && ['ns3::VectorValue', 'ns3::Vector3DValue'].includes(attr.valueType)) {
+    return { editable: false, managed: true, reason: '由节点坐标设置初始位置' }
+  }
   if (attr.constructible === false) return { editable: false, managed: false, reason: '注册接口不允许在构造时配置' }
   if (['ns3::ObjectVectorValue', 'ns3::ObjectMapValue'].includes(attr.valueType)) {
     return { editable: false, managed: false, reason: '对象容器暂不支持文本配置' }
@@ -34,26 +40,54 @@ export const protocolMetadataIssues = (spec: ExperimentSpec, layers: CatalogLaye
     item.typeId === typeId && (layerId !== 'channel' || (item.field === 'propagationId') === propagation)
   ))
   const check = (layerId: string, typeId: string, attrs: Record<string, unknown>, label = typeId, propagation = false) => {
+    if (!typeId) { issues.push(`请选择${propagation ? '传播模型' : layers.find((layer) => layer.id === layerId)?.label || layerId}协议`); return }
     const item = itemFor(layerId, typeId, propagation)
     if (!item) { issues.push(`${layerId} 未注册协议：${typeId}，请先预编译`); return }
     if (!item.attributes) { issues.push(`${typeId} 缺少注册属性信息，请先预编译`); return }
-    for (const [name, value] of Object.entries(attrs)) {
+    for (const [name, value] of Object.entries(nonBlankAttributes(attrs))) {
       const attr = item.attributes.find((entry) => entry.name === name)
       if (!attr) { issues.push(`${label} 没有属性 ${name}`); continue }
       const state = attributeEditState(item, attr, layerId)
       if (!state.editable) issues.push(`${label}.${name}：${state.reason}`)
       if (!['string', 'number', 'boolean'].includes(typeof value)) issues.push(`${label}.${name} 必须是标量属性值`)
+      else if (state.editable) {
+        try { attributeLiteral(attr, value) }
+        catch (error) { issues.push(`${label}.${name}：${error instanceof Error ? error.message : String(error)}`) }
+      }
     }
   }
-  const phyAttrs = { ...spec.stack?.phy?.attrs }
-  delete phyAttrs.txPower // Unused historical shortcut; explicit protocol values retain their meaning.
-  check('phy', spec.stack?.phy?.type, { ...phyAttrs, ...extras[spec.stack?.phy?.type] })
-  check('mac', spec.stack?.mac?.type, { ...spec.stack?.mac?.attrs, ...extras[spec.stack?.mac?.type] })
-  check('routing', spec.stack?.routing?.type, extras[spec.stack?.routing?.type] || {})
+  for (const node of spec.nodes.length ? spec.nodes : [undefined]) {
+    for (const config of deviceProtocolConfigurations(spec, node)) {
+      check(config.layerId, config.typeId, config.attributes, node ? `节点 ${node.id} 的 ${config.typeId}` : config.typeId)
+    }
+  }
   check('channel', spec.channel?.type, extras[spec.channel?.type] || {})
   check('channel', spec.channel?.propagation, extras[spec.channel?.propagation] || {}, spec.channel?.propagation, true)
+  for (const item of layers.find((layer) => layer.id === 'mobility')?.items || []) {
+    if (Object.keys(nonBlankAttributes(extras[item.typeId] || {})).length) issues.push(`${item.typeId} 的移动模型属性必须放在节点 protocolAttributes 中`)
+  }
   const ids = new Set(spec.nodes.map((node) => node.id))
   for (const node of spec.nodes) {
+    const overrides = node.protocolAttributes
+    if (overrides !== undefined) {
+      if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) issues.push(`节点 ${node.id} 的协议覆盖必须是对象`)
+      else for (const [typeId, attrs] of Object.entries(overrides)) {
+        if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) { issues.push(`节点 ${node.id} 的 ${typeId} 覆盖必须是属性对象`); continue }
+        if (Object.values(attrs).some((value) => !['string', 'number', 'boolean'].includes(typeof value))) issues.push(`节点 ${node.id} 的 ${typeId} 属性必须是标量`)
+        const owner = layers.find((layer) => layer.items.some((item) => item.typeId === typeId))
+        if (Object.keys(attrs).length && owner && owner.id !== 'mobility' && !NODE_PROTOCOL_LAYERS.some((id) => id === owner.id)) {
+          issues.push(`节点 ${node.id} 的 ${typeId} 不支持节点协议覆盖；信道与传播模型在统一参数中配置，应用使用节点应用属性`)
+        }
+      }
+    }
+    if (node.mobility !== undefined) {
+      if (!node.mobility || typeof node.mobility !== 'object' || Array.isArray(node.mobility) || typeof node.mobility.type !== 'string') {
+        issues.push(`节点 ${node.id} 的移动模型必须包含 TypeId 字符串`)
+      } else {
+        if (Object.keys(node.mobility).some((key) => key !== 'type')) issues.push(`节点 ${node.id} 的移动模型仅保存 type；属性应放在节点 protocolAttributes 中`)
+        check('mobility', node.mobility.type, overrides?.[node.mobility.type] || {}, `节点 ${node.id} 的 ${node.mobility.type}`)
+      }
+    }
     if (!node.app) continue
     check('app', node.app, node.appAttrs || {}, `节点 ${node.id} 的 ${node.app}`)
     if (hasSocketInterface(itemFor('app', node.app))) {
@@ -61,5 +95,5 @@ export const protocolMetadataIssues = (spec: ExperimentSpec, layers: CatalogLaye
       else if (!ids.has(node.appDestination)) issues.push(`节点 ${node.id} 的应用目的节点不在拓扑中`)
     }
   }
-  return issues
+  return [...new Set(issues)]
 }

@@ -9,6 +9,7 @@ export const TERRESTRIAL_RADIO_CC = String.raw`
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace ns3 {
@@ -39,7 +40,15 @@ public:
             .AddAttribute("DataRate", "Ideal radio bit rate; no acoustic OFDM or preamble overhead.",
                 DataRateValue(DataRate("1Mbps")),
                 MakeDataRateAccessor(&AquaSimRadioPhy::SetDataRate, &AquaSimRadioPhy::GetDataRate),
-                MakeDataRateChecker());
+                MakeDataRateChecker())
+            .AddTraceSource("RxBegin", "Actual ideal-radio reception attempt.",
+                MakeTraceSourceAccessor(&AquaSimRadioPhy::m_rxBegin), "ns3::AquaVisualRxBeginCallback")
+            .AddTraceSource("RxCollision", "Collision observed by the ideal-radio medium.",
+                MakeTraceSourceAccessor(&AquaSimRadioPhy::m_rxCollision), "ns3::AquaVisualRxCollisionCallback")
+            .AddTraceSource("RxDrop", "Actual failed radio reception.",
+                MakeTraceSourceAccessor(&AquaSimRadioPhy::m_rxDrop), "ns3::AquaVisualRxDropCallback")
+            .AddTraceSource("RxEnd", "Radio reception has ended.",
+                MakeTraceSourceAccessor(&AquaSimRadioPhy::m_rxEnd), "ns3::AquaVisualRxEndCallback");
         return tid;
     }
     void SetDataRate(DataRate rate) {
@@ -47,6 +56,9 @@ public:
         m_rate = rate;
     }
     DataRate GetDataRate() const { return m_rate; }
+    void addModulation(Ptr<AquaSimModulation>, int) override {
+        throw std::invalid_argument("Ideal radio PHY uses DataRate and does not support acoustic modulation objects");
+    }
     Time calcTxTime(uint32_t bytes) override {
         return std::max(NanoSeconds(1), m_rate.CalculateBytesTxTime(bytes));
     }
@@ -100,9 +112,20 @@ public:
         auto reception = std::make_shared<Reception>();
         reception->packet = packet;
         reception->end = Simulator::Now() + NanoSeconds(tag.nanoseconds);
+        m_rxBegin(packet, NanoSeconds(tag.nanoseconds));
         reception->collided = Simulator::Now() < m_txEnd;
+        if (reception->collided) {
+            reception->reason = "collision_rx_tx";
+            m_rxCollision(packet, nullptr, reception->reason);
+        }
         for (const auto& other : m_receiving) {
-            if (other->end > Simulator::Now()) { other->collided = true; reception->collided = true; }
+            if (other->end > Simulator::Now()) {
+                other->collided = true; reception->collided = true;
+                if (other->reason.empty()) other->reason = "collision_rx_rx";
+                if (reception->reason.empty()) reception->reason = "collision_rx_rx";
+                m_rxCollision(other->packet, packet, other->reason);
+                m_rxCollision(packet, other->packet, reception->reason);
+            }
         }
         m_receiving.push_back(reception);
         setStatus(NIDLE, 0);
@@ -118,6 +141,8 @@ public:
     }
 
 protected:
+    // Airtime comes directly from DataRate; no acoustic modulation table is needed.
+    void initmodulations() override {}
     bool matchPkt(Ptr<Packet> packet) override {
         AquaSimRadioDurationTag tag;
         return packet->PeekPacketTag(tag);
@@ -134,7 +159,7 @@ protected:
     }
 
 private:
-    struct Reception { Ptr<Packet> packet; EventId event; Time end; bool collided = false; };
+    struct Reception { Ptr<Packet> packet; EventId event; Time end; bool collided = false; std::string reason; };
     bool HasActiveReceptions() const {
         return std::any_of(m_receiving.begin(), m_receiving.end(), [](const auto& reception) {
             return reception->end > Simulator::Now();
@@ -147,8 +172,15 @@ private:
         if (!reception->collided && !sleeping && !GetDevice()->FailureStatus()) {
             // Preserve the base Rx trace and normal MAC/application delivery.
             SendPktUp(reception->packet);
+        } else {
+            m_rxDrop(reception->packet, reception->reason.empty() ? std::string("receiver_unavailable") : reception->reason);
         }
+        m_rxEnd(reception->packet);
     }
+    ns3::TracedCallback<Ptr<Packet>, Time> m_rxBegin;
+    ns3::TracedCallback<Ptr<Packet>, Ptr<Packet>, std::string> m_rxCollision;
+    ns3::TracedCallback<Ptr<Packet>, std::string> m_rxDrop;
+    ns3::TracedCallback<Ptr<Packet>> m_rxEnd;
     DataRate m_rate{1000000};
     Time m_txEnd{Seconds(0)};
     std::vector<std::shared_ptr<Reception>> m_receiving;

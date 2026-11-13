@@ -1,6 +1,7 @@
 #include "ns3/aqua-sim-tg-module.h"
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
+#include "ns3/mobility-module.h"
 #include <iomanip>
 #include <iostream>
 #include <set>
@@ -18,6 +19,7 @@ std::string Quote(const std::string& value) {
 int main() {
     // Force the Aqua-Sim library to be linked; enumerate metadata without constructing devices.
     AquaSimChannel::GetTypeId(); AquaSimPhy::GetTypeId(); AquaSimMac::GetTypeId();
+    MobilityModel::GetTypeId();
     std::cout << "AQUASIM_CATALOG_BEGIN\n[";
     bool first = true;
     for (uint32_t i = 0; i < TypeId::GetRegisteredN(); ++i) {
@@ -30,6 +32,7 @@ int main() {
         else if (tid == AquaSimChannel::GetTypeId() || tid.IsChildOf(AquaSimChannel::GetTypeId())) layer = "channel";
         else if (tid.IsChildOf(AquaSimPropagation::GetTypeId())) layer = "propagation";
         else if (tid.IsChildOf(Application::GetTypeId())) layer = "app";
+        else if (tid.IsChildOf(MobilityModel::GetTypeId())) layer = "mobility";
         else continue;
         if (!first) std::cout << ',';
         first = false;

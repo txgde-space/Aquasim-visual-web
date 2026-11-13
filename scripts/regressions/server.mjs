@@ -9,7 +9,8 @@ export async function checkServer(server) {
   await checkProtocolSource(server)
   await checkServerTasks(server)
   const { precompileSimulatorGuarded } = await server.ssrLoadModule('/server/runner.ts')
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aquasim-build-config-'))
+  const fixtureRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aquasim-build-config-')))
+  const { saveCatalog, cachedCatalog, invalidateCatalog } = await server.ssrLoadModule('/server/protocolCatalog.ts')
   const bin = path.join(fixtureRoot, 'bin')
   const previousPath = process.env.PATH
   fs.mkdirSync(bin)
@@ -57,6 +58,21 @@ export async function checkServer(server) {
   const precompile = precompileSimulatorGuarded
   process.env.PATH = `${bin}${path.delimiter}${previousPath || ''}`
   try {
+    const custom = { layer: 'mac', typeId: 'ns3::UnlistedMac', parentTypeId: 'ns3::AquaSimMac', groupName: 'Example',
+      attributes: [{ name: 'CustomInterval', valueType: 'ns3::TimeValue', defaultValue: '7s', constructible: true }] }
+    const publish = (rows) => saveCatalog(fixtureRoot, `AQUASIM_CATALOG_BEGIN\n${JSON.stringify(rows)}\nAQUASIM_CATALOG_END`)
+    const customCatalog = publish([custom])
+    assert.deepEqual(customCatalog.flatMap((layer) => layer.items.filter((item) => item.typeId).map((item) => item.typeId)), [custom.typeId], 'labels cannot inject Swarm, TDMA or any other absent type')
+    const registered = customCatalog.find((layer) => layer.id === 'mac').items[0]
+    assert.equal(registered.id, custom.typeId, 'live catalog identifiers come from registered TypeIds')
+    assert.deepEqual(registered.attributes, custom.attributes, 'unlisted types retain their actual metadata and defaults')
+    assert.deepEqual(cachedCatalog(fixtureRoot), customCatalog)
+    const replacement = publish([{ ...custom, typeId: 'ns3::AquaSimTDMA' }])
+    assert.equal(replacement.find((layer) => layer.id === 'mac').items[0].label, 'TDMA', 'optional labels decorate only types returned by the probe')
+    assert.equal(replacement.flatMap((layer) => layer.items).some((item) => item.typeId === custom.typeId), false, 'a later probe replaces removed protocols')
+    invalidateCatalog(fixtureRoot)
+    assert.equal(cachedCatalog(fixtureRoot), null)
+
     const multiple = fixture('multiple caches')
     const stale = writeCache(multiple, 'cmake-cache', 'OFF', 'default')
     const actual = writeCache(multiple, 'build', 'ON', 'Debug')

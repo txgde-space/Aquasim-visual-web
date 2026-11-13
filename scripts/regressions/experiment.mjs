@@ -1,3 +1,4 @@
+import { fixtureLayers, selectedForm } from './protocol-fixture.mjs'
 import assert from 'node:assert/strict'
 
 const PHY = 'ns3::AquaSimPhyFDM', CMN = 'ns3::AquaSimPhyCmn', RADIO = 'ns3::AquaSimRadioPhy'
@@ -42,20 +43,28 @@ export async function checkExperimentRegressions(load) {
   const catalog = await load('/src/features/experiment/lib/typeIdCatalog.ts')
   const { generateAquaVisualCc } = await load('/src/features/experiment/lib/generateScratch.ts')
   const { useTopologyEditor } = await load('/src/features/experiment/composables/useTopologyEditor.ts')
-  const { createDefaultExperimentForm: form, createDefaultTopology: nodes, buildExperimentSpec: build, validateExperiment: validate } = specLib
+  const { createDefaultExperimentForm, createDefaultTopology: nodes, buildExperimentSpec: build, validateExperiment: validate } = specLib
   const { serializeExperiment: serialize, parseExperiment: parse } = doc
-  const layers = registeredLayers(catalog.TYPEID_LAYERS)
+  const form = () => selectedForm(createDefaultExperimentForm)
+  const layers = registeredLayers([...fixtureLayers, { id: 'mobility', label: '移动模型', field: 'mobilityId', scope: 'node', items: [] }])
   const makeDraft = (value = form(), topology = nodes(2)) => ({ form: value, nodes: topology, selectedIds: [], activeCatalogId: `mac:${value.macId}` })
   const makeSpec = () => build(form(), nodes(2), layers)
   const generate = (spec) => generateAquaVisualCc(spec, layers)
   const document = (value = form()) => JSON.parse(serialize(makeDraft(value), layers))
 
-  assert.deepEqual(form().protocolAttributes, {}, 'new experiments use registered defaults without hidden overrides')
+  assert.deepEqual(createDefaultExperimentForm().protocolAttributes, {}, 'new experiments use registered defaults without hidden overrides')
   for (const key of ['slotNum', 'slotLen', 'initialRoundDelay', 'transRange', 'environmentStacks', 'trafficId', 'trafficRateBps']) assert.ok(!(key in form()))
+  assert.deepEqual(catalog.TYPEID_LAYERS.flatMap((layer) => layer.items), [], 'initial navigation never advertises static protocols')
+  for (const field of ['phyId', 'macId', 'routingId', 'channelId', 'propagationId']) {
+    assert.equal(createDefaultExperimentForm()[field], '', 'new drafts make no protocol selection before discovery')
+  }
+  assert.ok(nodes(2).every((node) => !node.phyId && !node.macId && !node.routingId))
+  const blank = makeDraft(createDefaultExperimentForm())
+  assert.deepEqual(parse(serialize(blank), []).form, blank.form, 'an uncompiled blank draft round trips without filling protocols')
   assert.deepEqual(validate(makeSpec(), layers), [])
   assert.doesNotMatch(generate(makeSpec()), /\{"(?:NodeCount|InitialRoundDelay|SlotNum|SlotLen|transRange)",/)
-  assert.ok(validate(makeSpec(), catalog.TYPEID_LAYERS).some((message) => message.includes('缺少注册属性信息')))
-  const order = ['app', 'routing', 'mac', 'phy', 'channel']
+  assert.ok(validate(makeSpec(), catalog.TYPEID_LAYERS).some((message) => message.includes('未注册协议')))
+  const order = ['app', 'routing', 'mac', 'phy', 'channel', 'mobility']
   assert.deepEqual(catalog.TYPEID_LAYERS.map((layer) => layer.id), order)
   const unknownLayers = [{ id: 'unknown-a', items: [] }, ...layers.slice().reverse(), { id: 'unknown-b', items: [] }]
   assert.deepEqual(catalog.orderCatalogLayers(unknownLayers).map((layer) => layer.id), [...order, 'unknown-a', 'unknown-b'])
@@ -79,7 +88,7 @@ export async function checkExperimentRegressions(load) {
   const unknownApp = makeSpec(); unknownApp.nodes[0].app = 'ns3::UnavailableApplication'
   assert.throws(() => generate(unknownApp), /app 未注册协议/)
 
-  for (const value of ['nonsense', '-1s', '1', '1e309s', '']) {
+  for (const value of ['nonsense', '-1s', '1e309s', '']) {
     const spec = { ...makeSpec(), simStop: value }
     assert.ok(validate(spec, layers).some((message) => message.includes('simStop')))
     assert.throws(() => generate(spec), /simStop/)
@@ -162,6 +171,14 @@ export async function checkExperimentRegressions(load) {
 }
 
 async function checkLegacyDocuments({ form, document, makeSpec, parse, serialize, makeDraft, layers, nodes }) {
+  for (const version of [1, 2, 3]) {
+    const incomplete = document()
+    incomplete.editor.version = version
+    for (const field of ['phyId', 'macId', 'routingId', 'channelId', 'propagationId']) delete incomplete.editor.form[field]
+    const restored = parse(JSON.stringify(incomplete), []).form
+    assert.equal(restored.macId, version === 3 ? '' : SWARM, 'old omitted protocol defaults are restored only in legacy editor versions')
+    assert.equal(restored.phyId, version === 3 ? '' : PHY)
+  }
   for (const version of [1, 2]) {
     const old = document()
     old.editor.version = version
@@ -228,6 +245,24 @@ async function checkEditorAndPresentation(load, { form, nodes, layers, useTopolo
   const saved = { form: editor.experimentForm.value, nodes: editor.editNodes.value, selected: editor.selectedIds.value, active: editor.activeCatalogId.value }
   try {
     editor.experimentForm.value = form(); editor.editNodes.value = nodes(8); editor.onSelectionChange([1])
+    const coordinateBefore = structuredClone(editor.editNodes.value.map((node) => ({ ...node })))
+    editor.selectedIds.value = editor.editNodes.value.map((node) => node.node_id)
+    const cardNodeId = editor.editNodes.value[0].node_id
+    editor.onNodeCoordinate({ node_id: cardNodeId, axis: 'z', value: -12.345 })
+    assert.equal(editor.editNodes.value[0].z, -12.34, 'card edits address the explicit node, including Z')
+    assert.deepEqual(editor.editNodes.value.slice(1), coordinateBefore.slice(1), 'a card never changes other selected nodes')
+    editor.onNodeCoordinate({ node_id: cardNodeId, axis: 'x', value: NaN })
+    assert.equal(editor.editNodes.value[0].x, coordinateBefore[0].x)
+    editor.editNodes.value = coordinateBefore
+    editor.onSelectionChange([1])
+    const beforeRename = JSON.parse(JSON.stringify(editor.editNodes.value))
+    editor.onNodeRename({ node_id: 1, name: '  汇聚节点  ' })
+    assert.equal(editor.editNodes.value[0].name, '汇聚节点')
+    assert.deepEqual(editor.editNodes.value.map(({ name: ignored, ...node }) => node), beforeRename.map(({ name: ignored, ...node }) => node), 'renaming changes no IDs, coordinates or protocol settings')
+    const named = parse(serialize(makeDraft(editor.experimentForm.value, editor.editNodes.value), layers), layers)
+    assert.equal(named.nodes[0].name, '汇聚节点', 'remarks survive experiment export/import')
+    editor.onNodeRename({ node_id: 1, name: '' })
+    assert.equal(editor.editNodes.value[0].name, 'Node-1')
     editor.setProtocolAttribute(TDMA, 'SlotNum', '2')
     for (const [layer, id, field] of [['phy', 'phy-radio', 'phyId'], ['channel', 'radio-channel', 'channelId'], ['channel', 'radio-propagation', 'propagationId'], ['mac', 'tdma', 'macId']]) {
       const before = JSON.parse(JSON.stringify(editor.experimentForm.value))
@@ -273,7 +308,7 @@ async function checkEditorAndPresentation(load, { form, nodes, layers, useTopolo
   const { default: Panel } = await load('/src/components/ExperimentPanel.vue')
   for (const macId of [SWARM, VARIANT, CUSTOM]) {
     const html = await renderToString(createSSRApp(Attributes, { layers, form: { ...form(), macId }, node: null, ready: true, scope: 'scene' }))
-    assert.match(html, /注册默认：11/); assert.doesNotMatch(html, /自动：/)
+    assert.match(html, /placeholder="11"/); assert.doesNotMatch(html, /注册默认：|自动：/)
   }
   const radio = { ...form(), phyId: RADIO, channelId: 'radio-channel', propagationId: 'radio-propagation' }
   const radioHtml = await renderToString(createSSRApp(Attributes, { layers, form: radio, node: null, ready: true, scope: 'scene' }))
@@ -284,13 +319,16 @@ async function checkEditorAndPresentation(load, { form, nodes, layers, useTopolo
   assert.match(appHtml, />OffTime<\/span>/)
   const right = await renderToString(createSSRApp(Panel, { form: form(), specJson: '{}', scratchCc: '' }))
   assert.match(right, />simStop<\/span>/)
+  assert.doesNotMatch(right, /复制 JSON|下载 JSON|规格与代码/)
+  assert.equal((right.match(/aria-label="实验文件"/g) || []).length, 1, 'one section owns previews and experiment files')
   for (const name of ['SlotNum', 'SlotLen', 'InitialRoundDelay', 'transRange']) assert.doesNotMatch(right, new RegExp(`>${name}</span>`))
-  const drawer = await renderToString(createSSRApp(Drawer, { layers: layers.slice().reverse(), ready: true }))
+  const drawerLayers = layers.filter((layer) => layer.scope !== 'node')
+  const drawer = await renderToString(createSSRApp(Drawer, { layers: drawerLayers.slice().reverse(), ready: true }))
   for (const activeId of ['mac:swarm', `mac:${SWARM}`]) {
-    const activeHtml = await renderToString(createSSRApp(Drawer, { layers, ready: true, activeId }))
+    const activeHtml = await renderToString(createSSRApp(Drawer, { layers: drawerLayers, ready: true, activeId }))
     const button = activeHtml.match(/<button(?=[^>]*data-item-id="swarm")[^>]*>/)?.[0]
     assert.match(button || '', /class="[^"]*\bactive\b/, 'aliases and canonical TypeIds highlight the same selected protocol')
   }
   const renderedOrder = [...drawer.matchAll(/class="[^"]*rail-btn[^"]*"[^>]*>([^<]+)<\/button>/g)].map((match) => match[1].trim())
-  assert.deepEqual(renderedOrder, ['APP', 'RT', 'MAC', 'PHY', 'CH'], 'dynamic catalogs use the same app-to-channel order')
+  assert.deepEqual(renderedOrder, ['APP', 'RT', 'MAC', 'PHY', 'CH'], 'global protocol navigation keeps its order; node-owned mobility stays in the node card')
 }

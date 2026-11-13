@@ -1,3 +1,6 @@
+import type { NodeModelType } from '../nodeModel'
+import type { NodeMobilitySelection, ProtocolAttributeOverrides } from './experiment'
+
 export interface LogMeta {
   [key: string]: unknown
   type: 'meta'
@@ -8,7 +11,7 @@ export interface LogMeta {
   medium?: 'acoustic' | 'radio'
   propagation_speed_mps?: number
   time_precision_us?: number
-  trace_scope?: 'phy-success'
+  trace_scope?: 'phy-success' | 'phy-events'
 }
 
 /** Raw record as read from a structured log / JSONL line, before normalization. */
@@ -20,6 +23,9 @@ export interface ParsedNodeRecord {
   node_id: number
   name: string
   role: string
+  modelType?: NodeModelType
+  mobility?: NodeMobilitySelection
+  protocolAttributes?: ProtocolAttributeOverrides
   x: number
   y: number
   z: number

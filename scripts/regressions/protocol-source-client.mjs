@@ -90,20 +90,24 @@ export async function checkProtocolSourceClient(server) {
     await flush()
     assert.equal(source.code.value, '', 'a late response cannot publish after the viewer closes')
 
-    const html = await renderToString(h(ProtocolDrawer, {
-      ready: false,
+    const drawerProps = {
+      ready: true,
       layers: [{ id: 'mac', label: 'MAC', items: [
         { id: 'swarm', typeId: 'ns3::AquaSimSwarm', label: 'Swarm' },
         { id: 'none', typeId: '', label: 'None' },
       ] }],
-    }))
+    }
+    const uncompiled = await renderToString(h(ProtocolDrawer, { ...drawerProps, ready: false }))
+    assert.doesNotMatch(uncompiled, /class="(?:lib-item|protocol-source-button)"/, 'uncompiled catalogs never display protocol entries or source buttons')
+    assert.match(uncompiled, /请先预编译/)
+    const html = await renderToString(h(ProtocolDrawer, drawerProps))
     assert.equal((html.match(/class="protocol-source-button"/g) || []).length, 1, 'none has no source viewer button')
-    assert.match(html, /<button[^>]*class="lib-item"[^>]*disabled/, 'assigning remains disabled before compilation')
+    assert.doesNotMatch(html, /<button[^>]*class="lib-item"[^>]*disabled/, 'only discovered protocols can be assigned')
     assert.match(html, /<\/button><button[^>]*class="protocol-source-button"/, 'source and assign buttons are siblings, never nested')
-    assert.doesNotMatch(html, /<button[^>]*class="protocol-source-button"[^>]*disabled/, 'source viewing is enabled before compilation')
+    assert.doesNotMatch(html, /<button[^>]*class="protocol-source-button"[^>]*disabled/, 'discovered protocol source viewing is independent of assignment')
   } finally {
     scope?.stop()
     globalThis.fetch = originalFetch
   }
-  console.log('Protocol source client regressions passed: file switching, directory/protocol races, retry, close cancellation and independent source buttons before compilation.')
+  console.log('Protocol source client regressions passed: file switching, directory/protocol races, retry, close cancellation and independent source buttons and no uncompiled placeholders.')
 }

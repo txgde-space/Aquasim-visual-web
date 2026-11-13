@@ -1,3 +1,6 @@
+import type { NodeModelType } from '../nodeModel'
+import type { NodeMobilitySelection, ProtocolAttributeOverrides } from './experiment'
+
 export interface Point3D {
   x: number
   y: number
@@ -53,6 +56,11 @@ export interface ReplayNode extends Point3D {
   node_id: number
   name: string
   role: string
+  modelType?: NodeModelType
+  mobility?: NodeMobilitySelection
+  protocolAttributes?: ProtocolAttributeOverrides
+  /** Derived from recorded movement; never a simulation position or configuration override. */
+  motionDirection?: Point3D
   phyId?: string
   macId?: string
   routingId?: string

@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { TYPEID_LAYERS, type CatalogLayer } from '../lib/typeIdCatalog'
 import { LOCAL_STORAGE_KEYS } from '../../../shared/constants'
+import { simulatorFailure } from '../lib/simulatorDiagnostics'
 import { requestSimulator } from '../api/simulator'
 
 const PROGRESS_TIMEOUT_MS = 10_000
@@ -13,6 +14,7 @@ interface SimulatorCheck {
   error?: string
   defaultHome?: string
   catalog?: CatalogLayer[] | null
+  buildReusable?: boolean
 }
 
 interface BuildProgress {
@@ -29,7 +31,22 @@ interface OperationResponse {
   catalog?: CatalogLayer[]
 }
 
-export const useSimulatorSettings = () => {
+interface ReadySimulator {
+  selection: string
+  catalog: CatalogLayer[]
+  result: SimulatorCheck | null
+  defaultHome: string
+  buildStatus: 'idle' | 'ok'
+  buildLog: string
+  buildProgress: BuildProgress | null
+}
+
+// Retain only a completed discovery for the current directory. Route unmounts
+// still abort requests and release timers; no component or running task is kept alive.
+export const createSimulatorSession = () => ({ ready: null as ReadySimulator | null, startupPrecompileConsumed: false })
+const simulatorSession = createSimulatorSession()
+
+export const useSimulatorSettings = (session = simulatorSession) => {
   const aquaSimHome = ref('')
   const catalog = ref<CatalogLayer[]>(TYPEID_LAYERS)
   const catalogReady = ref(false)
@@ -49,7 +66,11 @@ export const useSimulatorSettings = () => {
   let onRunnerAvailable: ((error?: Error) => void) | null = null
   let waitingStatusFailures = 0
   let disposed = false
-  let startupPrecompilePending = true
+  let startupPrecompilePending = !session.startupPrecompileConsumed
+  const consumeStartupPrecompile = () => {
+    startupPrecompilePending = false
+    session.startupPrecompileConsumed = true
+  }
   let progressTimer: ReturnType<typeof setInterval> | null = null
   const stopProgressPolling = () => {
     if (progressTimer) clearInterval(progressTimer)
@@ -112,8 +133,31 @@ export const useSimulatorSettings = () => {
     storageError.value = '浏览器无法读取设置，本次仍可填写目录。'
   }
 
+  const saved = session.ready
+  const restored = !!saved && saved.selection === aquaSimHome.value.trim()
+  if (restored) {
+    catalog.value = saved.catalog
+    catalogReady.value = true
+    result.value = saved.result
+    defaultHome.value = saved.defaultHome
+    buildStatus.value = saved.buildStatus
+    buildLog.value = saved.buildLog
+    buildProgress.value = saved.buildProgress
+    consumeStartupPrecompile()
+  } else session.ready = null
+  const rememberReady = () => {
+    if (!catalogReady.value || disposed) return
+    session.ready = {
+      selection: aquaSimHome.value.trim(), catalog: catalog.value,
+      result: result.value?.ok ? result.value : null, defaultHome: defaultHome.value,
+      buildStatus: buildStatus.value === 'ok' ? 'ok' : 'idle',
+      buildLog: buildLog.value, buildProgress: buildProgress.value,
+    }
+  }
+
   watch(aquaSimHome, (value) => {
-    startupPrecompilePending = false
+    session.ready = null
+    consumeStartupPrecompile()
     pending?.abort()
     pending = null
     invalidateOperation()
@@ -137,8 +181,9 @@ export const useSimulatorSettings = () => {
   }, { flush: 'sync' })
 
   const checkDirectory = async (precompileAfterCheck = false) => {
-    if (!precompileAfterCheck) startupPrecompilePending = false
+    if (!precompileAfterCheck) consumeStartupPrecompile()
     if (disposed) return
+    session.ready = null
     pending?.abort()
     const controller = new AbortController()
     pending = controller
@@ -155,7 +200,14 @@ export const useSimulatorSettings = () => {
         catalog.value = catalogReady.value ? data.catalog! : TYPEID_LAYERS
         // Only the initial check may build automatically. Explicit directory
         // changes and operations consume this opportunity, including late replies.
-        if (precompileAfterCheck && startupPrecompilePending && ok && data.ok) void precompile()
+        if (catalogReady.value && data.buildReusable) {
+          consumeStartupPrecompile()
+          buildStatus.value = 'ok'
+          buildLog.value = ''
+          buildProgress.value = { phase: 'done', completed: 1, total: 1 }
+          rememberReady()
+        } else if (precompileAfterCheck && startupPrecompilePending && ok && data.ok) void precompile()
+        else rememberReady()
       }
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -170,8 +222,9 @@ export const useSimulatorSettings = () => {
   }
 
   const precompile = async () => {
-    startupPrecompilePending = false
+    consumeStartupPrecompile()
     if (disposed || buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    session.ready = null
     pending?.abort()
     pending = null
     checking.value = false
@@ -179,6 +232,9 @@ export const useSimulatorSettings = () => {
     const controller = new AbortController()
     operation = controller
     buildStatus.value = 'building'
+    if (result.value) result.value = { ...result.value, buildReusable: false }
+    catalog.value = TYPEID_LAYERS
+    catalogReady.value = false
     buildLog.value = ''
     buildError.value = ''
     buildProgress.value = { phase: 'configure', completed: 0, total: 0 }
@@ -206,24 +262,29 @@ export const useSimulatorSettings = () => {
         }
         buildLog.value = data.stdout || ''
         if (!ok || !data.ok) throw new Error(data.error || '预编译失败，请查看编译输出')
-        catalog.value = data.catalog || TYPEID_LAYERS
-        catalogReady.value = !!data.catalog
+        if (!Array.isArray(data.catalog)) throw new Error('预编译未返回注册协议目录，请重试。')
+        catalog.value = data.catalog
+        catalogReady.value = true
         buildStatus.value = 'ok'
         buildProgress.value = { phase: 'done', completed: 1, total: 1 }
+        rememberReady()
         break
       }
     } catch (error) {
       if (operation !== controller || controller.signal.aborted) return
       buildStatus.value = 'fail'
-      buildError.value = error instanceof Error ? error.message : String(error)
+      const failure = simulatorFailure(error, buildLog.value, '预编译失败，请查看详情。')
+      buildError.value = failure.summary
+      buildLog.value = failure.details
     } finally {
       if (operation === controller) invalidateOperation()
     }
   }
 
   const clearBuild = async () => {
-    startupPrecompilePending = false
+    consumeStartupPrecompile()
     if (disposed || buildStatus.value === 'building' || cleanStatus.value === 'cleaning') return
+    session.ready = null
     pending?.abort()
     pending = null
     checking.value = false
@@ -249,7 +310,9 @@ export const useSimulatorSettings = () => {
     } catch (error) {
       if (operation !== controller || controller.signal.aborted) return
       cleanStatus.value = 'fail'
-      cleanError.value = error instanceof Error ? error.message : String(error)
+      const failure = simulatorFailure(error, buildLog.value, '清除构建失败，请查看详情。')
+      cleanError.value = failure.summary
+      buildLog.value = failure.details
     } finally {
       if (operation === controller) invalidateOperation()
     }
@@ -263,7 +326,7 @@ export const useSimulatorSettings = () => {
     aquaSimHome.value = path
     void checkDirectory()
   }
-  onMounted(() => { void checkDirectory(true) })
+  onMounted(() => { if (!restored) void checkDirectory(true) })
   onBeforeUnmount(() => {
     disposed = true
     pending?.abort()

@@ -2,6 +2,12 @@
 import type { ExperimentForm, ExperimentSpec, TopologyNode } from '../../../shared/types/experiment'
 import { catalogItemById, type CatalogLayer } from './typeIdCatalog'
 
+/** Fill omitted fields only in historical editor documents, never in new drafts. */
+export const legacyProtocolDefaults = {
+  phyId: 'ns3::AquaSimPhyFDM', macId: 'ns3::AquaSimSwarm', routingId: 'ns3::AquaSimStaticRouting',
+  channelId: 'ns3::AquaSimChannel', propagationId: 'ns3::AquaSimRangePropagation',
+}
+
 const ALIASES: Record<string, Record<string, string>> = {
   phy: { 'phy-fdm': 'ns3::AquaSimPhyFDM', 'phy-cmn': 'ns3::AquaSimPhyCmn', 'phy-radio': 'ns3::AquaSimRadioPhy' },
   mac: { swarm: 'ns3::AquaSimSwarm', tdma: 'ns3::AquaSimTDMA', broadcast: 'ns3::AquaSimBroadcastMac', aloha: 'ns3::AquaSimPAloha' },

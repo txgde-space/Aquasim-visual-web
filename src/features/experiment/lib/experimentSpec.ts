@@ -19,9 +19,10 @@ export const createDefaultTopology = (count = 5, spacing = 1000): TopologyNode[]
     y: 0,
     z: 0,
     role: 'node',
-    phyId: 'ns3::AquaSimPhyFDM',
-    macId: 'ns3::AquaSimSwarm',
-    routingId: 'ns3::AquaSimStaticRouting',
+    modelType: 'auv',
+    phyId: '',
+    macId: '',
+    routingId: '',
     appId: 'none',
   }))
 )
@@ -30,11 +31,11 @@ export const createDefaultTopology = (count = 5, spacing = 1000): TopologyNode[]
 export const createDefaultProtocolAttributes = (): NonNullable<ExperimentForm['protocolAttributes']> => ({})
 
 export const createDefaultExperimentForm = (): ExperimentForm => ({
-  macId: 'ns3::AquaSimSwarm',
-  phyId: 'ns3::AquaSimPhyFDM',
-  routingId: 'ns3::AquaSimStaticRouting',
-  channelId: 'ns3::AquaSimChannel',
-  propagationId: 'ns3::AquaSimRangePropagation',
+  macId: '',
+  phyId: '',
+  routingId: '',
+  channelId: '',
+  propagationId: '',
   simStop: '30s',
   txPower: 1.1,
   protocolAttributes: createDefaultProtocolAttributes(),
@@ -55,9 +56,12 @@ export const nodesToSpec = (nodes: TopologyNode[] | undefined, layers = TYPEID_L
     y: roundCoord(node.y),
     z: roundCoord(node.z),
     role: node.role || 'node',
+    ...(node.modelType === undefined ? {} : { modelType: node.modelType }),
+    ...(node.mobility === undefined ? {} : { mobility: { ...node.mobility } }),
     app: typeOf('app', node.appId || 'none', layers),
     appAttrs: node.appAttrs,
     appDestination: node.appDestination,
+    ...(node.protocolAttributes === undefined ? {} : { protocolAttributes: node.protocolAttributes }),
   }))
 )
 

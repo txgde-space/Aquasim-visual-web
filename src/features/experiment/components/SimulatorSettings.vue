@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { simulatorFailure } from '../lib/simulatorDiagnostics'
 import SimulatorDirectoryPicker from './SimulatorDirectoryPicker.vue'
 
 const props = defineProps<{
@@ -14,7 +15,7 @@ const props = defineProps<{
   cleanError: string
   disabled: boolean
   storageError: string
-  result: { ok: boolean; home?: string; source?: string; error?: string } | null
+  result: { ok: boolean; home?: string; source?: string; error?: string; buildReusable?: boolean } | null
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -24,6 +25,14 @@ const emit = defineEmits<{
   select: [path: string]
 }>()
 const pickerOpen = ref(false)
+const detailsOpen = ref(false)
+const buildFailure = computed(() => simulatorFailure(props.buildError, props.buildLog, '预编译失败，请查看详情。'))
+const cleanFailure = computed(() => simulatorFailure(props.cleanError, props.buildLog, '清除构建失败，请查看详情。'))
+const directoryFailure = computed(() => simulatorFailure(props.result?.error, '', '目录检查失败，请查看详情。'))
+const detailsLog = computed(() => props.buildStatus === 'fail' ? buildFailure.value.details
+  : props.cleanStatus === 'fail' ? cleanFailure.value.details
+    : props.result && !props.result.ok ? directoryFailure.value.details : simulatorFailure('',props.buildLog).details)
+watch(() => [props.modelValue,props.buildStatus,props.cleanStatus,props.buildLog], () => {detailsOpen.value=false})
 const directoryDisabled = computed(() => props.disabled
   && !(props.buildStatus === 'building' && props.buildProgress?.phase === 'waiting'))
 const progressPercent = computed(() => props.buildProgress?.phase === 'build' && props.buildProgress.total > 0
@@ -82,19 +91,19 @@ const selectDirectory = (path: string) => {
       </div>
       <p v-else-if="cleanStatus === 'cleaning'">正在清除构建…</p>
       <p v-else-if="cleanStatus === 'ok'" class="directory-ok">构建已清除，重新预编译后可运行仿真</p>
-      <p v-else-if="cleanStatus === 'fail'" class="directory-error">{{ cleanError }}</p>
-      <p v-else-if="buildStatus === 'ok'" class="directory-ok">预编译完成</p>
-      <p v-else-if="buildStatus === 'fail'" class="directory-error">{{ buildError }}</p>
+      <p v-else-if="cleanStatus === 'fail'" class="directory-error">{{ cleanFailure.summary }}</p>
+      <p v-else-if="buildStatus === 'ok'" class="directory-ok">{{ result?.buildReusable ? '构建未变化，已复用' : '预编译完成' }}</p>
+      <p v-else-if="buildStatus === 'fail'" class="directory-error">{{ buildFailure.summary }}</p>
       <template v-else-if="result">
         <p :class="result.ok ? 'directory-ok' : 'directory-error'">
-          {{ result.ok ? '目录检查通过（尚未验证编译）' : result.error || '目录检查失败' }}
+          {{ result.ok ? '目录检查通过（尚未验证编译）' : directoryFailure.summary }}
         </p>
       </template>
       <p v-if="storageError" class="directory-error">{{ storageError }}</p>
     </div>
-    <details v-if="buildLog" class="build-output" :open="buildStatus === 'fail' || cleanStatus === 'fail'">
-      <summary>构建输出</summary>
-      <pre>{{ buildLog }}</pre>
+    <details v-if="detailsLog" class="build-output" :open="detailsOpen" @toggle="detailsOpen=($event.target as HTMLDetailsElement).open">
+      <summary>查看详情</summary>
+      <pre>{{ detailsLog }}</pre>
     </details>
     <SimulatorDirectoryPicker
       v-if="pickerOpen && !directoryDisabled"

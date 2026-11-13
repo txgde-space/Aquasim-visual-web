@@ -90,6 +90,29 @@ static ObjectFactory VisualFactory(const std::string& type, const VisualAttribut
     return factory;
 }
 
+static ObjectFactory VisualNodeFactory(const std::string& type, const VisualAttributes& attributes, uint32_t nodeId) {
+    try { return VisualFactory(type, attributes); }
+    catch (const std::exception& error) {
+        throw std::runtime_error("Node " + std::to_string(nodeId) + ": " + error.what());
+    }
+}
+
+static Ptr<MobilityModel> VisualCreateMobility(const std::string& type, const VisualAttributes& attributes,
+                                             uint32_t nodeId, const Vector& position) {
+    const TypeId tid = VisualType(type);
+    if (!tid.IsChildOf(MobilityModel::GetTypeId())) {
+        throw std::runtime_error("Node " + std::to_string(nodeId) + ": " + type + " does not implement ns3::MobilityModel");
+    }
+    for (const auto& attribute : attributes) {
+        if (attribute.first == "Position") {
+            throw std::runtime_error("Node " + std::to_string(nodeId) + ": mobility Position is managed by node coordinates");
+        }
+    }
+    auto model = VisualNodeFactory(type, attributes, nodeId).Create<MobilityModel>();
+    model->SetPosition(position);
+    return model;
+}
+
 class AquaVisualSocket : public AquaSimSocket {
 public:
     static TypeId GetTypeId() {

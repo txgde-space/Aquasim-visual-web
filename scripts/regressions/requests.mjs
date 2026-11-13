@@ -3,7 +3,8 @@ import { createRenderer, ref } from 'vue'
 
 export async function checkRequests(server) {
   const { useRunExperiment } = await server.ssrLoadModule('/src/features/experiment/composables/useRunExperiment.ts')
-  const { useSimulatorSettings } = await server.ssrLoadModule('/src/features/experiment/composables/useSimulatorSettings.ts')
+  const { useSimulatorSettings: useSessionSettings, createSimulatorSession } = await server.ssrLoadModule('/src/features/experiment/composables/useSimulatorSettings.ts')
+  const useSimulatorSettings = () => useSessionSettings(createSimulatorSession())
   const { useExperimentFiles } = await server.ssrLoadModule('/src/features/experiment/composables/useExperimentFiles.ts')
   const { createDefaultExperimentForm } = await server.ssrLoadModule('/src/features/experiment/lib/experimentSpec.ts')
   const { TYPEID_LAYERS } = await server.ssrLoadModule('/src/features/experiment/lib/typeIdCatalog.ts')
@@ -76,11 +77,25 @@ export async function checkRequests(server) {
     await waiting
     assert.equal(deliveries.length, 1, 'leaving the page cannot trigger a late replay navigation')
 
-    // Each mounted experiment page checks and builds once, even when the server
-    // already has a catalog. Returning to the page uses incremental ns-3 build.
+    // A refresh creates a new page session, but a verified server build needs no POST build or polling.
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const start = requests.length
+      const page = mount(useSimulatorSettings)
+      requests.at(-1).resolve(response({ ok: true, home: '/unchanged', buildReusable: true, catalog: [{ id: 'verified' }] }))
+      await flush()
+      assert.equal(page.state.catalogReady.value, true)
+      assert.equal(page.state.buildStatus.value, 'ok')
+      assert.equal(page.state.result.value.buildReusable, true)
+      assert.equal(callsSince(start, 'build').length, 0)
+      assert.equal(callsSince(start, 'build-progress').length, 0)
+      page.unmount()
+    }
+
+    // An unverified/old server catalog still requires one startup build. Route returns reuse the completed session below.
     for (const cached of [null, [{ id: 'cached' }]]) {
       const start = requests.length
       const startup = mount(useSimulatorSettings)
+      assert.deepEqual(startup.state.catalog.value.flatMap((layer) => layer.items), [], 'before the first check there are no static protocol entries')
       const check = requests.at(-1)
       check.resolve(response({ ok: true, home: '/startup', catalog: cached }))
       await flush()
@@ -90,6 +105,8 @@ export async function checkRequests(server) {
       assert.deepEqual(JSON.parse(build.init.body), JSON.parse(check.init.body), 'startup build uses the checked directory selection')
       assert.equal(startup.state.checking.value, false)
       assert.equal(startup.state.buildStatus.value, 'building')
+      assert.equal(startup.state.catalogReady.value, false, 'a new build waits for its own catalog result')
+      assert.deepEqual(startup.state.catalog.value.flatMap((layer) => layer.items), [])
       progress.resolve(response({ progress: { phase: 'build', completed: 2, total: 3 } }))
       await flush()
       assert.equal(startup.state.buildProgress.value.completed, 2, 'automatic compilation uses the existing progress display')
@@ -102,6 +119,8 @@ export async function checkRequests(server) {
       assert.equal(startup.state.buildProgress.value.phase, 'done')
       assert.equal(callsSince(start, 'build').length, 1)
       startup.state.selectDirectory('/explicit-selection')
+      assert.equal(startup.state.catalogReady.value, false)
+      assert.deepEqual(startup.state.catalog.value.flatMap((layer) => layer.items), [], 'directory changes immediately discard the old directory catalog')
       requests.at(-1).resolve(response({ ok: true, home: '/explicit-selection', catalog: null }))
       await flush()
       startup.state.resetDirectory()
@@ -109,6 +128,96 @@ export async function checkRequests(server) {
       await flush()
       assert.equal(callsSince(start, 'build').length, 1, 'explicit selection and reset retain manual precompilation')
       startup.unmount()
+    }
+
+    // Experiment -> replay -> experiment must neither recheck nor rebuild a
+    // completed catalog; only explicit operations invalidate that result.
+    {
+      const session = createSimulatorSession()
+      const open = () => mount(() => useSessionSettings(session))
+      const start = requests.length
+      let page = open()
+      requests.at(-1).resolve(response({ ok: true, home: '/session', defaultHome: '/default', catalog: null }))
+      await flush()
+      callsSince(start, 'build')[0].resolve(response({ ok: true, stdout: 'compiled once', catalog: [{ id: 'session-catalog' }] }))
+      await flush()
+      page.unmount()
+      const completedCount = requests.length
+      for (let i = 0; i < 3; i++) {
+        page = open()
+        assert.equal(requests.length, completedCount, 'route returns make zero initialization/progress requests')
+        assert.equal(page.state.catalogReady.value, true, 'catalog is ready synchronously on return')
+        assert.equal(page.state.catalog.value[0].id, 'session-catalog')
+        assert.equal(page.state.result.value.home, '/session')
+        assert.equal(page.state.defaultHome.value, '/default')
+        assert.equal(page.state.buildStatus.value, 'ok')
+        assert.equal(page.state.buildLog.value, 'compiled once')
+        assert.equal(intervals.size, 0, 'cached returns never restart polling')
+        page.unmount()
+      }
+      page = open()
+      const refreshing = page.state.precompile()
+      assert.equal(session.ready, null, 'manual compilation invalidates the previous snapshot immediately')
+      callsSince(completedCount, 'build')[0].resolve(response({ ok: true, stdout: 'refreshed', catalog: [{ id: 'new-registration' }] }))
+      await refreshing
+      page.unmount()
+      const refreshedCount = requests.length
+      page = open()
+      assert.equal(requests.length, refreshedCount)
+      assert.equal(page.state.catalog.value[0].id, 'new-registration', 'manual build replaces cached discovery')
+      const clearing = page.state.clearBuild()
+      assert.equal(session.ready, null)
+      requests.at(-1).resolve(response({ ok: true, stdout: 'cleaned' }))
+      await clearing
+      page.unmount()
+      const clearedStart = requests.length
+      page = open()
+      assert.equal(page.state.catalogReady.value, false, 'a cleaned catalog cannot reappear on route return')
+      requests.at(-1).resolve(response({ ok: true, catalog: null }))
+      await flush()
+      assert.equal(callsSince(clearedStart, 'check').length, 1)
+      assert.equal(callsSince(clearedStart, 'build').length, 0, 'route return cannot undo an explicit clean by auto-building again')
+      const rebuilding = page.state.precompile()
+      callsSince(clearedStart, 'build')[0].resolve(response({ ok: true, catalog: [{ id: 'rebuilt' }] }))
+      await rebuilding
+      page.state.selectDirectory('/different-directory')
+      assert.equal(session.ready, null, 'directory changes invalidate the old snapshot before the check replies')
+      assert.equal(page.state.catalogReady.value, false)
+      requests.at(-1).resolve(response({ ok: true, home: '/different-directory', catalog: null }))
+      await flush()
+      page.unmount()
+      const changedStart = requests.length
+      page = open()
+      assert.equal(page.state.catalogReady.value, false)
+      requests.at(-1).resolve(response({ ok: true, catalog: null }))
+      await flush()
+      assert.equal(callsSince(changedStart, 'build').length, 0, 'directory changes never renew the session auto-build opportunity')
+      page.unmount()
+    }
+    {
+      const session = createSimulatorSession()
+      const open = () => mount(() => useSessionSettings(session))
+      const start = requests.length
+      let page = open()
+      requests.at(-1).resolve(response({ ok: true, catalog: null }))
+      await flush()
+      const abandoned = callsSince(start, 'build')[0]
+      page.unmount()
+      abandoned.resolve(response({ ok: true, catalog: [{ id: 'abandoned' }] }))
+      await flush()
+      assert.equal(session.ready, null, 'late build results cannot populate a route cache after unmount')
+      const returnStart = requests.length
+      page = open()
+      requests.at(-1).resolve(response({ ok: true, home: '/finished-by-server', catalog: [{ id: 'fresh-server-cache' }] }))
+      await flush()
+      assert.equal(callsSince(returnStart, 'build').length, 0, 'an interrupted startup build is not automatically submitted again')
+      assert.equal(page.state.catalogReady.value, true, 'a lightweight check can recover the server-completed catalog')
+      page.unmount()
+      const recoveredCount = requests.length
+      page = open()
+      assert.equal(requests.length, recoveredCount)
+      assert.equal(page.state.catalog.value[0].id, 'fresh-server-cache')
+      page.unmount()
     }
 
     for (const failure of ['invalid-directory', 'http-error', 'network-error']) {
@@ -133,6 +242,7 @@ export async function checkRequests(server) {
     assert.equal(retry.state.buildStatus.value, 'fail')
     assert.equal(retry.state.buildError.value, 'compiler failed')
     assert.equal(retry.state.buildLog.value, 'useful compiler output')
+    assert.deepEqual(retry.state.catalog.value.flatMap((layer) => layer.items), [], 'failure must never restore a static fallback')
     assert.equal(callsSince(retryStart, 'build').length, 1, 'an automatic failure does not start a retry loop')
     waiting = retry.state.precompile()
     assert.equal(callsSince(retryStart, 'build').length, 2, 'manual retry remains available after startup failure')
@@ -142,6 +252,28 @@ export async function checkRequests(server) {
     assert.equal(retry.state.buildError.value, '')
     assert.equal(retry.state.catalog.value[0].id, 'retry-success')
     retry.unmount()
+
+    const probeStart = requests.length
+    const probeFailure = mount(useSimulatorSettings)
+    requests.at(-1).resolve(response({ok:true,catalog:null}));await flush()
+    callsSince(probeStart,'build')[0].resolve(response({ok:false,error:"读取注册协议失败：\nerror: PCH file '/test/pch' built from a different branch ((clang-old)) than the compiler ((clang-new))",stdout:'main build finished'},500))
+    await flush()
+    assert.match(probeFailure.state.buildError.value,/编译器版本.*预编译头/)
+    assert.doesNotMatch(probeFailure.state.buildError.value,/clang-old/)
+    assert.match(probeFailure.state.buildLog.value,/clang-old/,'probe failure output is retained even with an older server response')
+    assert.match(probeFailure.state.buildLog.value,/main build finished/)
+    probeFailure.unmount()
+
+    const missingStart = requests.length
+    const missing = mount(useSimulatorSettings)
+    requests.at(-1).resolve(response({ ok: true, catalog: null }))
+    await flush()
+    callsSince(missingStart, 'build')[0].resolve(response({ ok: true, stdout: 'build without catalog' }))
+    await flush()
+    assert.equal(missing.state.buildStatus.value, 'fail', 'a successful build response without discovery is not a ready catalog')
+    assert.equal(missing.state.catalogReady.value, false)
+    assert.deepEqual(missing.state.catalog.value.flatMap((layer) => layer.items), [])
+    missing.unmount()
 
     const answeredProgress = new Set()
     const pendingProgress = (start) => callsSince(start, 'build-progress')
@@ -479,16 +611,21 @@ export async function checkRequests(server) {
     await waiting
     await flush()
     assert.equal(cleaning.state.catalogReady.value, false, 'a stale directory check cannot revive a cleaned catalog')
+    assert.deepEqual(cleaning.state.catalog.value.flatMap((layer) => layer.items), [], 'cleaning cannot restore predefined protocol entries')
     assert.equal(cleaning.state.cleanStatus.value, 'ok')
     assert.equal(callsSince(cleaningStart, 'build').length, 0, 'a manual clean supersedes startup auto-build')
     cleaning.unmount()
 
     const editor = {
       editNodes: ref([]), selectedIds: ref([]), experimentForm: ref(createDefaultExperimentForm()),
-      activeCatalogId: ref('mac:swarm'), topologyError: ref('最多支持 64 个节点'),
+      canvas: ref(undefined), activeCatalogId: ref('mac:swarm'), topologyError: ref('最多支持 64 个节点'),
     }
     const files = mount(() => useExperimentFiles(editor, ref(TYPEID_LAYERS), ref(''), () => {}, () => {}))
+    editor.canvas.value = { retained: true }
     files.state.newExperiment()
+    assert.equal(editor.canvas.value, undefined, 'new experiments reset optional visual settings')
+    assert.equal(editor.experimentForm.value.macId, '')
+    assert.equal(editor.activeCatalogId.value, '')
     assert.equal(editor.topologyError.value, '', 'new drafts clear stale topology warnings')
     editor.topologyError.value = 'old topology error'
     await files.state.importFile({ name: 'empty.json', size: 100, text: async () => files.state.documentJson.value })
@@ -496,7 +633,7 @@ export async function checkRequests(server) {
     assert.equal(files.state.failed.value, false)
     files.unmount()
     assert.equal(timeouts.size, 0, 'request regressions leave no pending watchdogs')
-    console.log('Request regressions passed: startup precompile, busy-runner wait/races, progress recovery/timeouts, true failures, cached catalogs, manual precedence, unmount and directory cancellation.')
+    console.log('Request regressions passed: session catalog reuse/invalidation, one startup precompile, busy-runner wait/races, progress recovery/timeouts, true failures, manual precedence, unmount and directory cancellation.')
   } finally {
     for (const app of apps) app.unmount()
     globalThis.fetch = originalFetch

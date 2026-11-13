@@ -19,6 +19,7 @@ const toggleLayer = (id) => {
 
 const orderedLayers = computed(() => orderCatalogLayers(props.layers))
 const currentLayer = computed(() => props.layers.find((layer) => layer.id === openLayer.value) || null)
+const currentItems = computed(() => props.ready ? currentLayer.value?.items || [] : [])
 
 const onDragStart = (layer, item, event) => {
   if (!props.ready) {
@@ -74,9 +75,10 @@ const shortLabel = (id) => ({
         <section v-if="currentLayer" class="flyout">
           <header class="flyout-head">{{ currentLayer.label }}</header>
           <p v-if="!ready" class="catalog-hint">请先预编译，读取此目录实际注册的协议。</p>
+          <p v-else-if="!currentItems.length" class="catalog-hint">此目录未注册该层的可用协议。</p>
           <div class="flyout-list">
             <div
-              v-for="item in currentLayer.items"
+              v-for="item in currentItems"
               :key="item.id"
               class="lib-item-row"
             >

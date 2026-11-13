@@ -1,4 +1,11 @@
 import type { Point3D } from './replay'
+import type { NodeModelType } from '../nodeModel'
+
+export type ProtocolAttributeOverrides = Record<string, Record<string, string>>
+
+export interface NodeMobilitySelection {
+  type: string
+}
 
 export interface ExperimentForm {
   macId: string
@@ -8,28 +15,34 @@ export interface ExperimentForm {
   propagationId: string
   simStop: string
   txPower: number
-  protocolAttributes?: Record<string, Record<string, string>>
+  protocolAttributes?: ProtocolAttributeOverrides
 }
 
 export interface TopologyNode extends Point3D {
   node_id: number
   name: string
   role: string
+  modelType?: NodeModelType
+  mobility?: NodeMobilitySelection
   phyId: string
   macId: string
   routingId: string
   appId: string
   appAttrs?: Record<string, string>
   appDestination?: number
+  protocolAttributes?: ProtocolAttributeOverrides
 }
 
 export interface ExperimentNodeSpec extends Point3D {
   id: number
   name: string
   role: string
+  modelType?: NodeModelType
+  mobility?: NodeMobilitySelection
   app: string
   appAttrs?: Record<string, string>
   appDestination?: number
+  protocolAttributes?: ProtocolAttributeOverrides
 }
 
 export type ExperimentTraffic =

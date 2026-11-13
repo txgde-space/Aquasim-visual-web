@@ -1,7 +1,6 @@
 import type { Plugin } from 'vite'
-import { clearSimulatorBuildGuarded, precompileSimulatorGuarded, readJsonBody, readPrecompileProgress, runExperimentGuarded } from './runner'
+import { clearSimulatorBuildGuarded, precompileSimulatorGuarded, readJsonBody, readPrecompileProgress, readReusableSimulatorCatalog, runExperimentGuarded } from './runner'
 import { browseSimulatorDirectories, inspectSimulator } from './simulatorConfig'
-import { cachedCatalog } from './protocolCatalog'
 import { readProtocolSource } from './protocolSource'
 
 /**
@@ -39,7 +38,8 @@ export const ns3RunPlugin = (): Plugin => ({
         if (req.url === '/api/simulator/check') {
           const config = inspectSimulator(request.aquaSimHome)
           res.statusCode = config.ok ? 200 : 400
-          res.end(JSON.stringify({ ...config, catalog: config.ok ? cachedCatalog(config.home) : null }))
+          const catalog = config.ok ? readReusableSimulatorCatalog(config.home) : null
+          res.end(JSON.stringify({ ...config, catalog, buildReusable: !!catalog }))
           return
         }
         if (req.url === '/api/simulator/build') {

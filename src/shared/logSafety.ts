@@ -1,7 +1,8 @@
 import type { ParsedLog } from './types/log'
 
 export const MAX_LOG_FILE_BYTES = 12 * 1024 * 1024
-export const MAX_LOG_FILES = 20
+export const MAX_LOG_FILES = 64
+export const MAX_LOG_TOTAL_BYTES = 64 * 1024 * 1024
 export const MAX_LOG_NODES = 4000
 export const MAX_LOG_PACKETS = 30000
 export const MAX_JSONL_LINES = 80000
