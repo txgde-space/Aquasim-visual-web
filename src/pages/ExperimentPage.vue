@@ -13,7 +13,7 @@ import { generateAquaVisualCc } from '@/features/experiment/lib/generateScratch'
 import { protocolRange } from '@/features/experiment/lib/protocolRange'
 import { cloneNode, nodesFromReplay, useTopologyEditor } from '@/features/experiment/composables/useTopologyEditor'
 import { useRunExperiment } from '@/features/experiment/composables/useRunExperiment'
-import { useSimulatorSettings } from '@/features/experiment/composables/useSimulatorSettings'
+import { useSimulatorSettings, fieldSimulatorSession } from '@/features/experiment/composables/useSimulatorSettings'
 import { useExperimentFiles } from '@/features/experiment/composables/useExperimentFiles'
 import ExperimentFiles from '@/features/experiment/components/ExperimentFiles.vue'
 import NodeProtocolDetails from '@/features/experiment/components/NodeProtocolDetails.vue'
@@ -22,12 +22,19 @@ import SimulatorSettings from '@/features/experiment/components/SimulatorSetting
 import ProtocolSourceViewer from '@/features/experiment/components/ProtocolSourceViewer.vue'
 import type { CatalogItem } from '@/features/experiment/lib/typeIdCatalog'
 
+import FieldDevices from '@/features/field/FieldDevices.vue'
+import { fieldDraft } from '@/features/experiment/composables/experimentDraft'
+import { fieldMapSource } from '@/state/fieldSession'
+
+const props = withDefaults(defineProps<{ mode?: 'simulation' | 'field' }>(), { mode: 'simulation' })
+const isField = props.mode === 'field'
+const completedFieldRun = ref<{ log: string; name: string } | null>(null)
 const canvasViewPadding = { left: 232, top: 24, right: 300, bottom: 0 }
 const router = useRouter()
-const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory } = useSimulatorSettings()
+const { catalog, catalogReady, aquaSimHome, defaultHome, storageError, checking, result: simulatorResult, precompile, buildStatus, buildLog, buildError, buildProgress, clearBuild, cleanStatus, cleanError, resetDirectory, selectDirectory } = useSimulatorSettings(isField ? fieldSimulatorSession : undefined, { storageKey: isField ? LOCAL_STORAGE_KEYS.fieldAquaSimHome : LOCAL_STORAGE_KEYS.aquaSimHome, autoBuild: !isField })
 const simulatorBusy = computed(() => buildStatus.value === 'building' || cleanStatus.value === 'cleaning')
 const drawerCatalog = computed(() => catalog.value.filter((layer) => layer.scope !== 'node'))
-const editor = useTopologyEditor(catalog)
+const editor = useTopologyEditor(catalog, isField ? fieldDraft : undefined)
 const {
   editNodes,
   canvas,
@@ -111,7 +118,7 @@ const generatedScratch = computed(() => {
   catch (error) { return `// ${error instanceof Error ? error.message : String(error)}` }
 })
 
-const onRunSuccess = (log: string, logName: string) => {
+const openRunReplay = (log: string, logName: string) => {
   session.pendingReplayApply = null
   session.pendingReplayLog = log
   session.pendingReplayName = logName
@@ -121,7 +128,10 @@ const onRunSuccess = (log: string, logName: string) => {
 const { runStatus, runLog, runExperiment } = useRunExperiment({
   getSpec: () => experimentSpec.value,
   getAquaSimHome: () => aquaSimHome.value,
-  onSuccess: onRunSuccess,
+  onSuccess: (log, name) => {
+    if (isField) completedFieldRun.value = { log, name }
+    else openRunReplay(log, name)
+  },
 })
 
 const consoleVisible = computed(() => runStatus.value !== 'idle' || !!runLog.value)
@@ -131,6 +141,7 @@ const runStatusLabel = computed(
 
 const onRun = async () => {
   if (editNodes.value.length < 2 || !catalogReady.value || simulatorBusy.value || validationIssues.value.length) return
+  completedFieldRun.value = null
   await runExperiment()
   consoleOpen.value = true
 }
@@ -151,6 +162,7 @@ const applyToReplay = () => {
 
 const files = useExperimentFiles(editor, catalog, aquaSimHome, selectDirectory, () => {
   rangeScope.value++
+  completedFieldRun.value = null
   runStatus.value = 'idle'
   runLog.value = ''
   consoleOpen.value = false
@@ -161,7 +173,7 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
 </script>
 
 <template>
-  <section class="page">
+  <section class="page" :class="{ 'field-page': isField }">
     <div ref="stageEl" class="deck">
       <div class="deck-canvas">
         <NodeCanvas
@@ -179,7 +191,11 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
           :theme-key="CANVAS_THEME_KEY"
           fx-level="standard"
           :edit-mode="true"
-          :allow-gps="true"
+          :allow-gps="isField"
+          :gps-required="isField"
+          :gps-source="isField ? fieldMapSource ?? undefined : undefined"
+          :preference-scope="isField ? 'field' : 'simulation'"
+          @gps-source="isField && (fieldMapSource = $event)"
           :allow-delete-nodes="true"
           :allow-rename="runStatus !== 'running' && !simulatorBusy"
           :allow-coordinate-edit="runStatus !== 'running' && !simulatorBusy"
@@ -217,6 +233,8 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
         </NodeCanvas>
       </div>
 
+      <FieldDevices v-if="isField" />
+
       <div class="dock-unit dock-unit-l" :class="{ closed: !protoOpen }">
         <div class="dock dock-left">
           <ProtocolDrawer :layers="drawerCatalog" :ready="catalogReady" :active-id="activeCatalogId" :applied-protocols="protocolStack" @assign="assignItem" @view-source="sourceItem = $event">
@@ -245,11 +263,12 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
         <span class="cmd-sep" aria-hidden="true"></span>
         <button class="btn btn-compact" :disabled="runStatus === 'running' || simulatorBusy || importing" @click="newExperiment">新建实验</button>
         <button class="run-btn" data-testid="exp-run" :disabled="editNodes.length < 2 || !catalogReady || runStatus === 'running' || simulatorBusy || validationIssues.length > 0" @click="onRun">
-          {{ runStatus === 'running' ? '运行中…' : '运行仿真' }}
+          {{ runStatus === 'running' ? '运行中…' : isField ? '运行试验' : '运行仿真' }}
         </button>
+        <button v-if="isField && completedFieldRun" class="btn btn-compact" @click="openRunReplay(completedFieldRun.log, completedFieldRun.name)">查看运行回放</button>
       </div>
 
-      <div class="dock-unit dock-unit-r experiment-inspector" :class="{ closed: !inspectOpen }">
+      <div class="dock-unit dock-unit-r experiment-inspector" :style="isField ? { bottom: '212px' } : undefined" :class="{ closed: !inspectOpen }">
         <button
           class="panel-ear"
           :title="inspectOpen ? '收起属性面板' : '展开属性面板'"
@@ -268,7 +287,7 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
           :default-width="300"
           :min="240"
           :max="480"
-          :storage-key="LOCAL_STORAGE_KEYS.splitInspect"
+          :storage-key="isField ? LOCAL_STORAGE_KEYS.fieldSplitInspect : LOCAL_STORAGE_KEYS.splitInspect"
         >
         <aside class="dock-body">
           <SimulatorSettings
@@ -368,4 +387,5 @@ const { documentJson, message: fileMessage, failed: fileFailed, importing, newEx
 <style scoped>
 /* Match the left dock: its height is capped at deck height minus 88px. */
 .experiment-inspector { bottom: calc(88px - var(--dock-gap)); }
+@media (max-width:1100px) { .field-page .experiment-inspector { bottom:260px !important; } }
 </style>

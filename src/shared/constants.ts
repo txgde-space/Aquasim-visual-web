@@ -11,6 +11,13 @@ export const CANVAS_THEME_KEY = 'industrial-scada'
 
 export const LOCAL_STORAGE_KEYS = Object.freeze({
   aquaSimHome: 'aquasim_aqua_sim_home',
+  fieldAquaSimHome: 'aquasim_field_aqua_sim_home',
+  fieldDevices: 'aquasim_field_devices',
+  fieldSplitInspect: 'aquasim_field_split_inspect',
+  simulationNodeSize: 'aquasim_simulation_node_size',
+  simulationNodeSnapping: 'aquasim_simulation_node_snapping',
+  fieldNodeSize: 'aquasim_field_node_size',
+  fieldNodeSnapping: 'aquasim_field_node_snapping',
   fxLevel: 'aquasim_fx_level',
   uiTheme: 'aquasim_ui_theme',
   splitInspect: 'aquasim_split_inspect',

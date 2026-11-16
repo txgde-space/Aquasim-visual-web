@@ -67,7 +67,7 @@ export async function checkRequests(server) {
     requests.at(-1).resolve(new Response('<html>static preview</html>', { headers: { 'Content-Type': 'text/html' } }))
     await waiting
     assert.equal(run.state.runStatus.value, 'fail')
-    assert.match(run.state.runLog.value, /yarn dev/)
+    assert.match(run.state.runLog.value, /Go 服务|yarn dev/)
 
     waiting = run.state.runExperiment()
     request = requests.at(-1)

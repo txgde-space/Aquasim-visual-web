@@ -110,7 +110,7 @@
       </div>
     </div>
 
-    <GpsMapControls v-if="allowGps" :map="gps" :cursor="gpsCursor" />
+    <GpsMapControls v-if="allowGps" :map="gps" :cursor="gpsCursor" :required="gpsRequired" />
 
     <canvas
       ref="canvasEl"
@@ -295,6 +295,9 @@ const props = defineProps({
   allowPositionLock: { type: Boolean, default: false },
   allowPlaceNode: { type: Boolean, default: false },
   allowGps: { type: Boolean, default: false },
+  gpsRequired: { type: Boolean, default: false },
+  gpsSource: { type: Object, default: null },
+  preferenceScope: { type: String, default: 'replay' },
   boxSelect: { type: Boolean, default: false },
   originalPositions: { type: Array, default: () => [] },
   selectedNodeId: { type: [Number, String], default: null },
@@ -315,6 +318,12 @@ const props = defineProps({
   sceneFocusRequest: { type: Object, default: null },
   editableSceneAssets: { type: Boolean, default: false },
 })
+
+const preferenceKeys = props.preferenceScope === 'field'
+  ? { size: LOCAL_STORAGE_KEYS.fieldNodeSize, snap: LOCAL_STORAGE_KEYS.fieldNodeSnapping }
+  : props.preferenceScope === 'simulation'
+    ? { size: LOCAL_STORAGE_KEYS.simulationNodeSize, snap: LOCAL_STORAGE_KEYS.simulationNodeSnapping }
+    : { size: LOCAL_STORAGE_KEYS.nodeSize, snap: LOCAL_STORAGE_KEYS.nodeSnapping }
 
 const NODE_SIZE_MIN = 0.5
 const NODE_SIZE_MAX = 2
@@ -371,12 +380,13 @@ const nodeRadius = computed(() => nodeRadiusFor(Math.min(displayWidth.value, dis
 const emit = defineEmits([
   'node-select', 'pause-request', 'node-move', 'node-move-end', 'node-place', 'selection-change', 'nodes-move',
   'protocol-drop', 'nodes-delete', 'node-rename', 'node-coordinate', 'canvas-state',
-  'scene-asset-select', 'scene-asset-move',
+  'scene-asset-select', 'scene-asset-move', 'gps-source',
 ])
 let resizeObserver = null
 
 const liveBounds = computed(() => computeBounds(props.viewNodes || props.nodes))
 const gps = useGpsMap(() => scheduleDraw())
+gps.enabled.value = props.gpsRequired
 const bounds = computed(() => gps.active.value ? gps.bounds.value : dragFrozenBounds.value || sessionFrozenBounds.value || liveBounds.value)
 
 const scale = computed(() => gps.active.value
@@ -490,6 +500,28 @@ const nodeGeographic = (node) => {
   const point = localToGeo(node, gps.origin.value)
   return Number.isFinite(point.lon) ? `${point.lon.toFixed(6)}° 经度 / ${point.lat.toFixed(6)}° 纬度` : '超出本地坐标可映射范围'
 }
+let restoringGps = false
+let gpsDisposed = false
+const publishGpsSource = () => {
+  if (props.allowGps && gps.sourceFile.value) emit('gps-source', { file: gps.sourceFile.value, origin: { ...gps.origin.value }, view: { zoom: zoom.value, pan: { ...pan.value } } })
+}
+watch(() => [gps.sourceFile.value, gps.origin.value], () => { if (!restoringGps) publishGpsSource() })
+onMounted(() => {
+  if (!props.allowGps || !props.gpsSource?.file) return
+  const source = props.gpsSource
+  restoringGps = true
+  const stop = watch(() => gps.loading.value, async (loading) => {
+    if (loading) return
+    await nextTick()
+    if (gpsDisposed) return
+    if (gps.sourceFile.value === source.file && source.view) {
+      zoom.value = Math.min(maxScale.value / scale.value, Math.max(minZoom.value, source.view.zoom))
+      pan.value = constrainMapPan(source.view.pan, projection.value, displayWidth.value, displayHeight.value)
+    }
+    restoringGps = false; publishGpsSource(); stop()
+  })
+  gps.load(source.file, source.origin)
+})
 let ordinaryView = null
 watch(() => gps.active.value, (active) => {
   cancelActiveTool()
@@ -899,7 +931,7 @@ watch(() => props.active, (active) => {
 watch(nodeSizeScale, (next) => {
   nodeSizeScale.value = clampNodeSize(next)
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEYS.nodeSize, String(nodeSizeScale.value))
+    localStorage.setItem(preferenceKeys.size, String(nodeSizeScale.value))
   } catch {
     // ignore persistence errors
   }
@@ -907,7 +939,7 @@ watch(nodeSizeScale, (next) => {
 })
 
 watch(snapping, (value) => {
-  try { localStorage.setItem(LOCAL_STORAGE_KEYS.nodeSnapping, JSON.stringify(value)) } catch { /* storage can be unavailable */ }
+  try { localStorage.setItem(preferenceKeys.snap, JSON.stringify(value)) } catch { /* storage can be unavailable */ }
 }, { deep: true })
 
 watch(() => props.editMode, (next, previous) => {
@@ -967,7 +999,7 @@ const onKeyUp = (event) => {
 
 onMounted(() => {
   try {
-    const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEYS.nodeSnapping) || 'null')
+    const saved = JSON.parse(localStorage.getItem(preferenceKeys.snap) || 'null')
     if (saved && typeof saved === 'object') {
       for (const key of Object.keys(snapping.value)) {
         if (typeof saved[key] === 'boolean') snapping.value[key] = saved[key]
@@ -975,7 +1007,7 @@ onMounted(() => {
     }
   } catch { /* keep defaults when storage is unavailable or malformed */ }
   try {
-    const savedNodeSize = localStorage.getItem(LOCAL_STORAGE_KEYS.nodeSize)
+    const savedNodeSize = localStorage.getItem(preferenceKeys.size)
     if (savedNodeSize !== null) nodeSizeScale.value = clampNodeSize(savedNodeSize)
   } catch {
     // ignore persistence errors
@@ -1047,6 +1079,8 @@ useCanvasPersistence({
 })
 
 onBeforeUnmount(() => {
+  gpsDisposed = true
+  publishGpsSource()
   endSceneAssetDrag()
   window.removeEventListener('pointermove', moveSceneAsset)
   window.removeEventListener('pointerup', endSceneAssetDrag)

@@ -16,7 +16,8 @@ const themeToggleLabel = computed(() => (theme.value === 'dark' ? '切换到亮�
         <span class="brand-sub">水声网络仿真</span>
       </router-link>
       <nav class="page-tabs" aria-label="页面">
-        <router-link class="page-tab" to="/">实验</router-link>
+        <router-link class="page-tab" to="/">仿真试验</router-link>
+        <router-link class="page-tab" to="/field">真实试验</router-link>
         <router-link class="page-tab" to="/replay">回放</router-link>
       </nav>
       <div class="topbar-actions">
@@ -40,7 +41,7 @@ const themeToggleLabel = computed(() => (theme.value === 'dark' ? '切换到亮�
     <main class="app-main">
       <router-view v-slot="{ Component }">
         <Transition name="page">
-          <component :is="Component" />
+          <component :is="Component" :key="$route.name" />
         </Transition>
       </router-view>
     </main>

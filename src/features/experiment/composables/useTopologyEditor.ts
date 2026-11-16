@@ -48,8 +48,8 @@ export interface AssignPayload {
 
 const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
 
-export const useTopologyEditor = (layers: Ref<CatalogLayer[]>) => {
-  const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId, canvas } = experimentDraft
+export const useTopologyEditor = (layers: Ref<CatalogLayer[]>, draft = experimentDraft) => {
+  const { nodes: editNodes, selectedIds, form: experimentForm, activeCatalogId, canvas } = draft
   const topologyError = ref('')
   const isPositionLocked = (id: number) => canvas.value?.lockedNodeIds?.includes(Number(id)) ?? false
   const canAddNode = computed(() => editNodes.value.length < MAX_NODE_COUNT)

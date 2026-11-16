@@ -45,8 +45,10 @@ interface ReadySimulator {
 // still abort requests and release timers; no component or running task is kept alive.
 export const createSimulatorSession = () => ({ ready: null as ReadySimulator | null, startupPrecompileConsumed: false })
 const simulatorSession = createSimulatorSession()
+export const fieldSimulatorSession = createSimulatorSession()
 
-export const useSimulatorSettings = (session = simulatorSession) => {
+export const useSimulatorSettings = (session = simulatorSession, options: { storageKey?: string; autoBuild?: boolean } = {}) => {
+  const storageKey = options.storageKey ?? LOCAL_STORAGE_KEYS.aquaSimHome
   const aquaSimHome = ref('')
   const catalog = ref<CatalogLayer[]>(TYPEID_LAYERS)
   const catalogReady = ref(false)
@@ -128,7 +130,7 @@ export const useSimulatorSettings = (session = simulatorSession) => {
     }
   }
   try {
-    aquaSimHome.value = localStorage.getItem(LOCAL_STORAGE_KEYS.aquaSimHome) || ''
+    aquaSimHome.value = localStorage.getItem(storageKey) || ''
   } catch {
     storageError.value = '浏览器无法读取设置，本次仍可填写目录。'
   }
@@ -172,8 +174,8 @@ export const useSimulatorSettings = (session = simulatorSession) => {
     cleanStatus.value = 'idle'
     cleanError.value = ''
     try {
-      if (value.trim()) localStorage.setItem(LOCAL_STORAGE_KEYS.aquaSimHome, value.trim())
-      else localStorage.removeItem(LOCAL_STORAGE_KEYS.aquaSimHome)
+      if (value.trim()) localStorage.setItem(storageKey, value.trim())
+      else localStorage.removeItem(storageKey)
       storageError.value = ''
     } catch {
       storageError.value = '浏览器无法保存设置，目录仅在当前页面生效。'
@@ -326,7 +328,7 @@ export const useSimulatorSettings = (session = simulatorSession) => {
     aquaSimHome.value = path
     void checkDirectory()
   }
-  onMounted(() => { if (!restored) void checkDirectory(true) })
+  onMounted(() => { if (!restored) void checkDirectory(options.autoBuild !== false) })
   onBeforeUnmount(() => {
     disposed = true
     pending?.abort()

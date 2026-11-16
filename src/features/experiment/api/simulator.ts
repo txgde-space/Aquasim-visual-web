@@ -9,7 +9,7 @@ export const requestSimulator = async <T>(endpoint: SimulatorEndpoint, body: unk
     signal,
   })
   if (!response.headers.get('content-type')?.includes('application/json')) {
-    throw new Error('仿真服务不可用，请通过 yarn dev 启动服务。')
+    throw new Error('仿真服务不可用，请启动 Go 服务或开发服务。')
   }
   const data: unknown = await response.json()
   if (!data || typeof data !== 'object' || Array.isArray(data)) {

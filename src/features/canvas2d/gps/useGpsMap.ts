@@ -8,6 +8,7 @@ export const useGpsMap = (scheduleDraw: () => void) => {
   const info = shallowRef<GpsMapInfo | null>(null), origin = ref<GeoPoint>({ lon: 0, lat: 0 })
   const bounds = computed(() => info.value ? projectedBounds(info.value.bounds) : null)
   const active = computed(() => enabled.value && !!info.value)
+  const sourceFile = shallowRef<File | null>(null)
   const fileName = ref('')
   const fileBytes = ref(0)
   const readStats = shallowRef({ bytesRead: 0, reads: 0, maxOffset: 0, cacheBytes: 0 })
@@ -17,7 +18,7 @@ export const useGpsMap = (scheduleDraw: () => void) => {
   const cache = new Map<string, ImageBitmap | null>(), pending = new Set<string>()
   const clear = () => { for (const bitmap of cache.values()) bitmap?.close(); cache.clear(); pending.clear(); imageBytes = 0 }
   const dispose = () => { generation++; worker?.terminate(); candidateWorker?.terminate(); worker = null; candidateWorker = null; clearTimeout(timer); clear() }
-  const load = (file: File) => {
+  const load = (file: File, savedOrigin?: GeoPoint) => {
     error.value = ''
     if (!file.size) { error.value = '底图文件为空。'; return }
     // The former source remains usable until the replacement is validated.
@@ -52,6 +53,8 @@ export const useGpsMap = (scheduleDraw: () => void) => {
         worker?.terminate(); clear(); worker = candidate; candidateWorker = null
         info.value = next; fileName.value = file.name; fileBytes.value = file.size
         origin.value = geographic({ x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 })
+        if (savedOrigin && Number.isFinite(savedOrigin.lon) && Number.isFinite(savedOrigin.lat) && savedOrigin.lon >= next.bounds[0] && savedOrigin.lon <= next.bounds[2] && savedOrigin.lat >= next.bounds[1] && savedOrigin.lat <= next.bounds[3] && supportsLocalFrame(next.bounds, savedOrigin)) origin.value = { ...savedOrigin }
+        sourceFile.value = file
         loading.value = false; enabled.value = true; tileError.value = ''; clearTimeout(timer); scheduleDraw()
       }
       if (data.type === 'tiles') {
@@ -107,6 +110,6 @@ export const useGpsMap = (scheduleDraw: () => void) => {
     if (requests.length) worker.postMessage({ type: 'tiles', tiles: requests })
   }
   onBeforeUnmount(dispose)
-  return { enabled, active, loading, error, tileError, info, origin, bounds, fileName, fileBytes, readStats, load, draw }
+  return { sourceFile, enabled, active, loading, error, tileError, info, origin, bounds, fileName, fileBytes, readStats, load, draw }
 }
 export type GpsMap = ReturnType<typeof useGpsMap>

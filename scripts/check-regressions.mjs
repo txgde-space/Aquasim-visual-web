@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { checkFieldDevices } from './regressions/field-devices.mjs'
+import { checkWorkspaceIsolation } from './regressions/workspace-isolation.mjs'
 import { checkBuildReuse } from './regressions/build-reuse.mjs'
 import { checkGpsMap } from './regressions/gps-map.mjs'
 import { checkReplay } from './regressions/replay.mjs'
@@ -102,6 +104,8 @@ try {
   await checkRequests(server)
   await checkProtocolSourceClient(server)
   await checkCodeHighlight(server)
+  await checkFieldDevices(server)
+  await checkWorkspaceIsolation(server)
   await checkBuildReuse(server)
   await checkServer(server)
 } finally {

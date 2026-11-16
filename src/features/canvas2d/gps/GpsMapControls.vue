@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { GpsMap } from './useGpsMap'
 import { supportsLocalFrame, type GeoPoint } from './geometry'
-const props = defineProps<{ map: GpsMap; cursor: GeoPoint | null }>()
+const props = defineProps<{ map: GpsMap; cursor: GeoPoint | null; required?: boolean }>()
 const open = ref(false), input = ref<HTMLInputElement | null>(null)
 const longitude = ref(''), latitude = ref(''), originError = ref('')
 const selectFile = (event: Event) => {
@@ -22,11 +22,21 @@ watch(() => props.map.origin.value, (point) => { longitude.value = displayCoordi
 const attribution = computed(() => props.map.info.value?.attribution.replace(/<[^>]*>/g, '') ?? '')
 </script>
 <template>
-  <div class="gps-control" @pointerdown.stop @wheel.stop @dblclick.stop @contextmenu.prevent.stop @keydown.esc.stop.prevent="open = false">
+  <div v-if="required && !map.info.value" class="gps-empty" @pointerdown.stop @wheel.stop @contextmenu.prevent>
+    <section class="gps-welcome" aria-label="选择卫星地图">
+      <span class="gps-eyebrow">真实试验 · 离线卫星底图</span>
+      <h2>选择湖试区域的卫星地图</h2>
+      <p>打开本机的 MBTiles 文件，按真实地理坐标布置节点。</p>
+      <button class="btn primary" :disabled="map.loading.value" @click="input?.click()">{{ map.loading.value ? '正在读取卫星地图…' : '选择卫星地图文件' }}</button>
+      <p>支持 GB 级文件，按需读取，不上传。</p>
+      <p v-if="map.error.value" class="gps-error" role="alert">{{ map.error.value }}</p>
+    </section>
+  </div>
+  <div class="gps-control" :class="{ 'gps-field': required }" @pointerdown.stop @wheel.stop @dblclick.stop @contextmenu.prevent.stop @keydown.esc.stop.prevent="open = false">
     <input ref="input" type="file" accept=".mbtiles" hidden @change="selectFile" />
     <section v-if="open" class="gps-panel" role="dialog" aria-label="GPS 模式设置">
       <header><strong>GPS 模式</strong><button class="btn" aria-label="关闭 GPS 设置" @click="open = false">×</button></header>
-      <label class="gps-switch"><input v-model="map.enabled.value" type="checkbox" :disabled="!map.info.value" />使用卫星 / 地图底图</label>
+      <label v-if="!required" class="gps-switch"><input v-model="map.enabled.value" type="checkbox" :disabled="!map.info.value" />使用卫星 / 地图底图</label>
       <button class="btn" :disabled="map.loading.value" @click="input?.click()">{{ map.loading.value ? '正在读取底图…' : map.info.value ? '更换 MBTiles 底图' : '选择 MBTiles 底图' }}</button>
       <p>支持 GB 级栅格 MBTiles（PNG / JPEG / WebP），按需从本地文件读取，不上传。刷新后需重新选择文件。</p>
       <p v-if="map.error.value" class="gps-error" role="alert">{{ map.error.value }}</p>
@@ -49,10 +59,17 @@ const attribution = computed(() => props.map.info.value?.attribution.replace(/<[
       <span v-if="cursor" class="gps-coordinates"><span>经度 <b>{{ cursor.lon.toFixed(6) }}°</b></span><span>纬度 <b>{{ cursor.lat.toFixed(6) }}°</b></span></span>
       <span v-if="attribution" class="gps-attribution" :title="attribution">{{ attribution }}</span>
     </div>
-    <button class="btn gps-toggle" :class="{ active: map.active.value }" :aria-expanded="open" @click="toggle">GPS 模式<span v-if="map.active.value" class="gps-state">已开启</span></button>
+    <button class="btn gps-toggle" :class="{ active: map.active.value }" :aria-expanded="open" @click="toggle">{{ required ? '卫星地图设置' : 'GPS 模式' }}<span v-if="map.active.value" class="gps-state">已开启</span></button>
   </div>
 </template>
 <style scoped>
+.gps-empty { position:absolute; inset:0; z-index:10; display:grid; place-items:center; background:var(--bg); }
+.gps-welcome { max-width:420px; width:calc(100% - 40px); padding:30px; text-align:center; background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:var(--shadow-island); display:grid; gap:16px; font-family:var(--font-ui); }
+.gps-welcome h2 { font-size:20px; margin:0; color:var(--text); }
+.gps-eyebrow { color:var(--accent); font:12px var(--font-mono); }
+.gps-control.gps-field { right:auto; left:450px; align-items:flex-start; max-width:calc(100% - 810px); }
+@media (max-width:1100px) { .gps-control.gps-field { left:auto; right:14px; bottom:190px; max-width:320px; align-items:flex-end; } }
+
 .gps-control { position: absolute; right: 14px; bottom: 12px; z-index: 30; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: calc(100% - 28px); font: 12px/1.5 var(--font-ui); }
 .gps-toggle, .gps-panel, .gps-readout { border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(14px); border-radius: var(--r-lg); box-shadow: var(--shadow-island); }
 .gps-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; font: 500 12px/1.5 var(--font-ui); }
