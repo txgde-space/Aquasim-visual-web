@@ -21,4 +21,8 @@
 .field-page .field-devices .coordinate { flex:0 0 auto }
 .field-page .field-devices .service-error { flex:0 1 auto;max-width:100px;margin:0;font-size:10px }
 @media(max-width:1100px){.field-page .statusbar>.sb-item:last-child{display:none}.field-page .field-devices .readings{justify-content:flex-start;gap:10px}.field-page .statusbar{gap:8px}}
-@media(max-width:1100px){.field-page .gps-control.gps-field{bottom:14px;right:100px}}
+.field-page .gps-control.gps-field { position:static;max-width:none;align-items:flex-end }
+.field-page .gps-control.gps-field .gps-toggle { position:absolute;right:100px;bottom:14px;z-index:10;height:30px;padding:0 12px;white-space:nowrap }
+.field-page .gps-control.gps-field .gps-panel { position:absolute;right:100px;bottom:52px;z-index:30;max-width:calc(100% - 114px) }
+.field-page .gps-control.gps-field .gps-readout { position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:10;width:max-content;max-width:calc(100% - 28px);pointer-events:none }
+@media(max-width:1100px){.field-page .gps-control.gps-field .gps-readout{bottom:54px}}
