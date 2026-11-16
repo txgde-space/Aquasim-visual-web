@@ -23,3 +23,8 @@ dist-ssr
 node_modules
 /package-lock.json
 .workbuddy/
+
+# Go build outputs
+/out/
+/aquasim-standalone
+*.exe

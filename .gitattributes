@@ -1,0 +1,3 @@
+# Preserve imported browser bundles (including shader strings) and vendor notices verbatim.
+web/assets/** -whitespace
+web/licenses/** -whitespace
