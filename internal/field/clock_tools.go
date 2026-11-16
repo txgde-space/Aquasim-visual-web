@@ -135,7 +135,8 @@ func (m *Manager) OpenAtomicBatch(configs []Config) (BatchOpenResult, error) {
 			c.Device = fmt.Sprintf("atomic:%d", m.nextAtomic)
 		}
 		m.mu.Unlock()
-		if e := m.Connect(c); e != nil {
+		commands := DefaultCommands()
+		if e := m.connect(c, &commands); e != nil {
 			for _, id := range ids {
 				_ = m.Disconnect(id)
 			}
@@ -182,7 +183,8 @@ func (m *Manager) SyncAtomicBatch(ids []string) (BatchResult, error) {
 		seen[id] = true
 		sessions = append(sessions, s)
 	}
-	commands := m.commands
+	// Initial alignment always uses the device's default set-time protocol.
+	commands := DefaultCommands()
 	m.mu.Unlock()
 	// Stable lock order, and no query bytes interleaved with the set command.
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].config.Device < sessions[j].config.Device })

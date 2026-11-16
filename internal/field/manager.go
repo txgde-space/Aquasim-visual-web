@@ -67,12 +67,13 @@ type Port interface {
 	SetReadTimeout(time.Duration) error
 }
 type session struct {
-	port    Port
-	key     string
-	config  Config
-	done    chan struct{}
-	once    sync.Once
-	writeMu sync.Mutex
+	commands *Commands // Optional immutable profile for this connection.
+	port     Port
+	key      string
+	config   Config
+	done     chan struct{}
+	once     sync.Once
+	writeMu  sync.Mutex
 }
 
 func (s *session) close() { s.once.Do(func() { close(s.done); _ = s.port.Close() }) }
@@ -184,6 +185,10 @@ func openPort(c Config) (Port, error) {
 	return serial.Open(c.Port, &serial.Mode{BaudRate: c.BaudRate, DataBits: c.DataBits, StopBits: stop, Parity: parity})
 }
 func (m *Manager) Connect(c Config) error {
+	return m.connect(c, nil)
+}
+
+func (m *Manager) connect(c Config, commands *Commands) error {
 	if e := validateConfig(&c); e != nil {
 		return e
 	}
@@ -220,7 +225,7 @@ func (m *Manager) Connect(c Config) error {
 		_ = p.Close()
 		return fmt.Errorf("设置读取超时失败: %w", e)
 	}
-	s := &session{port: p, key: key, config: c, done: make(chan struct{})}
+	s := &session{port: p, key: key, config: c, commands: commands, done: make(chan struct{})}
 	m.sessions[c.Device] = s
 	m.states[c.Device] = DeviceState{Connected: true, Port: c.Port, BaudRate: c.BaudRate, DataBits: c.DataBits, StopBits: c.StopBits, Parity: c.Parity, PollIntervalMS: c.PollIntervalMS}
 	go m.read(s)
@@ -400,6 +405,9 @@ func (m *Manager) poll(s *session) {
 	for {
 		m.mu.Lock()
 		commands := m.commands
+		if s.commands != nil {
+			commands = *s.commands
+		}
 		m.mu.Unlock()
 		if e := s.write(commands.Query + commands.ending()); e != nil {
 			m.fail(s, fmt.Errorf("原子钟查询失败: %w", e))

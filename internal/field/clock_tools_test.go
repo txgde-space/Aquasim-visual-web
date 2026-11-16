@@ -71,6 +71,10 @@ func TestAtomicBatchRollbackAndExclusivity(t *testing.T) {
 func TestBatchCommonEpochAndObservedState(t *testing.T) {
 	m := NewManager()
 	defer m.Close()
+	// A custom profile for ordinary connections must not change initial alignment.
+	if e := m.SetCommands(Commands{Query: "CUSTOM?", Set: "CUSTOM{unix}", Ending: "lf"}); e != nil {
+		t.Fatal(e)
+	}
 	ports := map[string]*fakePort{}
 	m.open = func(c Config) (Port, error) { p := newPort(); ports[c.Port] = p; return p, nil }
 	opened, e := m.OpenAtomicBatch([]Config{testConfig("atomic", "/dev/a"), testConfig("atomic", "/dev/b")})
@@ -92,6 +96,9 @@ func TestBatchCommonEpochAndObservedState(t *testing.T) {
 		if !strings.Contains(ports[row.Port].text(), AtomicSetCommand(at)) {
 			t.Fatal(ports[row.Port].text())
 		}
+		if strings.Contains(ports[row.Port].text(), "CUSTOM") {
+			t.Fatal("custom profile leaked into initial alignment")
+		}
 	}
 	for _, st := range m.Snapshot().Atomics {
 		if st.Connected && (st.ValidTime || st.UTCTime != "" || st.LastSync == nil || st.LastSync.State != "sent") {
@@ -103,6 +110,9 @@ func TestBatchCommonEpochAndObservedState(t *testing.T) {
 	}
 	m.Close()
 	for _, p := range ports {
+		if !strings.Contains(p.text(), "!T?\r\n") {
+			t.Fatal("default time query missing", p.text())
+		}
 		select {
 		case <-p.closed:
 		default:
