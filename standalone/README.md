@@ -25,6 +25,19 @@ chmod +x aquasim-n100-linux-amd64
 
 服务支持干净退出；切换网页不关闭串口，明确点击“断开”或退出 Go 服务才释放设备。串口配置在本次服务进程中有效，重启服务后由用户重新连接。
 
+前台可直接按 **Ctrl+C** 停止。找不到原终端时，在同一台机器的另一个终端执行，不需要查找 PID：
+
+```sh
+# 开发模式（在 standalone 目录）
+go run . stop
+# N100 二进制程序
+./aquasim-n100-linux-amd64 stop
+# 使用其他端口时，停止命令也指定相同端口
+go run . stop -listen 0.0.0.0:8081
+```
+
+停止命令会释放串口、终止本服务的仿真任务并等待监听端口关闭；服务未运行时会直接提示。该命令仅允许本机操作，不接受浏览器或其他 Wi-Fi 客户端的停止请求。监听默认通配地址或回环地址均支持；若只绑定了具体 LAN IP，请在原终端按 Ctrl+C。旧版服务需先用 Ctrl+C 退出一次，再运行新版本。
+
 ## 串口与时间语义
 
 协议参考用户指定的 [GPS_Time_Sync](https://github.com/txgde-space/GPS_Time_Sync/tree/fcec7fdf98f91aad37571860e75b367e0fc0d81c)：

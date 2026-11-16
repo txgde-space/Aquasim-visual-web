@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -65,16 +67,45 @@ func staticHandler(root fs.FS) http.Handler {
 	})
 }
 func main() {
-	addr := flag.String("listen", "0.0.0.0:8080", "HTTP listen address")
-	home := flag.String("simulator-home", "", "Optional prepared native ns-3 directory")
-	flag.Parse()
+	if err := run(os.Args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
+		log.Print(err)
+		os.Exit(1)
+	}
+}
+
+func run(args []string) error {
+	stopping := len(args) > 0 && args[0] == "stop"
+	if stopping {
+		args = args[1:]
+	}
+	flags := flag.NewFlagSet("aquasim", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: aquasim [stop] [-listen 0.0.0.0:8080] [-simulator-home path]\nDevelopment: go run . [stop] [flags]")
+		flags.PrintDefaults()
+	}
+	addr := flags.String("listen", "0.0.0.0:8080", "HTTP listen address")
+	home := flags.String("simulator-home", "", "Optional prepared native ns-3 directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("未知参数 %q；停止服务请使用 stop -listen 地址", flags.Arg(0))
+	}
+	if stopping {
+		return stopService(*addr)
+	}
 	root, e := fs.Sub(assets, "web")
 	if e != nil {
-		log.Fatal(e)
+		return e
 	}
 	if _, e = fs.Stat(root, "index.html"); e != nil {
-		log.Fatal("Frontend assets missing. Build with scripts/build-standalone.sh.")
+		return fmt.Errorf("Frontend assets missing. Build with scripts/build-standalone.sh.")
 	}
+	listener, e := net.Listen("tcp", *addr)
+	if e != nil {
+		return fmt.Errorf("无法启动服务: %w；如需停止已有 AquaSim 服务，请使用 stop 命令", e)
+	}
+	defer listener.Close()
 	manager := field.NewManager()
 	defer manager.Close()
 	mux := http.NewServeMux()
@@ -84,22 +115,32 @@ func main() {
 	mux.Handle("/api/run", sim)
 	mux.Handle("/api/simulator/", sim)
 	mux.HandleFunc("/api/capabilities", func(w http.ResponseWriter, r *http.Request) {
-		field.JSON(w, 200, map[string]any{"ok": true, "runtime": "go", "fieldDevices": true, "simulator": true})
+		field.JSON(w, 200, map[string]any{"ok": true, "service": serviceIdentity, "runtime": "go", "fieldDevices": true, "simulator": true})
 	})
 	mux.Handle("/", staticHandler(root))
 	server := &http.Server{Addr: *addr, Handler: field.SameOrigin(mux), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	mux.Handle("/api/service/stop", serviceStopHandler(stop))
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		manager.Close()
 		sim.Close()
 		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = server.Shutdown(deadline)
+		if err := server.Shutdown(deadline); err != nil {
+			_ = server.Close()
+		}
 	}()
 	fmt.Printf("AquaSim field server listening on %s (open /field for real experiments)\n", *addr)
-	if e = server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
-		log.Fatal(e)
+	fmt.Println("按 Ctrl+C 停止，或在另一个终端执行同一程序的 stop 命令（开发模式：go run . stop）。")
+	e = server.Serve(listener)
+	stop()
+	<-shutdownDone
+	if e != nil && e != http.ErrServerClosed {
+		return e
 	}
+	return nil
 }
