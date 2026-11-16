@@ -99,5 +99,21 @@ const closeSettings = () => {
 .field-head strong { font-size: 12px; font-weight: 600; }.utc-tag { color: var(--muted); font: 10px var(--font-mono); }.field-settings { margin-left: auto; height: 25px; min-height: 25px; font-size: 11px; padding: 2px 8px; }
 .readings { margin-top: 5px; }.reading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }.reading dt { flex-shrink: 0; }.reading dt span { margin-left: 5px; color: var(--muted); font-size: 10px; }.reading dt span.warning { color: var(--warn); }.reading dd { margin: 0; font: 10px/1.8 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }.coordinate { text-align: right; color: var(--muted); font: 10px/1.6 var(--font-mono); }.stale dd, .stale .coordinate { color: var(--muted); }.service-error { color: var(--warn); margin-top: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
 .field-dialog { width: min(740px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 20px; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--panel-solid); color: var(--text); box-shadow: var(--shadow-pop); z-index: 80; font: 13px/1.5 var(--font-ui); }.field-dialog::backdrop { background: color-mix(in srgb, var(--sunken) 65%, transparent); backdrop-filter: blur(4px); }.dialog-head { justify-content: space-between; }.dialog-head h2 { font-size: 16px; }.hint { margin-top: 7px; font-size: 12px; color: var(--muted); line-height: 1.6; }.ports-action { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; }.ports-action .hint { margin: 0; }.device-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.serial-card { padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raised); }.serial-card header { justify-content: space-between; }.serial-card h3, .sync-section h3 { font-size: 13px; }.serial-card header span { color: var(--muted); font-size: 11px; }.connected-port { font: 11px/1.5 var(--font-mono); color: var(--accent); margin-top: 6px; overflow-wrap: anywhere; }fieldset { border: 0; padding: 0; margin: 10px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }fieldset label { display: grid; gap: 3px; min-width: 0; }fieldset label > span { font-size: 11px; }fieldset .field-param { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }.port-field { grid-column: 1 / -1; }.select { width: 100%; min-width: 0; }.serial-actions { margin-top: 10px; }.sync-section { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }.sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }.error, .message { margin-top: 10px; font-size: 12px; overflow-wrap: anywhere; }.error { color: var(--bad); }.message { color: var(--rx); }.mono { font-family: var(--font-mono); }details { margin-top: 10px; }summary { cursor: pointer; font-size: 12px; color: var(--muted); }pre { max-height: 100px; overflow: auto; margin-top: 6px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.field-dialog { color-scheme: dark; }
+[data-theme="light"] .field-dialog { color-scheme: light; }
+select.select {
+  appearance: none;
+  padding-inline-end: 28px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.select:disabled { opacity: .45; cursor: not-allowed; }
+.select:disabled:hover { border-color: var(--line); }
 @media (max-width: 600px) { .device-settings { grid-template-columns: 1fr; }.field-dialog { padding: 14px; } }
 </style>
