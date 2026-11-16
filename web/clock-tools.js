@@ -19,9 +19,11 @@ function deviceAt(port) { return Object.entries(latest?.atomics||{}).find(([,st]
 function render() {
  const state=latest?.clockTools.auto
  if(!state || !hardware)return
- const checkbox=hardware.querySelector('[data-auto-system]')
- checkbox.checked=state.enabled
- checkbox.disabled=autoBusy || !!statusError || (!state.enabled && !latest.atomic.connected)
+ const autoButton=hardware.querySelector('[data-auto-system]')
+ text(autoButton,autoBusy?'正在处理…':state.enabled?'已开启自动同步系统时间':'自动同步系统时间')
+ autoButton.setAttribute('aria-pressed',String(state.enabled))
+ autoButton.title=state.enabled?'点击关闭自动同步系统时间':'点击开启自动同步系统时间'
+ autoButton.disabled=autoBusy || !!statusError || (!state.enabled && !latest.atomic.connected)
  const info=hardware.querySelector('[data-auto-status]')
  text(info, statusError || autoError || state.error || (state.enabled?'每 60 秒使用原子钟同步服务端系统时间':'原子钟 → 服务端系统时间'))
  info.classList.toggle('error',!!(statusError || autoError || state.error))
@@ -107,13 +109,12 @@ function attach(){
  const card=[...root.querySelectorAll('.serial-card')].find(el=>el.querySelector('h3')?.textContent==='原子钟')
  if(!card)return
  if(!card.querySelector('[data-clock-tools]')){
-  const label=document.createElement('label');label.className='clock-auto-toggle'
-  const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.dataset.autoSystem='';checkbox.disabled=true
-  label.append(checkbox,document.createTextNode('自动同步系统时间'));card.querySelector('.serial-actions').append(label)
+  const autoButton=document.createElement('button');autoButton.type='button';autoButton.className='btn clock-auto-button';autoButton.dataset.autoSystem='';autoButton.disabled=true
+  text(autoButton,'自动同步系统时间');autoButton.setAttribute('aria-pressed','false');card.querySelector('.serial-actions').append(autoButton)
   const info=document.createElement('p');info.className='clock-auto-status';info.dataset.autoStatus='';info.setAttribute('role','status');card.append(info)
-  checkbox.onchange=async()=>{
+  autoButton.onclick=async()=>{
    if(autoBusy)return
-   const enabled=checkbox.checked,token=controller;autoBusy=true;autoError='';checkbox.disabled=true
+   const enabled=!latest?.clockTools.auto.enabled,token=controller;autoBusy=true;autoError='';render()
    try{latest=await api('atomic-auto',enabled?{enabled:true,device:'atomic',direction:'atomic-to-system',intervalSeconds:60,maxStepSeconds:60}:{enabled:false});render()}
    catch(e){if(e.name!=='AbortError')autoError=e.message}
    finally{if(controller===token){autoBusy=false;render()}}

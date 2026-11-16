@@ -12,9 +12,10 @@
 .clock-list-head{display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:12px;margin-bottom:8px}
 .clock-port-choice{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer}
 .clock-port-choice span{overflow-wrap:anywhere;min-width:0}.clock-port-time{font-size:12px;text-align:right}
-.clock-auto-toggle{display:inline-flex!important;align-items:center;gap:6px!important;font-size:12px;white-space:nowrap;cursor:pointer}
-.clock-port-choice input,.clock-auto-toggle input{accent-color:var(--accent)}
-.field-dialog .serial-actions{flex-wrap:wrap}.field-dialog .sync-section{display:none}
+.clock-auto-button{white-space:nowrap}
+.field-dialog .clock-auto-button[aria-pressed="true"],.field-dialog .clock-connected-button{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.clock-port-choice input{accent-color:var(--accent)}
+.field-dialog .serial-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.field-dialog .sync-section{display:none}
 @media(max-width:600px){.clock-port-choice{grid-template-columns:auto minmax(0,1fr)}.clock-port-time{grid-column:2;text-align:left}}
 
 /* The field workspace owns a single device component in the footer. Its button
