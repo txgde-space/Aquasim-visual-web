@@ -113,6 +113,72 @@ func (m *Manager) Handler() http.Handler {
 				return
 			}
 			JSON(w, 200, m.Snapshot())
+		case "/api/field/atomic-auto":
+			if r.Method != "POST" {
+				failure(w, 405, errors.New("仅支持 POST"))
+				return
+			}
+			var q AutoSyncConfig
+			if e := decode(r, &q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			if e := m.ConfigureAuto(q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			JSON(w, 200, m.Snapshot())
+		case "/api/field/atomic-commands":
+			if r.Method != "POST" {
+				failure(w, 405, errors.New("仅支持 POST"))
+				return
+			}
+			var q Commands
+			if e := decode(r, &q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			if e := m.SetCommands(q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			JSON(w, 200, m.Snapshot())
+		case "/api/field/atomic-batch-open":
+			if r.Method != "POST" {
+				failure(w, 405, errors.New("仅支持 POST"))
+				return
+			}
+			var q struct {
+				Configs []Config `json:"configs"`
+			}
+			if e := decode(r, &q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			result, e := m.OpenAtomicBatch(q.Configs)
+			if e != nil {
+				failure(w, 400, e)
+				return
+			}
+			JSON(w, 200, map[string]any{"ok": true, "result": result})
+		case "/api/field/atomic-batch-sync":
+			if r.Method != "POST" {
+				failure(w, 405, errors.New("仅支持 POST"))
+				return
+			}
+			var q struct {
+				Devices []string `json:"devices"`
+			}
+			if e := decode(r, &q); e != nil {
+				failure(w, 400, e)
+				return
+			}
+			result, e := m.SyncAtomicBatch(q.Devices)
+			if e != nil {
+				failure(w, 400, e)
+				return
+			}
+			JSON(w, 200, map[string]any{"ok": true, "result": result})
 		case "/api/field/atomic-sync":
 			if r.Method != "POST" {
 				w.Header().Set("Allow", "POST")

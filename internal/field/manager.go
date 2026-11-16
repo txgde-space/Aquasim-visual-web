@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -54,10 +55,12 @@ type DeviceState struct {
 	received, timeReceived, fixReceived time.Time
 }
 type Status struct {
-	OK         bool        `json:"ok"`
-	SystemTime string      `json:"systemTime"`
-	GPS        DeviceState `json:"gps"`
-	Atomic     DeviceState `json:"atomic"`
+	OK         bool                   `json:"ok"`
+	SystemTime string                 `json:"systemTime"`
+	GPS        DeviceState            `json:"gps"`
+	Atomic     DeviceState            `json:"atomic"`
+	Atomics    map[string]DeviceState `json:"atomics"`
+	ClockTools ClockToolsState        `json:"clockTools"`
 }
 type Port interface {
 	io.ReadWriteCloser
@@ -89,17 +92,34 @@ func (s *session) write(command string) error {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*session
-	states   map[string]DeviceState
-	open     func(Config) (Port, error)
-	now      func() time.Time
+	mu         sync.Mutex
+	syncMu     sync.Mutex
+	commands   Commands
+	nextAtomic int
+	closed     bool
+	auto       AutoSyncState
+	autoCancel chan struct{}
+	setClock   func(time.Time) error
+	sessions   map[string]*session
+	states     map[string]DeviceState
+	open       func(Config) (Port, error)
+	now        func() time.Time
 }
 
 func NewManager() *Manager {
-	return &Manager{sessions: map[string]*session{}, states: map[string]DeviceState{"gps": {}, "atomic": {}}, open: openPort, now: time.Now}
+	return &Manager{sessions: map[string]*session{}, states: map[string]DeviceState{"gps": {}, "atomic": {}}, open: openPort, now: time.Now, commands: DefaultCommands(), setClock: setSystemClock}
 }
-func validDevice(s string) bool { return s == "gps" || s == "atomic" }
+func atomicDevice(s string) bool {
+	if s == "atomic" {
+		return true
+	}
+	if !strings.HasPrefix(s, "atomic:") {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(s, "atomic:"))
+	return err == nil && n > 0 && n <= 1000000
+}
+func validDevice(s string) bool { return s == "gps" || atomicDevice(s) }
 func validateConfig(c *Config) error {
 	if !validDevice(c.Device) {
 		return errors.New("device 必须为 gps 或 atomic")
@@ -169,6 +189,20 @@ func (m *Manager) Connect(c Config) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closed {
+		return errors.New("服务正在退出")
+	}
+	if atomicDevice(c.Device) {
+		count := 0
+		for id := range m.sessions {
+			if atomicDevice(id) {
+				count++
+			}
+		}
+		if count >= 64 {
+			return errors.New("最多连接 64 台原子钟")
+		}
+	}
 	key := portKey(c.Port)
 	for _, s := range m.sessions {
 		if s.key == key {
@@ -190,7 +224,7 @@ func (m *Manager) Connect(c Config) error {
 	m.sessions[c.Device] = s
 	m.states[c.Device] = DeviceState{Connected: true, Port: c.Port, BaudRate: c.BaudRate, DataBits: c.DataBits, StopBits: c.StopBits, Parity: c.Parity, PollIntervalMS: c.PollIntervalMS}
 	go m.read(s)
-	if c.Device == "atomic" {
+	if atomicDevice(c.Device) {
 		go m.poll(s)
 	}
 	return nil
@@ -201,6 +235,10 @@ func (m *Manager) Disconnect(device string) error {
 	}
 	m.mu.Lock()
 	s := m.sessions[device]
+	if m.auto.Enabled && m.auto.Device == device {
+		m.auto.Error = "原子钟已断开，自动同步已关闭"
+		m.stopAutoLocked()
+	}
 	delete(m.sessions, device)
 	state := m.states[device]
 	state.Connected = false
@@ -213,11 +251,30 @@ func (m *Manager) Disconnect(device string) error {
 	}
 	return nil
 }
-func (m *Manager) Close() { _ = m.Disconnect("gps"); _ = m.Disconnect("atomic") }
+func (m *Manager) Close() {
+	m.mu.Lock()
+	m.closed = true
+	m.stopAutoLocked()
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		_ = m.Disconnect(id)
+	}
+	// Wait for an in-flight synchronization after closing ports to unblock writes.
+	m.syncMu.Lock()
+	m.syncMu.Unlock()
+}
 func (m *Manager) fail(s *session, e error) {
 	m.mu.Lock()
 	if m.sessions[s.config.Device] == s {
 		delete(m.sessions, s.config.Device)
+		if m.auto.Enabled && m.auto.Device == s.config.Device {
+			m.auto.Error = "串口连接失败，自动同步已关闭：" + bounded(e.Error())
+			m.stopAutoLocked()
+		}
 		st := m.states[s.config.Device]
 		st.Connected = false
 		st.FixValid = false
@@ -341,7 +398,10 @@ func (m *Manager) poll(s *session) {
 	ticker := time.NewTicker(time.Duration(s.config.PollIntervalMS) * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if e := s.write("!T?\r\n"); e != nil {
+		m.mu.Lock()
+		commands := m.commands
+		m.mu.Unlock()
+		if e := s.write(commands.Query + commands.ending()); e != nil {
 			m.fail(s, fmt.Errorf("原子钟查询失败: %w", e))
 			return
 		}
@@ -355,7 +415,7 @@ func (m *Manager) poll(s *session) {
 func (m *Manager) state(device string, now time.Time) DeviceState {
 	st := m.states[device]
 	maxAge := 5 * time.Second
-	if device == "atomic" && time.Duration(st.PollIntervalMS)*3*time.Millisecond > maxAge {
+	if atomicDevice(device) && time.Duration(st.PollIntervalMS)*3*time.Millisecond > maxAge {
 		maxAge = time.Duration(st.PollIntervalMS) * 3 * time.Millisecond
 	}
 	st.Stale = !st.Connected || st.received.IsZero() || now.Sub(st.received) > maxAge
@@ -367,10 +427,22 @@ func (m *Manager) Snapshot() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
-	return Status{OK: true, SystemTime: now.UTC().Format(time.RFC3339Nano), GPS: m.state("gps", now), Atomic: m.state("atomic", now)}
+	atomics := map[string]DeviceState{}
+	for id := range m.states {
+		if atomicDevice(id) {
+			atomics[id] = m.state(id, now)
+		}
+	}
+	return Status{OK: true, SystemTime: now.UTC().Format(time.RFC3339Nano), GPS: m.state("gps", now), Atomic: m.state("atomic", now), Atomics: atomics, ClockTools: ClockToolsState{Commands: m.commands, Auto: m.auto}}
 }
 func (m *Manager) SyncAtomic(source string) (SyncResult, error) {
+	m.syncMu.Lock()
+	defer m.syncMu.Unlock()
 	m.mu.Lock()
+	if m.auto.Enabled {
+		m.mu.Unlock()
+		return SyncResult{}, errors.New("请先关闭自动同步，再执行手动校时")
+	}
 	s := m.sessions["atomic"]
 	now := m.now()
 	target := now
@@ -394,8 +466,13 @@ func (m *Manager) SyncAtomic(source string) (SyncResult, error) {
 		m.mu.Unlock()
 		return SyncResult{}, errors.New("source 必须为 gps 或 system")
 	}
+	commands := m.commands
 	m.mu.Unlock()
-	if e := s.write(AtomicSetCommand(target)); e != nil {
+	command, err := commands.render(target)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	if e := s.write(command); e != nil {
 		m.fail(s, e)
 		return SyncResult{}, e
 	}
