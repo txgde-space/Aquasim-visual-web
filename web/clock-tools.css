@@ -40,3 +40,15 @@
 .field-page .gps-control.gps-field .gps-panel { position:absolute;right:100px;bottom:52px;z-index:30;max-width:calc(100% - 114px) }
 .field-page .gps-control.gps-field .gps-readout { position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:10;width:max-content;max-width:calc(100% - 28px);pointer-events:none }
 @media(max-width:1100px){.field-page .gps-control.gps-field .gps-readout{bottom:54px}}
+
+/* Hardware selectors use the same themed menu for ports and serial parameters. */
+.field-dialog .field-select{position:relative;min-width:0}
+.field-dialog .field-select-control{padding-right:28px;text-align:left;font:12px var(--font-ui)}
+.field-dialog button.field-select-control{display:block;cursor:pointer}
+.field-dialog .field-select-control:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.field-dialog .field-select-arrow{position:absolute;right:11px;top:50%;width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+.field-dialog .field-select-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:180px;overflow:auto;padding:4px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--panel-solid);box-shadow:var(--shadow-pop);font:12px/1.5 var(--font-ui)}
+.field-dialog .field-select-option{padding:6px 8px;border-radius:var(--r-sm);overflow-wrap:anywhere;cursor:pointer}
+.field-dialog .field-select-option:hover,.field-dialog .field-select-option[data-active="true"]{background:var(--raised)}
+.field-dialog .field-select-option[aria-selected="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.field-dialog .field-select-empty{padding:6px 8px;color:var(--muted)}
