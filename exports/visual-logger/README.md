@@ -4,7 +4,7 @@
 
 发布包为 `visual-logger.zip`，解压后只有一个 `visual-logger/` 根目录；将该目录放入 ns-3 的 `contrib/`。随包提供独立的 `visual-logger.zip.sha256` 校验文件。
 
-沿用旧 `AquaSimReplayHelper` 的 NETWORK / NODE / BOTH 使用方式。旧实现位于 aqua-sim-dev 的 `origin/feature/replay`（提交 `3690cc1`），不在本次两个已构建工作副本的当前分支中；新包通过公开 trace 适配，避免依赖旧分支向 PHY/Channel/缓存注入的 SetReplayLogger 私有接口。
+采集范围为 NETWORK、NODE、ALL。旧实现位于 aqua-sim-dev 的 `origin/feature/replay`（提交 `3690cc1`），不在本次两个已构建工作副本的当前分支中；新包通过公开 trace 适配，避免依赖旧分支向 PHY/Channel/缓存注入的 SetReplayLogger 私有接口。
 
 **通用的是日志记录接口和格式，不是所有 Aqua-Sim 分支的内部 API。** 核心只依赖 ns-3 的 core、network、mobility；附带的 Aqua-Sim 适配器针对下述接口。未知分支先检查接口，不能承诺所有版本直接编译。组件不选择或替换已有 PHY、MAC、路由、传播模型、应用或缓存。
 
@@ -45,6 +45,13 @@ scratch 顶部：
 #include "ns3/visual-log-helper.h"
 ```
 
+在场景现有的 `CommandLine cmd` 上注册每次运行的可选参数，放在 `cmd.Parse(argc, argv)` 之前：
+
+```cpp
+std::string runId;
+cmd.AddValue("runId", "Replay run ID (random when omitted)", runId);
+```
+
 在 main 中，节点/设备/地址/初始坐标已经创建好、Run 之前：
 
 ```cpp
@@ -57,7 +64,7 @@ log.SetNodeModelType(1, "auv");
 log.SetNodeModelType(2, "sensor");
 log.SetNodeModelType(3, "buoy");
 // log.SetLocalNodeId(2);                   // 可选：只输出节点 2 的自身收发日志
-// log.SetRunId("experiment-001");          // 可选：默认自动生成本次实验 ID
+if (!runId.empty()) log.SetRunId(runId);
 log.InstallAll(Seconds(simStop));           // 自动发现所有 Aqua-Sim 设备
 // 也可以用 log.Install(devices, Seconds(simStop)) 显式提供参与设备
 
@@ -73,9 +80,9 @@ Simulator::Destroy();                      // 自动写出，无需额外 Flush/
 | NETWORK | `net.json`，全局观测 |
 | NODE，不指定 LocalNodeId | `node.<id>.json`，每个节点一份，包括没有通信的节点 |
 | NODE，指定 LocalNodeId | 仅指定节点自己的 TX、RX、碰撞/丢弃结果与轨迹 |
-| BOTH | 全局文件和节点文件；LocalNodeId 只限制节点文件 |
+| ALL | 全局文件和节点文件；LocalNodeId 只限制节点文件 |
 
-文件位于 `replay-logs/<run_id>/`。同名实验目录已存在时明确报错，不覆盖或混入上次实验。默认禁用日志，必须 SetEnabled(true)。所有节点创建完再安装，且每个参与节点只能有一个 Aqua-Sim 设备。
+文件位于 `replay-logs/YYYY-MM-DD_HH-MM-SS/<run_id>/`。第一层取启用采集时主机的本地日期时间，第二层使用本次实验 ID。省略参数时，每个进程独立生成 16 位随机十六进制 ID；需要关联的各船日志请传入同一个 ID，例如 `./ns3 run my-scenario -- --runId=lake-01`。该值也写入 JSON 的 `meta.run_id`。自定义 ID 支持 1～80 个英文字母、数字、连字符和下划线。同一时间戳下已有同名实验目录时会报错。默认禁用日志，必须 SetEnabled(true)。所有节点创建完再安装，且每个参与节点只能有一个 Aqua-Sim 设备。
 
 Helper 内部持有记录器到 Destroy，保留 NodeList 对象直到最后位置采集完成，再解除连接和释放；不插入 Stop、不改变仿真终止时刻。提前停止时写实际结束时刻。需要在 Destroy 前查看文件时，可选调用 log.Flush()，之后自动 Flush 不重复写。未调用 Destroy、进程崩溃或强制退出不保证输出。
 
@@ -83,7 +90,7 @@ Helper 内部持有记录器到 Destroy，保留 NodeList 对象直到最后位�
 
 ## Web 合并节点日志
 
-实验结束后，在回放页点击 **导入节点日志**，一次选择同一 run_id 目录下所有 `node.*.json`；不要把 `net.json` 一起选入。当前 Web 最多同时读取 64 个文件、合计 64 MiB，单文件仍限 12 MiB，超限整批报错，不再静默截取前 20 个。
+实验结束后，在回放页点击 **导入节点日志**，一次选择同一 run_id 目录下所有 `node.*.json`；不要把 `net.json` 一起选入。当前 Web 最多同时读取 64 个文件、合计 96 MiB，单文件限 24 MiB，超限整批报错，不再静默截取前 20 个。
 
 全局文件沿用 `uan-vis-packet-log/v2`。新的节点文件为 `uan-vis-node-log/v2`：每个文件只拥有本节点的 TX/RX 和移动轨迹，携带已知初始拓扑、modelType、相同 run_id 和精确发送 event_id；Web 沿用原节点日志合并入口。旧 v1 和既有样例的解析/匹配规则保留。
 
@@ -95,7 +102,7 @@ Helper 内部持有记录器到 Destroy，保留 NodeList 对象直到最后位�
 
 - 不修改协议参数或算法；附加 PacketTag 是仿真元数据，不计入传输字节。
 - 轨迹按真实米制坐标保存，不改 Z、不迁移坐标以迎合画面；按 Web 约定负 Z 向下。
-- 当前导入上限为 4000 节点、30000 次发送/30000 段轨迹、12 MiB 文件。组件超限时报错，不输出伪装完整的截断结果。
+- 当前导入上限为 4000 节点、30000 次发送、单次采集 50000 段轨迹、24 MiB 文件。回放页支持合并最多 250000 段轨迹。每船独立记录 8 小时、按 1 Hz 每秒一段计算，每船约 28800 段，五船约 144000 段。组件超限时报错，不输出伪装完整的截断结果。
 - Write 在仿真完成后一次写出；异常结束不会自动提供完整日志。使用独立文件名避免覆盖旧实验。
 - 具体已验证环境和结果见 [验证记录](docs/verification.md)。未知版本仍需一次成功接收、一场真实碰撞、移动轨迹和开启/关闭记录的结果对照。
 

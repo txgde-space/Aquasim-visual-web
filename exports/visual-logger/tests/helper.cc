@@ -27,18 +27,24 @@ static void Send(Ptr<AquaSimNetDevice> device) {
     device->GetMac()->TxProcess(packet);
 }
 int main(int argc, char** argv) {
-    std::string directory = "replay-logs", mode = "both", phy = "ns3::AquaSimPhyCmn";
+    std::string directory = "replay-logs", mode = "all", phy = "ns3::AquaSimPhyCmn";
     bool enabled = true, collision = false, explicitFlush = false;
     double stopSeconds = 19;
     CommandLine cmd;
+    std::string runId;
+    cmd.AddValue("runId", "Replay run ID (random when omitted)", runId);
     cmd.AddValue("directory", "Output directory", directory);
-    cmd.AddValue("mode", "network/node/both/single/sender", mode);
+    cmd.AddValue("mode", "network/node/all/single/sender", mode);
     cmd.AddValue("phy", "Installed PHY", phy);
     cmd.AddValue("enabled", "Logging enabled", enabled);
     cmd.AddValue("collision", "Two senders", collision);
     cmd.AddValue("flush", "Explicit flush before Destroy", explicitFlush);
     cmd.AddValue("stop", "Actual stop", stopSeconds);
     cmd.Parse(argc, argv);
+    if (mode != "network" && mode != "node" && mode != "all" && mode != "single" && mode != "sender") {
+        std::cerr << "Unknown logging mode: " << mode << '\n';
+        return 1;
+    }
     NodeContainer nodes; nodes.Create(4);
     MobilityHelper mobility;
     mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
@@ -64,8 +70,9 @@ int main(int argc, char** argv) {
     {
         VisualLogHelper log;
         log.SetEnabled(enabled);
-        log.SetOutputDir(directory); log.SetRunId("test-run");
-        log.SetLogScope(mode == "network" ? VisualLogScope::NETWORK : mode == "both" ? VisualLogScope::BOTH : VisualLogScope::NODE);
+        log.SetOutputDir(directory);
+        if (!runId.empty()) log.SetRunId(runId);
+        log.SetLogScope(mode == "network" ? VisualLogScope::NETWORK : mode == "all" ? VisualLogScope::ALL : VisualLogScope::NODE);
         if (mode == "single") log.SetLocalNodeId(30);
         if (mode == "sender") log.SetLocalNodeId(10);
         log.SetNodeModelType(10, "auv"); log.SetNodeModelType(20, "sensor");

@@ -8,7 +8,7 @@
 #include <string>
 
 namespace ns3 {
-enum class VisualLogScope { NETWORK, NODE, BOTH };
+enum class VisualLogScope { NETWORK, NODE, ALL };
 
 // Configure before Install. Events are attached once and files flush automatically
 // during Simulator::Destroy(), before retained node state is released.
@@ -17,7 +17,7 @@ public:
     VisualLogHelper() = default;
     void SetEnabled(bool enabled);
     void SetLogScope(VisualLogScope scope);
-    void SetLocalNodeId(uint16_t address); // NODE/BOTH: absent means one file per node
+    void SetLocalNodeId(uint16_t address); // NODE/ALL: absent means one file per node
     void SetNodeModelType(uint16_t address, const std::string& modelType);
     void SetNodeName(uint16_t address, const std::string& name);
     void SetOutputDir(const std::string& directory);

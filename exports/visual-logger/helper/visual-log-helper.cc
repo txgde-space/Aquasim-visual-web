@@ -1,9 +1,30 @@
 #include "visual-log-helper.h"
 #include "../adapters/aqua-sim-adapter.h"
-#include <chrono>
+#include <ctime>
 #include <filesystem>
+#include <random>
 
 namespace ns3 {
+namespace {
+std::string RunTimestamp() {
+    const auto now = std::time(nullptr);
+    const auto* local = std::localtime(&now);
+    char timestamp[20];
+    if (!local || !std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d_%H-%M-%S", local))
+        throw std::runtime_error("Cannot format replay directory timestamp");
+    return timestamp;
+}
+
+std::string RandomRunId() {
+    constexpr char digits[] = "0123456789abcdef";
+    std::random_device random;
+    std::uniform_int_distribution<unsigned> digit(0, 15);
+    std::string id(16, '0');
+    for (char& ch : id) ch = digits[digit(random)];
+    return id;
+}
+} // namespace
+
 struct VisualLogHelper::State {
     std::unique_ptr<VisualLogger> logger;
     Ptr<Object> nodeListOwner;
@@ -65,7 +86,7 @@ void VisualLogHelper::Install(const NetDeviceContainer& devices, Time stop) {
     state->scope = m_scope; state->local = m_local;
     state->ids = VisualLoggerNodeIds(devices);
     if (m_local && m_scope == VisualLogScope::NETWORK)
-        throw std::runtime_error("Local node selection applies to NODE or BOTH output");
+        throw std::runtime_error("Local node selection applies to NODE or ALL output");
     const std::set<uint16_t> known(state->ids.begin(), state->ids.end());
     const auto requireId = [&](uint16_t id) {
         if (!known.count(id)) throw std::runtime_error("Unknown Aqua-Sim node address: " + std::to_string(id));
@@ -88,9 +109,8 @@ void VisualLogHelper::Install(const NetDeviceContainer& devices, Time stop) {
             throw std::runtime_error("Logging requires one Aqua-Sim device per node");
         nodes.Add(node);
     }
-    const auto runId = m_runId.empty() ? "run-" + std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count()) : m_runId;
-    state->directory = std::filesystem::path(m_directory) / runId;
+    const auto runId = m_runId.empty() ? RandomRunId() : m_runId;
+    state->directory = std::filesystem::path(m_directory) / RunTimestamp() / runId;
     if (std::filesystem::exists(state->directory)) throw std::runtime_error("Log run directory already exists: " + state->directory.string());
     state->logger.reset(new VisualLogger(nodes, state->ids, stop));
     state->logger->SetRunId(runId);
