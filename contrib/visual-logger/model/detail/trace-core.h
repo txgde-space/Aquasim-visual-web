@@ -253,8 +253,8 @@ static void VisualCaptureMobility(uint32_t id, bool courseChange) {
             }
         }
         if (!merged) {
-            if (visualMovements.size() >= 30000) {
-                throw std::runtime_error("Mobility trace exceeds 30000 movement segments; shorten the experiment or reduce course changes");
+            if (visualMovements.size() >= 50000) {
+                throw std::runtime_error("Mobility trace exceeds 50000 movement segments; shorten the experiment or reduce course changes");
             }
             track.mergeIndex = visualMovements.size();
             visualMovements.push_back({id, track.timeNs, now, track.position, position});

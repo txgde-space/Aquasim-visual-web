@@ -2508,7 +2508,7 @@ NS_OBJECT_ENSURE_REGISTERED(AquaVisualGuardedSimulator);
 
 //#endregion
 //#region src/shared/logSafety.ts
-	const MAX_LOG_PACKETS = 3e4;
+	const MAX_LOG_MOVEMENTS = 50000;
 
 //#endregion
 //#region src/features/experiment/lib/mobilityTrace.ts
@@ -2571,8 +2571,8 @@ static void VisualCaptureMobility(uint32_t id, bool courseChange) {
             }
         }
         if (!merged) {
-            if (visualMovements.size() >= ${MAX_LOG_PACKETS}) {
-                throw std::runtime_error("Mobility trace exceeds ${MAX_LOG_PACKETS} movement segments; shorten the experiment or reduce course changes");
+            if (visualMovements.size() >= ${MAX_LOG_MOVEMENTS}) {
+                throw std::runtime_error("Mobility trace exceeds ${MAX_LOG_MOVEMENTS} movement segments; shorten the experiment or reduce course changes");
             }
             track.mergeIndex = visualMovements.size();
             visualMovements.push_back({id, track.timeNs, now, track.position, position});

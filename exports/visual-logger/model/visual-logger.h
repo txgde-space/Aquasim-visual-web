@@ -204,7 +204,7 @@ private:
         out << ']';
     }
     static void Save(const std::string& filename, const std::string& text) {
-        if (text.size() + 1 > 12 * 1024 * 1024) throw std::runtime_error("Replay exceeds Web's 12 MiB import limit");
+        if (text.size() + 1 > 24 * 1024 * 1024) throw std::runtime_error("Replay exceeds Web's 24 MiB import limit");
         std::ofstream file(filename, std::ios::binary);
         file << text << '\n';
         file.close();
